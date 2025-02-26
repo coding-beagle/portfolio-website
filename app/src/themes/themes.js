@@ -5,5 +5,4 @@ const defaultColours = {
   font: "Roboto, sans-serif",
 };
 // colour palette: https://coolors.co/00ccff-031926-f4e9cd-820263-d90368
-
 export default defaultColours;

@@ -1,87 +1,51 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import defaultColours from "../themes/themes";
+import Snow from "./scenes/snow";
+import Rain from "./scenes/rain";
+
+const Scenes = {
+  SNOW: 0,
+  RAIN: 1,
+  SUN: 2,
+};
 
 export default function Title() {
   const [isHover, setIsHover] = useState(false);
-  let particles = [];
-  const particleCount = 200;
-  const gravity = 0.05;
-  const maxSpeed = 1;
+  const [currentScene, setCurrentScene] = useState(
+    Math.floor(Math.random() * Object.keys(Scenes).length)
+  );
+  const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
-    const canvas = document.querySelector("canvas");
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const ctx = canvas.getContext("2d");
-
-    class Particle {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.vx = Math.random() * 2 - 1;
-        this.vy = Math.random() * 2 - 1;
-        this.size = Math.random() * 2 + 1;
-        this.color = defaultColours.accent;
-      }
-
-      update() {
-        this.vy += gravity;
-        this.x += this.vx;
-        this.y += this.vy;
-
-        if (this.y + this.size > canvas.height) {
-          this.y = 0;
-          this.vy *= -0.5;
-        }
-
-        if (this.y + this.size < 0) {
-          this.y = canvas.height;
-          this.vy *= -0.5;
-        }
-
-        if (this.vy > maxSpeed) {
-          this.vy -= Math.random(0.1, 0.5);
-        }
-
-        if (this.vy < maxSpeed) {
-          this.vy += Math.random(0.1, 0.5);
-        }
-
-        if (this.x + this.size > canvas.width || this.x - this.size < 0) {
-          this.vx *= -1;
-        }
-      }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
+    if (clicked) {
+      setTimeout(() => {
+        setClicked(false);
+      }, 150);
     }
+  }, [clicked]);
 
-    function initParticles() {
-      for (let i = 0; i < particleCount; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Particle(x, y));
-      }
+  const renderScene = () => {
+    switch (currentScene) {
+      case Scenes.SNOW:
+        return <Snow />;
+      case Scenes.RAIN:
+        return <Rain />;
+      default:
+        return;
     }
+  };
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-  }, []);
-
+  const getRandomShake = () => {
+    const shakes = [
+      "rotate(-5deg)",
+      "rotate(5deg)",
+      "translateX(-5px)",
+      "translateX(5px)",
+      "translateY(-5px)",
+      "translateY(5px)",
+    ];
+    return shakes[Math.floor(Math.random() * shakes.length)];
+  };
 
   return (
     <div
@@ -94,24 +58,21 @@ export default function Title() {
         position: "relative",
       }}
     >
-      <canvas
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          zIndex: 1,
-        }}
-      />
+      {renderScene()}
       <header
         onMouseEnter={() => setIsHover(true)}
         onMouseLeave={() => setIsHover(false)}
+        onMouseDown={() => {
+          setClicked(true);
+          setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
+        }}
         style={{
           fontSize: "8em",
           textAlign: "center",
           color: isHover ? defaultColours.secondary : defaultColours.accent,
           fontWeight: "bold",
           zIndex: 10,
-          transition: "color 0.5s ease",
+          transition: "color 0.5s ease, transform 0.5s ease",
           position: "relative",
           WebkitUserSelect: "none",
           WebkitTouchCallout: "none",
@@ -119,6 +80,7 @@ export default function Title() {
           MozUserSelect: "none",
           userSelect: "none",
           msUserSelect: "none",
+          transform: clicked ? `scale(1.05) ${getRandomShake()}` : "scale(1)",
         }}
       >
         Nicholas Teague
