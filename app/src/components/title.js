@@ -1,11 +1,11 @@
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import defaultColours from "../themes/themes";
 
 export default function Title() {
   const [isHover, setIsHover] = useState(false);
   let particles = [];
-  const particleCount = 500;
-  const gravity = 0.05;
+  const particleCount = 200;
+  const gravity = 0.01;
   const maxSpeed = 1;
 
   useEffect(() => {
@@ -23,10 +23,6 @@ export default function Title() {
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.accent;
         this.gravity = gravity;
-      }
-
-      changeDirection() {
-        this.gravity *= -1;
       }
 
       update() {
@@ -88,11 +84,12 @@ export default function Title() {
   }, []);
 
   useEffect(() => {
-    console.log("hovering", isHover);
-    for (let i = 0; i < particles.length; i++) {
-      particles[i].changeDirection();
-    }
-  }, [isHover, particles]);
+    particles.forEach((particle, index) => {
+      let newParticle = particles[index];
+      newParticle.gravity = isHover ? -1 : 0.01;
+      particles[index] = newParticle;
+    });
+  }, [isHover]);
 
   return (
     <div
