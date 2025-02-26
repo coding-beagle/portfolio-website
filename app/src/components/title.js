@@ -5,7 +5,7 @@ export default function Title() {
   const [isHover, setIsHover] = useState(false);
   let particles = [];
   const particleCount = 200;
-  const gravity = 0.01;
+  const gravity = 0.05;
   const maxSpeed = 1;
 
   useEffect(() => {
@@ -22,11 +22,10 @@ export default function Title() {
         this.vy = Math.random() * 2 - 1;
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.accent;
-        this.gravity = gravity;
       }
 
       update() {
-        this.vy += this.gravity;
+        this.vy += gravity;
         this.x += this.vx;
         this.y += this.vy;
 
@@ -83,13 +82,6 @@ export default function Title() {
     animate();
   }, []);
 
-  useEffect(() => {
-    particles.forEach((particle, index) => {
-      let newParticle = particles[index];
-      newParticle.gravity = isHover ? -1 : 0.01;
-      particles[index] = newParticle;
-    });
-  }, [isHover]);
 
   return (
     <div
@@ -119,9 +111,14 @@ export default function Title() {
           color: isHover ? defaultColours.secondary : defaultColours.accent,
           fontWeight: "bold",
           zIndex: 10,
-          transition: "color 0.3s ease, transform 0.3s ease",
+          transition: "color 0.5s ease",
           position: "relative",
-          transform: isHover ? "rotate(2deg)" : "rotate(0deg)",
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
         }}
       >
         Nicholas Teague
