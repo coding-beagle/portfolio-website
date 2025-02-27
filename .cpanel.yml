@@ -1,0 +1,8 @@
+deployment:
+  tasks:
+    - export DEPLOYPATH=~/repositories/portfolio-website
+    - cd $DEPLOYPATH
+    - git pull
+    - make install
+    - make build
+    - make deploy
