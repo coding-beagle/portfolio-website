@@ -19,7 +19,7 @@ export default function Rain() {
     const titleShieldRadius = 300;
     let animationFrameId;
     const maxFallSpeed = 13;
-    const maxWindSpeed = 2;
+    const maxWindSpeed = Math.random() * 10;
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
