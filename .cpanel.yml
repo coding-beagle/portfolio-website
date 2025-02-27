@@ -8,4 +8,4 @@ deployment:
     - git pull
     - make install && make build
     - cp -r app/build/ $DEPLOYPATH
-    - echo "Deployment complete"
+    - cd $DEPLOYPATH && npm install -g serve && serve -s
