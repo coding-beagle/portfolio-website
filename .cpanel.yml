@@ -6,4 +6,4 @@ deployment:
     - echo "Deploying to $DEPLOYPATH"
     - cd $REPOPATH
     - rm -rf $DEPLOYPATH/*
-    - cp -r app/build/ $DEPLOYPATH
+    - cp -r app/build/* $DEPLOYPATH
