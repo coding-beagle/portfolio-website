@@ -1,10 +1,13 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../themes/themes";
 
 export default function Rain() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
+  const [particleCount, setParticleCount] = useState(2000);
+  const [simulationSpeed, setSimulationSpeed] = useState(100);
+  const [mouseShieldRadius, setMouseShieldRadius] = useState(100);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -12,10 +15,8 @@ export default function Rain() {
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext("2d");
     let particles = [];
-    const particleCount = 2000;
     const gravity = 0.5;
     const windSpeed = 0.2;
-    const mouseShieldRadius = 300;
     const titleShieldRadius = 300;
     let animationFrameId;
     const maxFallSpeed = 13;
@@ -75,8 +76,8 @@ export default function Rain() {
           }
         }
 
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += (this.vx * simulationSpeed) / 100;
+        this.y += (this.vy * simulationSpeed) / 100;
 
         if (this.y > canvas.height) {
           this.y = 0;
@@ -112,6 +113,7 @@ export default function Rain() {
     }
 
     function initParticles() {
+      particles = [];
       for (let i = 0; i < particleCount; i++) {
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
@@ -142,16 +144,73 @@ export default function Rain() {
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mouseup", handleMouseUp);
     };
-  }, []);
+  }, [particleCount, simulationSpeed, mouseShieldRadius]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+        }}
+      />
+      <div style={{ zIndex: 10 }}>
+        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Particle Count:
+            <input
+              type="range"
+              min="100"
+              max="10000"
+              value={particleCount}
+              onChange={(e) => setParticleCount(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Simulation Speed:
+            <input
+              type="range"
+              min="1.0"
+              max="200.0"
+              value={simulationSpeed}
+              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Mouse Umbrella Radius:
+            <input
+              type="range"
+              min="10.0"
+              max="200.0"
+              value={mouseShieldRadius}
+              onChange={(e) => setMouseShieldRadius(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

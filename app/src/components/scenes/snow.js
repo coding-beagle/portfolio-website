@@ -3,6 +3,8 @@ import defaultColours from "../../themes/themes";
 
 export default function Snow() {
   const canvasRef = useRef(null);
+  const [particleCount, setParticleCount] = React.useState(200);
+  const [simulationSpeed, setSimulationSpeed] = React.useState(100);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -10,7 +12,6 @@ export default function Snow() {
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext("2d");
     let particles = [];
-    const particleCount = 200;
     const gravity = 0.05;
     const maxSpeed = 1;
     let animationFrameId;
@@ -35,8 +36,8 @@ export default function Snow() {
 
       update() {
         this.vy += gravity;
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += (this.vx * simulationSpeed) / 100;
+        this.y += (this.vy * simulationSpeed) / 100;
 
         if (this.y + this.size > canvas.height) {
           this.y = 0;
@@ -95,16 +96,56 @@ export default function Snow() {
       // Cleanup function to cancel the animation frame
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [particleCount, simulationSpeed]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+        }}
+      />
+      <div style={{ zIndex: 10 }}>
+        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Particle Count:
+            <input
+              type="range"
+              min="100"
+              max="10000"
+              value={particleCount}
+              onChange={(e) => setParticleCount(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Simulation Speed:
+            <input
+              type="range"
+              min="1.0"
+              max="200.0"
+              value={simulationSpeed}
+              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
