@@ -41,6 +41,7 @@ export default function Snow() {
         if (this.y + this.size > canvas.height) {
           this.y = 0;
           this.vy *= -0.5;
+          this.x = Math.random() * canvas.width;
         }
 
         if (this.y + this.size < 0) {

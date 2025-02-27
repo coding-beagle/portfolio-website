@@ -12,10 +12,11 @@ export default function Rain() {
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext("2d");
     let particles = [];
-    const particleCount = 800;
-    const gravity = 6;
+    const particleCount = 2000;
+    const gravity = 13;
     const rainX = (Math.random() - 0.5) * 15;
     const mouseShieldRadius = 100;
+    const titleShieldRadius = 200;
     let animationFrameId;
 
     const handleMouseMove = (event) => {
@@ -49,10 +50,40 @@ export default function Rain() {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
+        const dxFromTitle = this.x - window.innerWidth / 1.5;
+        const dyFromTitle = this.y - window.innerHeight / 2;
+        const distanceFromTitle = Math.sqrt(
+          dxFromTitle * dxFromTitle + dyFromTitle * dyFromTitle
+        );
+
+        const dxFromTitle2 = this.x - window.innerWidth / 3;
+        const dyFromTitle2 = this.y - window.innerHeight / 2;
+        const distanceFromTitle2 = Math.sqrt(
+          dxFromTitle2 * dxFromTitle2 + dyFromTitle2 * dyFromTitle2
+        );
+
+        const dxFromTitle3 = this.x - window.innerWidth / 2;
+        const dyFromTitle3 = this.y - window.innerHeight / 2.2;
+        const distanceFromTitle3 = Math.sqrt(
+          dxFromTitle3 * dxFromTitle3 + dyFromTitle3 * dyFromTitle3
+        );
+
         if (distance < mouseShieldRadius && mouseClickRef.current) {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
+        } else if (distanceFromTitle < titleShieldRadius) {
+          const angle2 = Math.atan2(dyFromTitle, dxFromTitle);
+          this.vx = Math.cos(angle2) * 5;
+          this.vy = Math.sin(angle2) * 5;
+        } else if (distanceFromTitle2 < titleShieldRadius) {
+          const angle3 = Math.atan2(dyFromTitle2, dxFromTitle2);
+          this.vx = Math.cos(angle3) * 5;
+          this.vy = Math.sin(angle3) * 5;
+        } else if (distanceFromTitle3 < titleShieldRadius * 2) {
+          const angle4 = Math.atan2(dyFromTitle3, dxFromTitle3);
+          this.vx = Math.cos(angle4) * 5;
+          this.vy = Math.sin(angle4) * 5;
         } else {
           this.vx = rainX;
           this.vy = gravity;
@@ -63,6 +94,7 @@ export default function Rain() {
 
         if (this.y > canvas.height) {
           this.y = 0;
+          this.x = Math.random() * canvas.width;
         }
 
         if (this.x >= canvas.width + this.size * 3) {
