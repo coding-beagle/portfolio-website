@@ -14,11 +14,12 @@ export default function Rain() {
     let particles = [];
     const particleCount = 2000;
     const gravity = 0.5;
-    const rainX = (Math.random() - 0.5) * 15;
-    const mouseShieldRadius = 100;
+    const windSpeed = 0.2;
+    const mouseShieldRadius = 300;
     const titleShieldRadius = 300;
     let animationFrameId;
-    const maxSpeed = 13;
+    const maxFallSpeed = 13;
+    const maxWindSpeed = 2;
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -40,7 +41,7 @@ export default function Rain() {
       constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = rainX + Math.random() * 2 - 1;
+        this.vx = Math.random() * 2 - 1;
         this.vy = Math.random() * 10 + 5;
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.secondary;
@@ -66,8 +67,10 @@ export default function Rain() {
           this.vx = Math.cos(angle2) * 10;
           this.vy = Math.sin(angle2) * 10;
         } else {
-          this.vx = rainX;
-          if (this.vy < maxSpeed) {
+          if (this.vy < maxWindSpeed) {
+            this.vx += windSpeed;
+          }
+          if (this.vy < maxFallSpeed) {
             this.vy += gravity;
           }
         }
@@ -78,14 +81,20 @@ export default function Rain() {
         if (this.y > canvas.height) {
           this.y = 0;
           this.x = Math.random() * canvas.width;
+          this.vy = Math.random() * 10 + 5;
+          this.vx = Math.random() * 2 - 1;
         }
 
         if (this.x >= canvas.width + this.size * 3) {
-          this.x = 0;
+          this.x = Math.random() * canvas.width;
+          this.y = 0;
+          this.vx = 0;
         }
 
         if (this.x < 0 - this.size * 3) {
-          this.x = canvas.width;
+          this.x = Math.random() * canvas.width;
+          this.y = 0;
+          this.vx = 0;
         }
 
         if (this.y + this.size < 0) {
