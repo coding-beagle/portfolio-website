@@ -36,15 +36,7 @@ export default function Title() {
   };
 
   const getRandomShake = () => {
-    const shakes = [
-      "rotate(-5deg)",
-      "rotate(5deg)",
-      "translateX(-5px)",
-      "translateX(5px)",
-      "translateY(-5px)",
-      "translateY(5px)",
-    ];
-    return shakes[Math.floor(Math.random() * shakes.length)];
+    return `rotate(${Math.random() * 10 - 5}deg)`;
   };
 
   return (

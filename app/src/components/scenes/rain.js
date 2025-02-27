@@ -16,7 +16,7 @@ export default function Rain() {
     const gravity = 13;
     const rainX = (Math.random() - 0.5) * 15;
     const mouseShieldRadius = 100;
-    const titleShieldRadius = 200;
+    const titleShieldRadius = 300;
     let animationFrameId;
 
     const handleMouseMove = (event) => {
@@ -39,7 +39,7 @@ export default function Rain() {
       constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = rainX;
+        this.vx = rainX + Math.random() * 2 - 1;
         this.vy = gravity;
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.secondary;
@@ -50,22 +50,10 @@ export default function Rain() {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        const dxFromTitle = this.x - window.innerWidth / 1.5;
+        const dxFromTitle = this.x - window.innerWidth / 2;
         const dyFromTitle = this.y - window.innerHeight / 2;
         const distanceFromTitle = Math.sqrt(
-          dxFromTitle * dxFromTitle + dyFromTitle * dyFromTitle
-        );
-
-        const dxFromTitle2 = this.x - window.innerWidth / 3;
-        const dyFromTitle2 = this.y - window.innerHeight / 2;
-        const distanceFromTitle2 = Math.sqrt(
-          dxFromTitle2 * dxFromTitle2 + dyFromTitle2 * dyFromTitle2
-        );
-
-        const dxFromTitle3 = this.x - window.innerWidth / 2;
-        const dyFromTitle3 = this.y - window.innerHeight / 2.2;
-        const distanceFromTitle3 = Math.sqrt(
-          dxFromTitle3 * dxFromTitle3 + dyFromTitle3 * dyFromTitle3
+          0.2 * dxFromTitle * dxFromTitle + 3 * dyFromTitle * dyFromTitle
         );
 
         if (distance < mouseShieldRadius && mouseClickRef.current) {
@@ -74,22 +62,14 @@ export default function Rain() {
           this.vy = Math.sin(angle) * 5;
         } else if (distanceFromTitle < titleShieldRadius) {
           const angle2 = Math.atan2(dyFromTitle, dxFromTitle);
-          this.vx = Math.cos(angle2) * 5;
-          this.vy = Math.sin(angle2) * 5;
-        } else if (distanceFromTitle2 < titleShieldRadius) {
-          const angle3 = Math.atan2(dyFromTitle2, dxFromTitle2);
-          this.vx = Math.cos(angle3) * 5;
-          this.vy = Math.sin(angle3) * 5;
-        } else if (distanceFromTitle3 < titleShieldRadius * 2) {
-          const angle4 = Math.atan2(dyFromTitle3, dxFromTitle3);
-          this.vx = Math.cos(angle4) * 5;
-          this.vy = Math.sin(angle4) * 5;
+          this.vx = Math.cos(angle2) * 10;
+          this.vy = Math.sin(angle2) * 10;
         } else {
           this.vx = rainX;
           this.vy = gravity;
         }
 
-        this.x += this.vx + (Math.random() - 0.5) * 2;
+        this.x += this.vx;
         this.y += this.vy;
 
         if (this.y > canvas.height) {
