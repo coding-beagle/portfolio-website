@@ -83,7 +83,7 @@ export default function Title() {
             setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
           }}
           style={{
-            fontSize: "8em",
+            fontSize: "5vw",
             textAlign: "center",
             color: isHover ? defaultColours.secondary : defaultColours.accent,
             fontWeight: "bold",
