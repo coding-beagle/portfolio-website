@@ -2,8 +2,4 @@
 deployment:
   tasks:
     - export DEPLOYPATH=/home/nteagvxe/repositories/portfolio-website
-    - cd $DEPLOYPATH
-    - git pull
-    - make install
-    - make build
-    - make deploy
+    - echo "Deploying to $DEPLOYPATH"
