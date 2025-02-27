@@ -1,5 +1,11 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/nteagvxe/repositories/portfolio-website
+    - export REPOPATH=/home/nteagvxe/repositories/portfolio-website
+    - export DEPLOYPATH=/home/nteagvxe/public_html/
     - echo "Deploying to $DEPLOYPATH"
+    - cd $REPOPATH
+    - git pull
+    - make install && make build
+    - cp -r app/build/ $DEPLOYPATH
+    - echo "Deployment complete"
