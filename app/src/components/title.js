@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import defaultColours from "../themes/themes";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
+import Sun from "./scenes/sun";
 
 const Scenes = {
   SNOW: 0,
@@ -30,6 +31,8 @@ export default function Title() {
         return <Snow />;
       case Scenes.RAIN:
         return <Rain />;
+      // case Scenes.SUN: // need to let this cook a bit
+      //   return <Sun />;
       default:
         return;
     }
