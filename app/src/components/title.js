@@ -99,7 +99,7 @@ export default function Title() {
             transform: clicked ? `scale(1.05) ${getRandomShake()}` : "scale(1)",
           }}
         >
-          Nicholas Teague
+          Nicholas Teague Website!
         </header>
         <div
           style={{
