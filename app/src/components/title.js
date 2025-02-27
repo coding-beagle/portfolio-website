@@ -4,6 +4,16 @@ import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
 import Sun from "./scenes/sun";
 import { Drawer, Button } from "antd";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faBars } from "@fortawesome/free-solid-svg-icons";
+import {
+  faGithub,
+  faLinkedin,
+  faTwitch,
+  faTwitter,
+  faYoutube,
+} from "@fortawesome/free-brands-svg-icons";
+import IconHover from "./IconHover";
 
 const Scenes = {
   SNOW: 0,
@@ -91,31 +101,25 @@ export default function Title() {
         >
           Nicholas Teague
         </header>
-        <header
-          onMouseEnter={() => setIsHoverLinks(true)}
-          onMouseLeave={() => setIsHoverLinks(false)}
-          onMouseDown={() => setDrawerVisible(true)}
+        <div
           style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: "1em",
             fontSize: "3em",
-            textAlign: "center",
-            color: isHoverLinks
-              ? defaultColours.secondary
-              : defaultColours.accent,
-            fontWeight: "bold",
-            zIndex: 10,
-            transition: "color 0.5s ease, transform 0.5s ease",
-            position: "relative",
-            WebkitUserSelect: "none",
-            WebkitTouchCallout: "none",
-            KhtmlUserSelect: "none",
-            MozUserSelect: "none",
-            userSelect: "none",
-            msUserSelect: "none",
-            transform: clicked ? `scale(1.05) ${getRandomShake()}` : "scale(1)",
+            zIndex: 100,
           }}
         >
-          More
-        </header>
+          <IconHover
+            icon={faGithub}
+            link="https://www.github.com/coding-beagle"
+          />
+          <IconHover
+            icon={faLinkedin}
+            link="https://www.linkedin.com/in/nicholasp-teague/"
+          />
+          <IconHover icon={faYoutube} link="https://www.youtube.com/@ntprod" />
+        </div>
       </div>
       <div style={{ position: "absolute", top: "1em", left: "1em" }}>
         <Drawer
