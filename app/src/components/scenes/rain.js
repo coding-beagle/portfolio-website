@@ -13,11 +13,12 @@ export default function Rain() {
     const ctx = canvas.getContext("2d");
     let particles = [];
     const particleCount = 2000;
-    const gravity = 13;
+    const gravity = 0.5;
     const rainX = (Math.random() - 0.5) * 15;
     const mouseShieldRadius = 100;
     const titleShieldRadius = 300;
     let animationFrameId;
+    const maxSpeed = 13;
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -40,7 +41,7 @@ export default function Rain() {
         this.x = x;
         this.y = y;
         this.vx = rainX + Math.random() * 2 - 1;
-        this.vy = gravity;
+        this.vy = Math.random() * 10 + 5;
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.secondary;
       }
@@ -66,7 +67,9 @@ export default function Rain() {
           this.vy = Math.sin(angle2) * 10;
         } else {
           this.vx = rainX;
-          this.vy = gravity;
+          if (this.vy < maxSpeed) {
+            this.vy += gravity;
+          }
         }
 
         this.x += this.vx;
