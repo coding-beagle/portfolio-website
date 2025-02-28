@@ -3,6 +3,7 @@ import defaultColours from "../themes/themes";
 import Snow from "./scenes/Snow";
 import Rain from "./scenes/Rain";
 import Sun from "./scenes/Plants";
+import Stars from "./scenes/Stars";
 import { Drawer, Button } from "antd";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -16,6 +17,7 @@ const Scenes = {
   SNOW: 0,
   RAIN: 1,
   SUN: 2,
+  STARS: 3,
 };
 
 export default function Title() {
@@ -50,6 +52,8 @@ export default function Title() {
         return <Rain />;
       case Scenes.SUN: // need to let this cook a bit
         return <Sun />;
+      case Scenes.STARS:
+        return <Stars />;
       default:
         return;
     }

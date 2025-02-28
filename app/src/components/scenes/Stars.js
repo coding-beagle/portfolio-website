@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import defaultColours from "../../themes/themes";
 
-export default function Plants() {
+export default function Stars() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [restart, setRestart] = React.useState(false);
-  const [particleCount, setParticleCount] = React.useState(50);
+  const [particleCount, setParticleCount] = React.useState(120);
   const [simulationSpeed, setSimulationSpeed] = React.useState(500);
   const [simulationLength, setSimulationLength] = React.useState(100);
 
@@ -33,8 +33,17 @@ export default function Plants() {
     const canvas = canvasRef.current;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    const twinkleChance = 1.1;
+    const maxTwinkleCounter = 100;
+    const mouseTriggerDistance = 100;
+
+    const shootingStars = [];
+    const maxShootingStars = 3;
+    const shootingStarChance = 0.998;
+    const maxShootingStarCounter = 1000;
+
     const ctx = canvas.getContext("2d");
-    let plants = [];
+    let stars = [];
     let animationFrameId;
 
     const handleMouseMove = (event) => {
@@ -45,73 +54,203 @@ export default function Plants() {
       };
     };
 
-    class Plant {
+    class Star {
       constructor(x, y, size) {
         this.x = x;
         this.y = y;
-        this.growthPoints = [{ x: x, y: y }];
-        this.colours = [defaultColours.secondaryAccent];
-        this.sizes = [size];
+        this.colour = defaultColours.accent;
+        this.size = size;
+        this.isTwinkling = false;
+        this.twinklingCounter = 0;
+        this.oldSize = 0;
       }
 
       update() {
         if (Math.random() * 1000 > simulationSpeed) return; // Throttle the update
+        const dx = Math.random() * 0.2 - 0.1;
+        const dy = Math.random() * 0.2 - 0.1;
+        const mouseDx = mousePosRef.current.x - this.x;
+        const mouseDy = mousePosRef.current.y - this.y;
+        const distance = Math.sqrt(mouseDx ** 2 + mouseDy ** 2);
 
-        const lastPoint = this.growthPoints[this.growthPoints.length - 1];
-        this.growthPoints.push({
-          x:
-            lastPoint.x +
-            this.sizes[this.sizes.length - 1] * (Math.random() - 0.5) * 2,
-          y:
-            lastPoint.y -
-            this.sizes[this.sizes.length - 1] * Math.random() * 2 +
-            1,
-        });
+        if (distance < mouseTriggerDistance && !this.isTwinkling) {
+          this.isTwinkling = true;
+        }
 
-        this.sizes.push(
-          this.sizes[this.sizes.length - 1] * (0.95 + Math.random() * 0.05)
-        );
+        this.x += dx;
+        this.y += dy;
 
-        this.colours.push(
-          getCloseColour(this.colours[this.colours.length - 1])
-        );
+        if (Math.random() > twinkleChance && !this.isTwinkling) {
+          this.isTwinkling = true;
+        }
 
-        if (this.growthPoints.length > simulationLength) {
-          setRestart(!restart);
+        if (this.isTwinkling) {
+          if (this.twinklingCounter == 0) {
+            this.oldSize = this.size;
+          }
+          this.twinklingCounter++;
+          this.colour = getCloseColour(defaultColours.accent);
+          if (this.twinklingCounter < maxTwinkleCounter / 2) {
+            this.size = this.size + Math.random() * 0.05 + 0.01;
+          } else {
+            this.size = this.size - Math.random() * 0.05 - 0.01;
+          }
+
+          if (this.twinklingCounter > maxTwinkleCounter) {
+            this.isTwinkling = false;
+            this.twinklingCounter = 0;
+            this.size = this.oldSize;
+            this.colour = defaultColours.accent;
+          }
         }
       }
 
       draw() {
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.sizes[0], 0, Math.PI * 2);
-        ctx.fillStyle = this.colours[0];
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = getCloseColour(this.colour);
         ctx.fill();
         ctx.closePath();
+      }
+    }
 
-        this.growthPoints.forEach((point, index) => {
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, this.sizes[index], 0, Math.PI * 2);
-          ctx.fillStyle = this.colours[index];
-          ctx.fill();
-          ctx.closePath();
-        });
+    const graduallyChangeColour = (colour, targetColour, iterations) => {
+      const r_current = parseInt(colour.slice(1, 3), 16);
+      const g_current = parseInt(colour.slice(3, 5), 16);
+      const b_current = parseInt(colour.slice(5, 7), 16);
+
+      const targetR = parseInt(targetColour.slice(1, 3), 16);
+      const targetG = parseInt(targetColour.slice(3, 5), 16);
+      const targetB = parseInt(targetColour.slice(5, 7), 16);
+
+      const rStep = (targetR - r_current) / iterations;
+      const gStep = (targetG - g_current) / iterations;
+      const bStep = (targetB - b_current) / iterations;
+
+      const colours = [];
+
+      for (let i = 0; i < iterations; i++) {
+        const r = Math.floor(r_current + rStep * i);
+        const g = Math.floor(g_current + gStep * i);
+        const b = Math.floor(b_current + bStep * i);
+
+        const rHex = r.toString(16).padStart(2, "0");
+        const gHex = g.toString(16).padStart(2, "0");
+        const bHex = b.toString(16).padStart(2, "0");
+
+        colours.push(`#${rHex}${gHex}${bHex}`);
+      }
+
+      return colours;
+    };
+
+    class ShootingStar {
+      constructor(x, y, size) {
+        this.x = x;
+        this.y = y;
+        this.size = size;
+        this.dx = Math.random() * 2 - 1;
+        this.dy = Math.random() * 2 - 1;
+        this.colour = defaultColours.accent;
+        this.isActive = false;
+        this.isActiveCounter = 0;
+        this.trailPositions = [{ x: this.x, y: this.y }];
+        this.trailColours = [];
+        this.fullColour = getCloseColour(defaultColours.accent);
+        this.fadeColours = graduallyChangeColour(
+          defaultColours.primary,
+          this.fullColour,
+          maxShootingStarCounter / 4
+        );
+        this.trailSizes = [this.size];
+      }
+
+      update() {
+        if (Math.random() * 1000 > simulationSpeed) return; // Throttle the update
+
+        if (!this.isActive && Math.random() > shootingStarChance) {
+          this.isActive = true;
+        }
+
+        if (this.isActive) {
+          this.isActiveCounter++;
+
+          // fade in for first quarter
+          if (this.isActiveCounter < maxShootingStarCounter / 4) {
+            this.colour = this.fadeColours[this.isActiveCounter];
+          }
+
+          // fade out for last quarter
+          if (this.isActiveCounter > (3 * maxShootingStarCounter) / 4) {
+            const fadeIndex =
+              this.isActiveCounter - (3 * maxShootingStarCounter) / 4;
+            if (fadeIndex < this.fadeColours.length) {
+              this.colour =
+                this.fadeColours[this.fadeColours.length - fadeIndex];
+            }
+          }
+
+          this.x += this.dx;
+          this.y += this.dy;
+
+          this.trailPositions.push({ x: this.x, y: this.y });
+          this.trailColours.push(getCloseColour(defaultColours.accent));
+          this.trailSizes.push(this.size);
+
+          this.trailSizes = this.trailSizes.map((size) => size - 0.1);
+
+          if (this.isActiveCounter > maxShootingStarCounter) {
+            this.isActive = false;
+            this.isActiveCounter = 0;
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.colour = defaultColours.accent;
+            this.trailColours = [];
+            this.trailPositions = [];
+            this.trailSizes = [];
+          }
+        }
+      }
+
+      draw() {
+        if (this.isActive) {
+          this.trailPositions.forEach((pos, index) => {
+            const size = this.trailSizes[index];
+            if (size <= 0) return;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+            ctx.fillStyle = this.trailColours[index];
+            ctx.fill();
+            ctx.closePath();
+          });
+        }
       }
     }
 
     function initBlocks() {
       for (let i = 0; i < particleCount; i++) {
-        const size = Math.random() * 20 + 10;
+        const size = Math.random() * 5 + 2.5;
         const x = Math.random() * (canvas.width - size);
-        const y = Math.random() + (canvas.height - size);
-        plants.push(new Plant(x, y, size));
+        const y = Math.random() * (canvas.height - size);
+        stars.push(new Star(x, y, size));
+      }
+      for (let i = 0; i < maxShootingStars; i++) {
+        const size = Math.random() * 5 + 2.5;
+        const x = Math.random() * (canvas.width - size);
+        const y = Math.random() * (canvas.height - size);
+        shootingStars.push(new ShootingStar(x, y, size));
       }
     }
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      plants.forEach((plant) => {
-        plant.update();
-        plant.draw();
+      stars.forEach((star) => {
+        star.update();
+        star.draw();
+      });
+      shootingStars.forEach((shootingStar) => {
+        shootingStar.update();
+        shootingStar.draw();
       });
       animationFrameId = requestAnimationFrame(animate);
     }
@@ -125,7 +264,7 @@ export default function Plants() {
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("mousemove", handleMouseMove);
     };
-  }, [restart, simulationSpeed, particleCount, simulationLength]);
+  }, [simulationSpeed, particleCount]);
 
   return (
     <>
@@ -146,7 +285,7 @@ export default function Plants() {
               marginBottom: "0.5em",
             }}
           >
-            Plant Count:
+            Star Count:
             <input
               type="range"
               min="1"
@@ -170,23 +309,6 @@ export default function Plants() {
               max="1000.0"
               value={simulationSpeed}
               onChange={(e) => setSimulationSpeed(Number(e.target.value))}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Length:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationLength}
-              onChange={(e) => setSimulationLength(Number(e.target.value))}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
