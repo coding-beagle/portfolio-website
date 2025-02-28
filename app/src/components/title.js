@@ -5,12 +5,9 @@ import Rain from "./scenes/Rain";
 import Sun from "./scenes/Plants";
 import { Drawer, Button } from "antd";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faBars } from "@fortawesome/free-solid-svg-icons";
 import {
   faGithub,
   faLinkedin,
-  faTwitch,
-  faTwitter,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
 import IconHover from "./IconHover";
