@@ -97,10 +97,6 @@ export default function Rain() {
           this.y = 0;
           this.vx = 0;
         }
-
-        // if (this.y + this.size < 0) {
-        //   this.y = canvas.height;
-        // }
       }
 
       draw() {

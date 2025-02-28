@@ -51,8 +51,8 @@ export default function Title() {
         return <Snow />;
       case Scenes.RAIN:
         return <Rain />;
-      // case Scenes.SUN: // need to let this cook a bit
-      //   return <Sun />;
+      case Scenes.SUN: // need to let this cook a bit
+        return <Sun />;
       default:
         return;
     }

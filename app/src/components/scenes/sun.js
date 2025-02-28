@@ -4,14 +4,16 @@ import defaultColours from "../../themes/themes";
 export default function Sun() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const [restart, setRestart] = React.useState(false);
+  const [particleCount, setParticleCount] = React.useState(50);
+  const [simulationSpeed, setSimulationSpeed] = React.useState(500);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     const ctx = canvas.getContext("2d");
-    let blocks = [];
-    const blockCount = 50;
+    let plants = [];
     let animationFrameId;
 
     const handleMouseMove = (event) => {
@@ -22,50 +24,60 @@ export default function Sun() {
       };
     };
 
-    class Block {
+    class Plant {
       constructor(x, y, size) {
         this.x = x;
         this.y = y;
         this.size = size;
-        this.color = defaultColours.secondary;
+        this.color = defaultColours.secondaryAccent;
+        this.growthPoints = [{ x: x, y: y }];
+      }
+
+      update() {
+        if (Math.random() * 1000 > simulationSpeed) return; // Throttle the update
+
+        const lastPoint = this.growthPoints[this.growthPoints.length - 1];
+        this.growthPoints.push({
+          x: lastPoint.x + this.size * (Math.random() - 0.5) * 2,
+          y: lastPoint.y - this.size * Math.random() * 2 + 1,
+        });
+
+        if (this.growthPoints.length > 60) {
+          setRestart(!restart);
+        }
       }
 
       draw() {
-        const dx = this.x + this.size / 2 - mousePosRef.current.x;
-        const dy = this.y + this.size / 2 - mousePosRef.current.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const shadowLength = Math.min(100, 2000 / distance);
-
-        const shadowX = (dx / distance) * shadowLength;
-        const shadowY = (dy / distance) * shadowLength;
-
-        ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y, this.size, this.size);
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
         ctx.beginPath();
-        ctx.moveTo(this.x + this.size, this.y + this.size);
-        ctx.lineTo(this.x + this.size + shadowX, this.y + this.size + shadowY);
-        ctx.lineTo(this.x + shadowX, this.y + shadowY);
-        ctx.lineTo(this.x, this.y);
-        ctx.closePath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
         ctx.fill();
+        ctx.closePath();
+
+        this.growthPoints.forEach((point) => {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, this.size, 0, Math.PI * 2);
+          ctx.fillStyle = this.color;
+          ctx.fill();
+          ctx.closePath();
+        });
       }
     }
 
     function initBlocks() {
-      for (let i = 0; i < blockCount; i++) {
-        const size = Math.random() * 50 + 20;
+      for (let i = 0; i < particleCount; i++) {
+        const size = Math.random() * 20 + 10;
         const x = Math.random() * (canvas.width - size);
-        const y = Math.random() * (canvas.height - size);
-        blocks.push(new Block(x, y, size));
+        const y = Math.random() + (canvas.height - size);
+        plants.push(new Plant(x, y, size));
       }
     }
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      blocks.forEach((block) => {
-        block.draw();
+      plants.forEach((plant) => {
+        plant.update();
+        plant.draw();
       });
       animationFrameId = requestAnimationFrame(animate);
     }
@@ -79,16 +91,56 @@ export default function Sun() {
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("mousemove", handleMouseMove);
     };
-  }, []);
+  }, [restart, simulationSpeed, particleCount]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+        }}
+      />
+      <div style={{ zIndex: 10 }}>
+        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Plant Count:
+            <input
+              type="range"
+              min="1"
+              max="50"
+              value={particleCount}
+              onChange={(e) => setParticleCount(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Simulation Speed:
+            <input
+              type="range"
+              min="1.0"
+              max="1000.0"
+              value={simulationSpeed}
+              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
