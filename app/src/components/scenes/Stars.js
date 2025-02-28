@@ -4,10 +4,9 @@ import defaultColours from "../../themes/themes";
 export default function Stars() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
-  const [restart, setRestart] = React.useState(false);
   const [particleCount, setParticleCount] = React.useState(120);
   const [simulationSpeed, setSimulationSpeed] = React.useState(500);
-  const [simulationLength, setSimulationLength] = React.useState(100);
+  const mouseClickRef = useRef(false);
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
@@ -39,7 +38,7 @@ export default function Stars() {
 
     const shootingStars = [];
     const maxShootingStars = 3;
-    const shootingStarChance = 0.998;
+    const shootingStarChance = 0.5;
     const maxShootingStarCounter = 1000;
 
     const ctx = canvas.getContext("2d");
@@ -52,6 +51,14 @@ export default function Stars() {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       };
+    };
+
+    const handleMouseDown = () => {
+      mouseClickRef.current = true;
+    };
+
+    const handleMouseUp = () => {
+      mouseClickRef.current = false;
     };
 
     class Star {
@@ -77,8 +84,16 @@ export default function Stars() {
           this.isTwinkling = true;
         }
 
-        this.x += dx;
-        this.y += dy;
+        if (distance < mouseTriggerDistance && mouseClickRef.current) {
+          this.x += dx;
+          this.y += dy;
+          const angle = Math.atan2(mouseDy, mouseDx);
+          this.x += Math.cos(angle) * 0.1;
+          this.y += Math.sin(angle) * 0.1;
+        } else {
+          this.x += dx;
+          this.y += dy;
+        }
 
         if (Math.random() > twinkleChance && !this.isTwinkling) {
           this.isTwinkling = true;
@@ -190,6 +205,15 @@ export default function Stars() {
             }
           }
 
+          const mouseDx = mousePosRef.current.x - this.x;
+          const mouseDy = mousePosRef.current.y - this.y;
+          const distance = Math.sqrt(mouseDx ** 2 + mouseDy ** 2);
+
+          if (distance < mouseTriggerDistance && mouseClickRef.current) {
+            const angle = Math.atan2(mouseDy, mouseDx);
+            this.dx = this.dx + Math.cos(angle) * 0.05;
+            this.dy = this.dy + Math.sin(angle) * 0.05;
+          }
           this.x += this.dx;
           this.y += this.dy;
 
@@ -259,10 +283,14 @@ export default function Stars() {
     animate();
 
     canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mousedown", handleMouseDown);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("mousedown", handleMouseDown);
     };
   }, [simulationSpeed, particleCount]);
 
