@@ -98,9 +98,9 @@ export default function Rain() {
           this.vx = 0;
         }
 
-        if (this.y + this.size < 0) {
-          this.y = canvas.height;
-        }
+        // if (this.y + this.size < 0) {
+        //   this.y = canvas.height;
+        // }
       }
 
       draw() {
@@ -199,11 +199,11 @@ export default function Rain() {
               marginBottom: "0.5em",
             }}
           >
-            Mouse Umbrella Radius:
+            Click Umbrella Radius:
             <input
               type="range"
               min="10.0"
-              max="200.0"
+              max="300.0"
               value={mouseShieldRadius}
               onChange={(e) => setMouseShieldRadius(Number(e.target.value))}
               style={{ marginLeft: "0.5em" }}
