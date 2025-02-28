@@ -5,5 +5,5 @@ const defaultColours = {
   secondaryAccent: "#5c946e",
   font: "Roboto, sans-serif",
 };
-// colour palette: https://coolors.co/00ccff-031926-f4e9cd-820263-d90368
+// colour palette: https://coolors.co/00ccff-031926-f4e9cd-5c946e-e36588
 export default defaultColours;
