@@ -1,12 +1,33 @@
 import React, { useEffect, useRef } from "react";
 import defaultColours from "../../themes/themes";
 
-export default function Sun() {
+export default function Plants() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [restart, setRestart] = React.useState(false);
   const [particleCount, setParticleCount] = React.useState(50);
   const [simulationSpeed, setSimulationSpeed] = React.useState(500);
+  const [simulationLength, setSimulationLength] = React.useState(100);
+
+  const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+
+  const getCloseColour = (colourHex) => {
+    const colour = {
+      r: parseInt(colourHex.slice(1, 3), 16),
+      g: parseInt(colourHex.slice(3, 5), 16),
+      b: parseInt(colourHex.slice(5, 7), 16),
+    };
+
+    const r = Math.floor(clamp(colour.r + Math.random() * 20 - 10, 0, 255));
+    const g = Math.floor(clamp(colour.g + Math.random() * 10 - 5, 0, 255));
+    const b = Math.floor(clamp(colour.b + Math.random() * 10 - 5, 0, 255));
+
+    const rHex = r.toString(16).padStart(2, "0");
+    const gHex = g.toString(16).padStart(2, "0");
+    const bHex = b.toString(16).padStart(2, "0");
+
+    return `#${rHex}${gHex}${bHex}`;
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -28,9 +49,9 @@ export default function Sun() {
       constructor(x, y, size) {
         this.x = x;
         this.y = y;
-        this.size = size;
-        this.color = defaultColours.secondaryAccent;
         this.growthPoints = [{ x: x, y: y }];
+        this.colours = [defaultColours.secondaryAccent];
+        this.sizes = [size];
       }
 
       update() {
@@ -38,26 +59,39 @@ export default function Sun() {
 
         const lastPoint = this.growthPoints[this.growthPoints.length - 1];
         this.growthPoints.push({
-          x: lastPoint.x + this.size * (Math.random() - 0.5) * 2,
-          y: lastPoint.y - this.size * Math.random() * 2 + 1,
+          x:
+            lastPoint.x +
+            this.sizes[this.sizes.length - 1] * (Math.random() - 0.5) * 2,
+          y:
+            lastPoint.y -
+            this.sizes[this.sizes.length - 1] * Math.random() * 2 +
+            1,
         });
 
-        if (this.growthPoints.length > 60) {
+        this.sizes.push(
+          this.sizes[this.sizes.length - 1] * (0.95 + Math.random() * 0.05)
+        );
+
+        this.colours.push(
+          getCloseColour(this.colours[this.colours.length - 1])
+        );
+
+        if (this.growthPoints.length > simulationLength) {
           setRestart(!restart);
         }
       }
 
       draw() {
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
+        ctx.arc(this.x, this.y, this.sizes[0], 0, Math.PI * 2);
+        ctx.fillStyle = this.colours[0];
         ctx.fill();
         ctx.closePath();
 
-        this.growthPoints.forEach((point) => {
+        this.growthPoints.forEach((point, index) => {
           ctx.beginPath();
-          ctx.arc(point.x, point.y, this.size, 0, Math.PI * 2);
-          ctx.fillStyle = this.color;
+          ctx.arc(point.x, point.y, this.sizes[index], 0, Math.PI * 2);
+          ctx.fillStyle = this.colours[index];
           ctx.fill();
           ctx.closePath();
         });
@@ -91,7 +125,7 @@ export default function Sun() {
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("mousemove", handleMouseMove);
     };
-  }, [restart, simulationSpeed, particleCount]);
+  }, [restart, simulationSpeed, particleCount, simulationLength]);
 
   return (
     <>
@@ -136,6 +170,23 @@ export default function Sun() {
               max="1000.0"
               value={simulationSpeed}
               onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Simulation Length:
+            <input
+              type="range"
+              min="1.0"
+              max="200.0"
+              value={simulationLength}
+              onChange={(e) => setSimulationLength(Number(e.target.value))}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
