@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import defaultColours from "../themes/themes";
-import Snow from "./scenes/snow";
-import Rain from "./scenes/rain";
-import Sun from "./scenes/sun";
+import Snow from "./scenes/Snow";
+import Rain from "./scenes/Rain";
+import Sun from "./scenes/Plants";
 import { Drawer, Button } from "antd";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faBars } from "@fortawesome/free-solid-svg-icons";
