@@ -37,6 +37,25 @@ export default function Title() {
   };
 
   useEffect(() => {
+    // Trigger shake effect on initial load
+    setClicked(true);
+    setIsHover(true);
+    setTimeout(() => {
+      setClicked(false);
+    }, 200);
+    setTimeout(() => {
+      setClicked(true);
+    }, 250);
+    setTimeout(() => {
+      setClicked(true);
+    }, 500);
+    setTimeout(() => {
+      setClicked(false);
+      setIsHover(false);
+    }, 1000);
+  }, []);
+
+  useEffect(() => {
     if (clicked) {
       setTimeout(() => {
         setClicked(false);
