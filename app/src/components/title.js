@@ -22,19 +22,11 @@ const Scenes = {
 
 export default function Title() {
   const [isHover, setIsHover] = useState(false);
-  const [isHoverLinks, setIsHoverLinks] = useState(false);
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
   );
+  const [lastRotationClockwise, setLastRotationClockwise] = useState(true);
   const [clicked, setClicked] = useState(false);
-  const [drawerVisible, setDrawerVisible] = useState(false);
-
-  const showDrawer = () => {
-    setDrawerVisible(true);
-  };
-  const onClose = () => {
-    setDrawerVisible(false);
-  };
 
   useEffect(() => {
     // Trigger shake effect on initial load
@@ -59,7 +51,7 @@ export default function Title() {
     if (clicked) {
       setTimeout(() => {
         setClicked(false);
-      }, 150);
+      }, 300);
     }
   }, [clicked]);
 
@@ -79,7 +71,8 @@ export default function Title() {
   };
 
   const getRandomShake = () => {
-    return `rotate(${Math.random() * 10 - 5}deg)`;
+    const rotation = (Math.random() - 0.5) * 20;
+    return `rotate(${rotation}deg)`;
   };
 
   return (
@@ -108,7 +101,7 @@ export default function Title() {
             color: isHover ? defaultColours.secondary : defaultColours.accent,
             fontWeight: "bold",
             zIndex: 10,
-            transition: "color 0.5s ease, transform 0.5s ease",
+            transition: "color 0.8s ease, transform 1.5s ease",
             position: "relative",
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none",
@@ -116,7 +109,7 @@ export default function Title() {
             MozUserSelect: "none",
             userSelect: "none",
             msUserSelect: "none",
-            transform: clicked ? `scale(1.05) ${getRandomShake()}` : "scale(1)",
+            transform: clicked ? `scale(1.1) ${getRandomShake()}` : "scale(1)",
           }}
         >
           Nicholas Teague
@@ -140,18 +133,6 @@ export default function Title() {
           />
           <IconHover icon={faYoutube} link="https://www.youtube.com/@ntprod" />
         </div>
-      </div>
-      <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-        <Drawer
-          title="Basic Drawer"
-          placement="right"
-          closable={false}
-          onClose={onClose}
-          visible={drawerVisible}
-        >
-          <p>About Me</p>
-          <p>Projects</p>
-        </Drawer>
       </div>
     </>
   );
