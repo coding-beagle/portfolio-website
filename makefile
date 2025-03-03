@@ -13,4 +13,7 @@ build:
 	cd app && npm run build && cd -
 
 deploy:
-	cd app && npm install -g serve && serve -s ./build && cd -
+	git fetch origin
+	if ! git diff --quiet origin/main; then \
+		echo "Your branch is behind the remote branch."; \
+	fi
