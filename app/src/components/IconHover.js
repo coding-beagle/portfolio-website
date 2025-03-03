@@ -8,6 +8,8 @@ export default function IconHover({ icon, link }) {
   return (
     <a
       href={link}
+      target="_blank"
+      rel="noopener noreferrer"
       style={{
         color: isHover ? defaultColours.secondary : defaultColours.accent,
         cursor: "pointer",
@@ -15,7 +17,13 @@ export default function IconHover({ icon, link }) {
       onMouseEnter={() => setIsHover(true)}
       onMouseLeave={() => setIsHover(false)}
     >
-      <FontAwesomeIcon icon={icon} />
+      <FontAwesomeIcon
+        icon={icon}
+        style={{
+          transition: "color 0.3s ease, transform 0.5s ease",
+          transform: isHover ? `scale(1.1)` : "scale(1)",
+        }}
+      />
     </a>
   );
 }
