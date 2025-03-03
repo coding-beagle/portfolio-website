@@ -10,7 +10,7 @@ install:
 	cd app && npm install
 
 build:
-	cd app && npm run build && cd -
+	cd app && npm run build && cd - && git add . && git commit -m "Build" && git push origin main;
 
 deploy:
 	git fetch origin
