@@ -34,7 +34,7 @@ export default function Stars() {
     canvas.height = window.innerHeight;
     const twinkleChance = 1.1;
     const maxTwinkleCounter = 100;
-    const mouseTriggerDistance = 100;
+    const mouseTriggerDistance = 300;
 
     const shootingStars = [];
     const maxShootingStars = 3;
