@@ -38,7 +38,6 @@ export default function Stars() {
 
     const shootingStars = [];
     const maxShootingStars = 3;
-    const shootingStarChance = 0.5;
     const maxShootingStarCounter = 1000;
 
     const ctx = canvas.getContext("2d");
