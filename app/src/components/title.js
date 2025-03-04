@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import defaultColours from "../themes/themes";
-import Snow from "./scenes/Snow";
-import Rain from "./scenes/Rain";
-import Sun from "./scenes/Plants";
-import Stars from "./scenes/Stars";
+import Snow from "./scenes/snow";
+import Rain from "./scenes/rain";
+import Sun from "./scenes/plants";
+import Stars from "./scenes/stars";
 import { Drawer, Button } from "antd";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -11,7 +11,7 @@ import {
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
-import IconHover from "./IconHover";
+import IconHover from "./iconHover";
 
 const Scenes = {
   SNOW: 0,
