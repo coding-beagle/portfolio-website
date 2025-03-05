@@ -8,9 +8,34 @@ export default function Snow() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const element = document.getElementById("title");
+    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
+    let elementCenterX = 0;
+    let elementCenterY = 0;
+    const titleShieldRadius = 30;
+
+    const recalculateRect = () => {
+      let rect = element.getBoundingClientRect();
+
+      rect_padded = {
+        left: rect.left - titleShieldRadius,
+        right: rect.right + titleShieldRadius,
+        top: rect.top - titleShieldRadius,
+        bottom: rect.bottom + titleShieldRadius,
+      };
+      elementCenterX = rect.left + rect.width / 2;
+      elementCenterY = rect.top + rect.height / 2;
+    };
+
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      recalculateRect();
+    };
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
+
     let particles = [];
     const gravity = 0.05;
     const maxSpeed = 1;
@@ -23,6 +48,14 @@ export default function Snow() {
         y: evt.clientY - rect.top,
       };
     };
+
+    const inElement = (rect, x, y) => {
+      return (
+        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+      );
+    };
+
+    recalculateRect();
 
     class Particle {
       constructor(x, y) {
@@ -38,6 +71,17 @@ export default function Snow() {
         this.vy += gravity;
         this.x += (this.vx * simulationSpeed) / 100;
         this.y += (this.vy * simulationSpeed) / 100;
+
+        // if (element) {
+        //   const dxFromElementCenter = this.x - elementCenterX;
+        //   const dyFromElementCenter = this.y - elementCenterY;
+
+        //   if (inElement(rect_padded, this.x, this.y)) {
+        //     const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
+        //     this.vx = Math.cos(angle2);
+        //     this.vy = Math.sin(angle2);
+        //   }
+        // }
 
         if (this.y + this.size > canvas.height) {
           this.y = 0;
@@ -95,6 +139,7 @@ export default function Snow() {
     return () => {
       // Cleanup function to cancel the animation frame
       cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", resizeCanvas);
     };
   }, [particleCount, simulationSpeed]);
 
