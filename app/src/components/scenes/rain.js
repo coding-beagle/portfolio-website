@@ -10,17 +10,41 @@ export default function Rain() {
   const [mouseShieldRadius, setMouseShieldRadius] = useState(100);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const ctx = canvas.getContext("2d");
+    const element = document.getElementById("title");
+    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
+    let elementCenterX = 0;
+    let elementCenterY = 0;
+
     let particles = [];
     const gravity = 0.5;
     const windSpeed = 0.2;
-    const titleShieldRadius = 300;
+    const titleShieldRadius = 30;
     let animationFrameId;
     const maxFallSpeed = 13;
     const maxWindSpeed = Math.random() * 10;
+
+    const recalculateRect = () => {
+      let rect = element.getBoundingClientRect();
+
+      rect_padded = {
+        left: rect.left - titleShieldRadius,
+        right: rect.right + titleShieldRadius,
+        top: rect.top - titleShieldRadius,
+        bottom: rect.bottom + titleShieldRadius,
+      };
+      elementCenterX = rect.left + rect.width / 2;
+      elementCenterY = rect.top + rect.height / 2;
+    };
+
+    const canvas = canvasRef.current;
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      recalculateRect();
+    };
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    const ctx = canvas.getContext("2d");
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -38,6 +62,14 @@ export default function Rain() {
       mouseClickRef.current = false;
     };
 
+    const inElement = (rect, x, y) => {
+      return (
+        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+      );
+    };
+
+    recalculateRect();
+
     class Particle {
       constructor(x, y) {
         this.x = x;
@@ -53,20 +85,21 @@ export default function Rain() {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        const dxFromTitle = this.x - window.innerWidth / 2;
-        const dyFromTitle = this.y - window.innerHeight / 2;
-        const distanceFromTitle = Math.sqrt(
-          0.2 * dxFromTitle * dxFromTitle + 3 * dyFromTitle * dyFromTitle
-        );
+        if (element) {
+          const dxFromElementCenter = this.x - elementCenterX;
+          const dyFromElementCenter = this.y - elementCenterY;
+
+          if (inElement(rect_padded, this.x, this.y)) {
+            const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
+            this.vx = Math.cos(angle2) * 5;
+            this.vy = Math.sin(angle2) * 5;
+          }
+        }
 
         if (distance < mouseShieldRadius && mouseClickRef.current) {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
-        } else if (distanceFromTitle < titleShieldRadius) {
-          const angle2 = Math.atan2(dyFromTitle, dxFromTitle);
-          this.vx = Math.cos(angle2) * 10;
-          this.vy = Math.sin(angle2) * 10;
         } else {
           if (this.vy < maxWindSpeed) {
             this.vx += windSpeed;
@@ -139,6 +172,7 @@ export default function Rain() {
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("resize", resizeCanvas);
     };
   }, [particleCount, simulationSpeed, mouseShieldRadius]);
 
