@@ -30,8 +30,13 @@ export default function Stars() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    const ctx = canvas.getContext("2d");
     const twinkleChance = 1.1;
     const maxTwinkleCounter = 100;
     const mouseTriggerDistance = 300;
@@ -40,7 +45,6 @@ export default function Stars() {
     const maxShootingStars = 3;
     const maxShootingStarCounter = 1000;
 
-    const ctx = canvas.getContext("2d");
     let stars = [];
     let animationFrameId;
 
