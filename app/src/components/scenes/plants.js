@@ -5,7 +5,7 @@ export default function Plants() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [restart, setRestart] = React.useState(false);
-  const [particleCount, setParticleCount] = React.useState(50);
+  const [particleCount, setParticleCount] = React.useState(25);
   const [simulationSpeed, setSimulationSpeed] = React.useState(500);
   const [simulationLength, setSimulationLength] = React.useState(100);
 
@@ -31,8 +31,12 @@ export default function Plants() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
     let plants = [];
     let animationFrameId;
@@ -100,7 +104,7 @@ export default function Plants() {
 
     function initBlocks() {
       for (let i = 0; i < particleCount; i++) {
-        const size = Math.random() * 20 + 10;
+        const size = Math.random() * 20 + (10 * canvas.width) / 1920;
         const x = Math.random() * (canvas.width - size);
         const y = Math.random() + (canvas.height - size);
         plants.push(new Plant(x, y, size));
@@ -124,6 +128,7 @@ export default function Plants() {
     return () => {
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("resize", resizeCanvas);
     };
   }, [restart, simulationSpeed, particleCount, simulationLength]);
 

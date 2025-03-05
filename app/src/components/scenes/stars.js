@@ -307,6 +307,7 @@ export default function Stars() {
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseup", handleMouseUp);
       canvas.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("resize", resizeCanvas);
     };
   }, [simulationSpeed, particleCount]);
 
