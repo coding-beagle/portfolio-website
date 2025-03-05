@@ -25,7 +25,6 @@ export default function Title() {
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
   );
-  const [lastRotationClockwise, setLastRotationClockwise] = useState(true);
   const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
@@ -111,6 +110,7 @@ export default function Title() {
             msUserSelect: "none",
             transform: clicked ? `scale(1.1) ${getRandomShake()}` : "scale(1)",
           }}
+          id="title"
         >
           Nicholas Teague
         </header>
