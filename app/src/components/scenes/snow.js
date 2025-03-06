@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../themes/themes";
 
 export default function Snow() {
   const canvasRef = useRef(null);
-  const [particleCount, setParticleCount] = React.useState(200);
-  const [simulationSpeed, setSimulationSpeed] = React.useState(100);
+  const particleCountRef = useRef(200);
+  const simulationSpeedRef = useRef(100);
+  const [, setRender] = useState(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -69,8 +70,8 @@ export default function Snow() {
 
       update() {
         this.vy += gravity;
-        this.x += (this.vx * simulationSpeed) / 100;
-        this.y += (this.vy * simulationSpeed) / 100;
+        this.x += (this.vx * simulationSpeedRef.current) / 100;
+        this.y += (this.vy * simulationSpeedRef.current) / 100;
 
         // if (element) {
         //   const dxFromElementCenter = this.x - elementCenterX;
@@ -117,7 +118,7 @@ export default function Snow() {
     }
 
     function initParticles() {
-      for (let i = 0; i < particleCount; i++) {
+      for (let i = 0; i < particleCountRef.current; i++) {
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
         particles.push(new Particle(x, y));
@@ -126,6 +127,19 @@ export default function Snow() {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Adjust particle count
+      const currentParticleCount = particles.length;
+      if (currentParticleCount < particleCountRef.current) {
+        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
+          const x = Math.random() * canvas.width;
+          const y = Math.random() * canvas.height;
+          particles.push(new Particle(x, y));
+        }
+      } else if (currentParticleCount > particleCountRef.current) {
+        particles.splice(particleCountRef.current);
+      }
+
       particles.forEach((particle) => {
         particle.update();
         particle.draw();
@@ -141,7 +155,7 @@ export default function Snow() {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [particleCount, simulationSpeed]);
+  }, []);
 
   return (
     <>
@@ -167,8 +181,11 @@ export default function Snow() {
               type="range"
               min="100"
               max="10000"
-              value={particleCount}
-              onChange={(e) => setParticleCount(Number(e.target.value))}
+              value={particleCountRef.current}
+              onChange={(e) => {
+                particleCountRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
@@ -184,8 +201,11 @@ export default function Snow() {
               type="range"
               min="1.0"
               max="200.0"
-              value={simulationSpeed}
-              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              value={simulationSpeedRef.current}
+              onChange={(e) => {
+                simulationSpeedRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>

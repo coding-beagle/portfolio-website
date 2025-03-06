@@ -1,13 +1,14 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../themes/themes";
 
 export default function Plants() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
-  const [restart, setRestart] = React.useState(false);
-  const [particleCount, setParticleCount] = React.useState(25);
-  const [simulationSpeed, setSimulationSpeed] = React.useState(500);
-  const [simulationLength, setSimulationLength] = React.useState(100);
+  const [restart, setRestart] = useState(false);
+  const particleCountRef = useRef(25);
+  const simulationSpeedRef = useRef(500);
+  const simulationLengthRef = useRef(100);
+  const [, setRender] = React.useState(0);
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
@@ -59,7 +60,7 @@ export default function Plants() {
       }
 
       update() {
-        if (Math.random() * 1000 > simulationSpeed) return; // Throttle the update
+        if (Math.random() * 1000 > simulationSpeedRef.current) return; // Throttle the update
 
         const lastPoint = this.growthPoints[this.growthPoints.length - 1];
         this.growthPoints.push({
@@ -80,7 +81,7 @@ export default function Plants() {
           getCloseColour(this.colours[this.colours.length - 1])
         );
 
-        if (this.growthPoints.length > simulationLength) {
+        if (this.growthPoints.length > simulationLengthRef.current) {
           setRestart(!restart);
         }
       }
@@ -103,7 +104,8 @@ export default function Plants() {
     }
 
     function initBlocks() {
-      for (let i = 0; i < particleCount; i++) {
+      plants = []; // Clear existing plants
+      for (let i = 0; i < particleCountRef.current; i++) {
         const size = Math.random() * 20 + (10 * canvas.width) / 1920;
         const x = Math.random() * (canvas.width - size);
         const y = Math.random() + (canvas.height - size);
@@ -113,6 +115,19 @@ export default function Plants() {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Adjust particle count
+      const currentParticleCount = plants.length;
+      if (currentParticleCount < particleCountRef.current) {
+        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
+          const size = Math.random() * 20 + (10 * canvas.width) / 1920;
+          const x = Math.random() * (canvas.width - size);
+          const y = Math.random() + (canvas.height - size);
+          plants.push(new Plant(x, y, size));
+        }
+      } else if (currentParticleCount > particleCountRef.current) {
+        plants.splice(particleCountRef.current);
+      }
       plants.forEach((plant) => {
         plant.update();
         plant.draw();
@@ -130,7 +145,7 @@ export default function Plants() {
       canvas.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [restart, simulationSpeed, particleCount, simulationLength]);
+  }, [restart]);
 
   return (
     <>
@@ -156,8 +171,11 @@ export default function Plants() {
               type="range"
               min="1"
               max="50"
-              value={particleCount}
-              onChange={(e) => setParticleCount(Number(e.target.value))}
+              value={particleCountRef.current}
+              onChange={(e) => {
+                particleCountRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
@@ -173,8 +191,11 @@ export default function Plants() {
               type="range"
               min="1.0"
               max="1000.0"
-              value={simulationSpeed}
-              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              value={simulationSpeedRef.current}
+              onChange={(e) => {
+                simulationSpeedRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
@@ -190,8 +211,11 @@ export default function Plants() {
               type="range"
               min="1.0"
               max="200.0"
-              value={simulationLength}
-              onChange={(e) => setSimulationLength(Number(e.target.value))}
+              value={simulationLengthRef.current}
+              onChange={(e) => {
+                simulationLengthRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>

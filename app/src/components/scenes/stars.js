@@ -1,11 +1,12 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../themes/themes";
 
 export default function Stars() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
-  const [particleCount, setParticleCount] = React.useState(120);
-  const [simulationSpeed, setSimulationSpeed] = React.useState(100);
+  const [particleCount, setParticleCount] = useState(120);
+  const simulationSpeedRef = useRef(100);
+  const [, setRender] = useState(0);
   const mouseClickRef = useRef(false);
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
@@ -76,7 +77,7 @@ export default function Stars() {
       }
 
       update() {
-        if (Math.random() * 1000 > simulationSpeed) return; // Throttle the update
+        if (Math.random() * 1000 > simulationSpeedRef.current) return; // Throttle the update
         const dx = Math.random() * 0.2 - 0.1;
         const dy = Math.random() * 0.2 - 0.1;
         const mouseDx = mousePosRef.current.x - this.x;
@@ -91,11 +92,11 @@ export default function Stars() {
           this.x += dx;
           this.y += dy;
           const angle = Math.atan2(mouseDy, mouseDx);
-          this.x += Math.cos(angle) * 0.1 * (simulationSpeed / 100);
-          this.y += Math.sin(angle) * 0.1 * (simulationSpeed / 100);
+          this.x += Math.cos(angle) * 0.1 * (simulationSpeedRef.current / 100);
+          this.y += Math.sin(angle) * 0.1 * (simulationSpeedRef.current / 100);
         } else {
-          this.x += dx * (simulationSpeed / 100);
-          this.y += dy * (simulationSpeed / 100);
+          this.x += dx * (simulationSpeedRef.current / 100);
+          this.y += dy * (simulationSpeedRef.current / 100);
         }
 
         if (Math.random() > twinkleChance && !this.isTwinkling) {
@@ -218,9 +219,11 @@ export default function Stars() {
           if (distance < mouseTriggerDistance && mouseClickRef.current) {
             const angle = Math.atan2(mouseDy, mouseDx);
             this.dx =
-              this.dx + Math.cos(angle) * 0.01 * (simulationSpeed / 100);
+              this.dx +
+              Math.cos(angle) * 0.01 * (simulationSpeedRef.current / 100);
             this.dy =
-              this.dy + Math.sin(angle) * 0.01 * (simulationSpeed / 100);
+              this.dy +
+              Math.sin(angle) * 0.01 * (simulationSpeedRef.current / 100);
           } else {
             if (
               Math.sqrt(this.dx ** 2 + this.dy ** 2) > this.startingMagnitude
@@ -229,8 +232,8 @@ export default function Stars() {
               this.dy = this.dy * 0.99;
             }
           }
-          this.x += (this.dx * simulationSpeed) / 100;
-          this.y += (this.dy * simulationSpeed) / 100;
+          this.x += this.dx;
+          this.y += this.dy;
 
           this.trailPositions.push({ x: this.x, y: this.y });
           this.trailColours.push(getCloseColour(defaultColours.accent));
@@ -298,18 +301,18 @@ export default function Stars() {
     initBlocks();
     animate();
 
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
-    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("pointermove", handleMouseMove);
+    canvas.addEventListener("pointerup", handleMouseUp);
+    canvas.addEventListener("pointerdown", handleMouseDown);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("mouseup", handleMouseUp);
-      canvas.removeEventListener("mousedown", handleMouseDown);
+      canvas.removeEventListener("pointermove", handleMouseMove);
+      canvas.removeEventListener("pointerup", handleMouseUp);
+      canvas.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [simulationSpeed, particleCount]);
+  }, [particleCount]);
 
   return (
     <>
@@ -352,8 +355,11 @@ export default function Stars() {
               type="range"
               min="1.0"
               max="200.0"
-              value={simulationSpeed}
-              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              value={simulationSpeedRef.current}
+              onChange={(e) => {
+                simulationSpeedRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1);
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
