@@ -5,9 +5,10 @@ export default function Rain() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
-  const [particleCount, setParticleCount] = useState(2000);
-  const [simulationSpeed, setSimulationSpeed] = useState(100);
-  const [mouseShieldRadius, setMouseShieldRadius] = useState(100);
+  const particleCountRef = useRef(2000);
+  const simulationSpeedRef = useRef(100);
+  const mouseShieldRadiusRef = useRef(100);
+  const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
     const element = document.getElementById("title");
@@ -25,7 +26,6 @@ export default function Rain() {
 
     const recalculateRect = () => {
       let rect = element.getBoundingClientRect();
-
       rect_padded = {
         left: rect.left - titleShieldRadius,
         right: rect.right + titleShieldRadius,
@@ -96,7 +96,7 @@ export default function Rain() {
           }
         }
 
-        if (distance < mouseShieldRadius && mouseClickRef.current) {
+        if (distance < mouseShieldRadiusRef.current && mouseClickRef.current) {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
@@ -109,8 +109,8 @@ export default function Rain() {
           }
         }
 
-        this.x += (this.vx * simulationSpeed) / 100;
-        this.y += (this.vy * simulationSpeed) / 100;
+        this.x += (this.vx * simulationSpeedRef.current) / 100;
+        this.y += (this.vy * simulationSpeedRef.current) / 100;
 
         if (this.y > canvas.height) {
           this.y = 0;
@@ -143,7 +143,7 @@ export default function Rain() {
 
     function initParticles() {
       particles = [];
-      for (let i = 0; i < particleCount; i++) {
+      for (let i = 0; i < particleCountRef.current; i++) {
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
         particles.push(new Particle(x, y));
@@ -152,6 +152,19 @@ export default function Rain() {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Adjust particle count
+      const currentParticleCount = particles.length;
+      if (currentParticleCount < particleCountRef.current) {
+        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
+          const x = Math.random() * canvas.width;
+          const y = Math.random() * canvas.height;
+          particles.push(new Particle(x, y));
+        }
+      } else if (currentParticleCount > particleCountRef.current) {
+        particles.splice(particleCountRef.current);
+      }
+
       particles.forEach((particle) => {
         particle.update();
         particle.draw();
@@ -174,7 +187,7 @@ export default function Rain() {
       canvas.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [particleCount, simulationSpeed, mouseShieldRadius]);
+  }, []);
 
   return (
     <>
@@ -200,8 +213,11 @@ export default function Rain() {
               type="range"
               min="100"
               max="10000"
-              value={particleCount}
-              onChange={(e) => setParticleCount(Number(e.target.value))}
+              value={particleCountRef.current}
+              onChange={(e) => {
+                particleCountRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
@@ -217,8 +233,11 @@ export default function Rain() {
               type="range"
               min="1.0"
               max="200.0"
-              value={simulationSpeed}
-              onChange={(e) => setSimulationSpeed(Number(e.target.value))}
+              value={simulationSpeedRef.current}
+              onChange={(e) => {
+                simulationSpeedRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
@@ -234,8 +253,11 @@ export default function Rain() {
               type="range"
               min="10.0"
               max="300.0"
-              value={mouseShieldRadius}
-              onChange={(e) => setMouseShieldRadius(Number(e.target.value))}
+              value={mouseShieldRadiusRef.current}
+              onChange={(e) => {
+                mouseShieldRadiusRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
               style={{ marginLeft: "0.5em" }}
             />
           </div>
