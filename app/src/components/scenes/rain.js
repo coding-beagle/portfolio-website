@@ -175,16 +175,16 @@ export default function Rain() {
     initParticles();
     animate();
 
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("pointermove", handleMouseMove);
+    canvas.addEventListener("pointerdown", handleMouseDown);
+    canvas.addEventListener("pointerup", handleMouseUp);
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      canvas.removeEventListener("mousedown", handleMouseDown);
-      canvas.removeEventListener("mouseup", handleMouseUp);
+      canvas.removeEventListener("pointermove", handleMouseMove);
+      canvas.removeEventListener("pointerdown", handleMouseDown);
+      canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
     };
   }, []);
