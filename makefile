@@ -10,7 +10,7 @@ install:
 	cd app && npm install
 
 build:
-	cd app && npm run build && cd - && git add . && git commit -m "AutoBuild" && git push origin main;
+	npm run build;
 
 deploy:
 	git fetch origin
@@ -18,6 +18,8 @@ deploy:
 		echo "Your branch is behind the remote branch."; \
 		git pull origin main; \
 		rm -rf /home/nteagvxe/public_html/*; \
+		npm install; \
+		make build; \
 		cp -r app/build/* /home/nteagvxe/public_html/; \
 		echo "Deployed successfully!"; \
 	fi

@@ -4,6 +4,7 @@ import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
 import Sun from "./scenes/plants";
 import Stars from "./scenes/stars";
+import Boids from "./scenes/boids";
 import { Drawer, Button } from "antd";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -18,6 +19,7 @@ const Scenes = {
   RAIN: 1,
   SUN: 2,
   STARS: 3,
+  BOIDS: 4,
 };
 
 export default function Title() {
@@ -64,6 +66,8 @@ export default function Title() {
         return <Sun />;
       case Scenes.STARS:
         return <Stars />;
+      case Scenes.BOIDS:
+        return <Boids />;
       default:
         return;
     }
