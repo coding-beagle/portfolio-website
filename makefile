@@ -7,7 +7,9 @@ clean:
 	rm -rf app/build
 
 install:
-	cd app && npm install
+	cd ./app; \
+	npm install; \
+	cd -; \
 
 build:
 	npm run build;
