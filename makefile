@@ -12,7 +12,7 @@ install:
 	cd -; \
 
 build:
-	cd .app/; \
+	cd ./app; \
 	npm run build; \
 	cd -; \
 
