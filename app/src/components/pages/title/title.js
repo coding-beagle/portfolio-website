@@ -135,7 +135,7 @@ export default function Title() {
             link="https://www.linkedin.com/in/nicholasp-teague/"
           />
           <IconHover icon={faYoutube} link="https://www.youtube.com/@ntprod" />
-          <IconHover icon={faNewspaper} link="/blog" openNewTab={false} />
+          {/* <IconHover icon={faNewspaper} link="/blog" openNewTab={false} /> */}
         </div>
       </div>
     </>
