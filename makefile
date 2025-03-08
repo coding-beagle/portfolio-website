@@ -12,7 +12,9 @@ install:
 	cd -; \
 
 build:
-	npm run build;
+	cd .app/; \
+	npm run build; \
+	cd -; \
 
 deploy:
 	git fetch origin
