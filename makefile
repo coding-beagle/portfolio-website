@@ -18,7 +18,7 @@ deploy:
 		echo "Your branch is behind the remote branch."; \
 		git pull origin main; \
 		rm -rf /home/nteagvxe/public_html/*; \
-		npm install; \
+		make install; \
 		make build; \
 		cp -r app/build/* /home/nteagvxe/public_html/; \
 		echo "Deployed successfully!"; \
