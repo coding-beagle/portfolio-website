@@ -1,14 +1,14 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import defaultColours from "../themes/themes";
+import defaultColours from "../../../themes/themes";
 import { useState } from "react";
 
-export default function IconHover({ icon, link }) {
+export default function IconHover({ icon, link, openNewTab = true }) {
   const [isHover, setIsHover] = useState(false);
 
   return (
     <a
       href={link}
-      target="_blank"
+      target={openNewTab ? "_blank" : "_self"}
       rel="noopener noreferrer"
       style={{
         color: isHover ? defaultColours.secondary : defaultColours.accent,

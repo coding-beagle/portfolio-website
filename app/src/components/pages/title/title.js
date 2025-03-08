@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
-import defaultColours from "../themes/themes";
+import defaultColours from "../../../themes/themes";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
 import Sun from "./scenes/plants";
 import Stars from "./scenes/stars";
 import Boids from "./scenes/boids";
-import { Drawer, Button } from "antd";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faGithub,
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
+import { faNewspaper } from "@fortawesome/free-solid-svg-icons";
 import IconHover from "./iconHover";
 
 const Scenes = {
@@ -136,6 +135,7 @@ export default function Title() {
             link="https://www.linkedin.com/in/nicholasp-teague/"
           />
           <IconHover icon={faYoutube} link="https://www.youtube.com/@ntprod" />
+          <IconHover icon={faNewspaper} link="/blog" openNewTab={false} />
         </div>
       </div>
     </>

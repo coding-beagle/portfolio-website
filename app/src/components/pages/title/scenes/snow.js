@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../themes/themes";
+import defaultColours from "../../../../themes/themes";
 
 export default function Snow() {
   const canvasRef = useRef(null);
@@ -9,29 +9,29 @@ export default function Snow() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const element = document.getElementById("title");
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
+    // const element = document.getElementById("title");
+    // let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
+    // let elementCenterX = 0;
+    // let elementCenterY = 0;
     const titleShieldRadius = 30;
 
-    const recalculateRect = () => {
-      let rect = element.getBoundingClientRect();
+    // const recalculateRect = () => {
+    //   let rect = element.getBoundingClientRect();
 
-      rect_padded = {
-        left: rect.left - titleShieldRadius,
-        right: rect.right + titleShieldRadius,
-        top: rect.top - titleShieldRadius,
-        bottom: rect.bottom + titleShieldRadius,
-      };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
-    };
+    //   rect_padded = {
+    //     left: rect.left - titleShieldRadius,
+    //     right: rect.right + titleShieldRadius,
+    //     top: rect.top - titleShieldRadius,
+    //     bottom: rect.bottom + titleShieldRadius,
+    //   };
+    //   elementCenterX = rect.left + rect.width / 2;
+    //   elementCenterY = rect.top + rect.height / 2;
+    // };
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      recalculateRect();
+      // recalculateRect();
     };
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
@@ -42,21 +42,21 @@ export default function Snow() {
     const maxSpeed = 1;
     let animationFrameId;
 
-    const getMousePos = (canvas, evt) => {
-      let rect = canvas.getBoundingClientRect();
-      return {
-        x: evt.clientX - rect.left,
-        y: evt.clientY - rect.top,
-      };
-    };
+    // const getMousePos = (canvas, evt) => {
+    //   let rect = canvas.getBoundingClientRect();
+    //   return {
+    //     x: evt.clientX - rect.left,
+    //     y: evt.clientY - rect.top,
+    //   };
+    // };
 
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
+    // const inElement = (rect, x, y) => {
+    //   return (
+    //     x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    //   );
+    // };
 
-    recalculateRect();
+    // recalculateRect();
 
     class Particle {
       constructor(x, y) {

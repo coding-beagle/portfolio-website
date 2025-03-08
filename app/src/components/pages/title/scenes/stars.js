@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../themes/themes";
+import defaultColours from "../../../../themes/themes";
 
 export default function Stars() {
   const canvasRef = useRef(null);
