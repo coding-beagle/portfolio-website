@@ -11,10 +11,6 @@ export default function Boids() {
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
-    const element = document.getElementById("title");
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
     let animationFrameId;
 
     let particles = [];
@@ -35,7 +31,7 @@ export default function Boids() {
         this.dx = Math.random() * 2 - 1;
         this.dy = Math.random() * 2 - 1;
         this.size = 10;
-        this.colour = defaultColours.secondaryAccent;
+        this.colour = defaultColours.accent;
       }
 
       draw() {
@@ -58,8 +54,8 @@ export default function Boids() {
           this.dy = this.dy * 0.95;
         }
 
-        this.x += this.dx;
-        this.y += this.dy;
+        this.x += this.dx * (simulationSpeedRef.current / 100);
+        this.y += this.dy * (simulationSpeedRef.current / 100);
       }
     }
 
@@ -81,19 +77,19 @@ export default function Boids() {
         ctx.arc(this.x, this.y, this.size, 0, 2 * Math.PI);
         ctx.fill();
       }
-      nearOtherBirds() {
+
+      insideOtherBird() {
         const distance = 50;
-        let count = 0;
-        this.particles.forEach((particle) => {
+        for (let particle of this.particles) {
           if (particle !== this) {
             const dx = this.x - particle.x;
             const dy = this.y - particle.y;
             const dist = Math.sqrt(dx ** 2 + dy ** 2);
             if (dist < distance) {
-              return { dx: particle.x, dy: particle.y };
+              return { dx: dx, dy: dy };
             }
           }
-        });
+        }
         return false;
       }
 
@@ -110,17 +106,18 @@ export default function Boids() {
           this.dy = this.dy * 0.99;
         }
 
-        const nearBirds = this.nearOtherBirds();
+        const nearBirds = this.insideOtherBird();
         if (nearBirds) {
+          console.log("near bird innit");
           const nearBirdDirection = Math.atan2(nearBirds.dy, nearBirds.dx);
           const currentDirection = Math.atan2(this.dy, this.dx);
           const newDirection = (nearBirdDirection + currentDirection) / 2;
-          this.dx = Math.cos(newDirection);
-          this.dy = Math.sin(newDirection);
+          this.dx = this.dx + Math.cos(newDirection) * 0.1;
+          this.dy = this.dy + Math.sin(newDirection) * 0.1;
         }
 
-        this.x += this.dx;
-        this.y += this.dy;
+        this.x += this.dx * (simulationSpeedRef.current / 100);
+        this.y += this.dy * (simulationSpeedRef.current / 100);
       }
     }
 
