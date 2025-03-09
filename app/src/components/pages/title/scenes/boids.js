@@ -6,7 +6,7 @@ export default function Boids() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const particleCountRef = useRef(10);
-  const simulationSpeedRef = useRef(100);
+  const simulationSpeedRef = useRef(30);
   const speedLim = 5;
   const [, setRender] = useState(0); // Dummy state to force re-render
 
