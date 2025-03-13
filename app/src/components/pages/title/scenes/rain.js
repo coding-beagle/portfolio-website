@@ -176,6 +176,7 @@ export default function Rain() {
     animate();
 
     canvas.addEventListener("pointermove", handleMouseMove);
+    canvas.addEventListener("touchmove", handleMouseMove);
     canvas.addEventListener("pointerdown", handleMouseDown);
     canvas.addEventListener("pointerup", handleMouseUp);
 
@@ -183,6 +184,7 @@ export default function Rain() {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
       canvas.removeEventListener("pointermove", handleMouseMove);
+      canvas.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);
       canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
