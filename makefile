@@ -8,6 +8,11 @@ clean:
 
 install:
 	cd ./app; \
+	npm install --frozen-lockfile; \
+	cd -; \
+
+lock:
+	cd ./app; \
 	npm install; \
 	cd -; \
 
