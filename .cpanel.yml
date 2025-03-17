@@ -5,4 +5,4 @@ deployment:
     - export DEPLOYPATH=/home/nteagvxe/public_html/
     - echo "Deploying to $DEPLOYPATH"
     - cd $REPOPATH
-    - make deploy
+    - make deploy_manual

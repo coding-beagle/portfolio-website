@@ -21,6 +21,13 @@ build:
 	npm run build; \
 	cd -; \
 
+deploy_manual:
+	make install; \
+	make build; \
+	rm -rf /home/nteagvxe/public_html/*; \
+	cp -r app/build/* /home/nteagvxe/public_html/; \
+	echo "Deployed successfully!"; \
+
 deploy:
 	git fetch origin
 	if ! git diff --quiet origin/main; then \
