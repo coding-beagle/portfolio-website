@@ -41,6 +41,9 @@ export default function Conway() {
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      try {
+        gridManagerRef.current.draw();
+      } catch (e) {}
     };
 
     const checkMobile = () => {
