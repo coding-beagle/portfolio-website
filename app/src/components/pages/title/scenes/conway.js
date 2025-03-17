@@ -64,7 +64,7 @@ export default function Conway() {
       return { x: Math.floor(gridX), y: Math.floor(gridY) };
     };
 
-    if (checkMobile) {
+    if (checkMobile()) {
       numGridColumns.current = 70;
       numGridRows.current = 40;
     }
