@@ -232,8 +232,8 @@ export default function Stars() {
               this.dy = this.dy * 0.99;
             }
           }
-          this.x += this.dx;
-          this.y += this.dy;
+          this.x += this.dx * (simulationSpeedRef.current / 100);
+          this.y += this.dy * (simulationSpeedRef.current / 100);
 
           this.trailPositions.push({ x: this.x, y: this.y });
           this.trailColours.push(getCloseColour(defaultColours.accent));
@@ -353,8 +353,8 @@ export default function Stars() {
             Simulation Speed:
             <input
               type="range"
-              min="1.0"
-              max="200.0"
+              min="75.0"
+              max="150.0"
               value={simulationSpeedRef.current}
               onChange={(e) => {
                 simulationSpeedRef.current = Number(e.target.value);

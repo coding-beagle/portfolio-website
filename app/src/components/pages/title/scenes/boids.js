@@ -108,7 +108,6 @@ export default function Boids() {
 
         const nearBirds = this.insideOtherBird();
         if (nearBirds) {
-          console.log("near bird innit");
           const nearBirdDirection = Math.atan2(nearBirds.dy, nearBirds.dx);
           const currentDirection = Math.atan2(this.dy, this.dx);
           const newDirection = (nearBirdDirection + currentDirection) / 2;

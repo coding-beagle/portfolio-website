@@ -10,8 +10,8 @@ import {
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
-import { faNewspaper } from "@fortawesome/free-solid-svg-icons";
 import IconHover from "./iconHover";
+import Conway from "./scenes/conway";
 
 const Scenes = {
   SNOW: 0,
@@ -19,6 +19,7 @@ const Scenes = {
   SUN: 2,
   STARS: 3,
   BOIDS: 4,
+  CONWAY: 5,
 };
 
 export default function Title() {
@@ -67,6 +68,8 @@ export default function Title() {
         return <Stars />;
       case Scenes.BOIDS:
         return <Boids />;
+      case Scenes.CONWAY:
+        return <Conway />;
       default:
         return;
     }
