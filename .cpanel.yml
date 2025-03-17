@@ -4,5 +4,4 @@ deployment:
     - export REPOPATH=/home/nteagvxe/repositories/portfolio-website
     - export DEPLOYPATH=/home/nteagvxe/public_html/
     - echo "Deploying to $DEPLOYPATH"
-    - cd $REPOPATH
-    - make deploy_manual
+    - cd $REPOPATH && make deploy_manual

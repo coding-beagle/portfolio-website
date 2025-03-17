@@ -42,6 +42,11 @@ export default function Conway() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
+
+    const checkMobile = () => {
+      return canvas.width < canvas.height;
+    };
+
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
@@ -55,6 +60,11 @@ export default function Conway() {
 
       return { x: Math.floor(gridX), y: Math.floor(gridY) };
     };
+
+    if (checkMobile) {
+      numGridColumns.current = 30;
+      numGridRows.current = 70;
+    }
 
     // takes a constructor of an array of particles and renders them
     class Grid {
