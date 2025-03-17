@@ -62,8 +62,8 @@ export default function Conway() {
     };
 
     if (checkMobile) {
-      numGridColumns.current = 30;
-      numGridRows.current = 70;
+      numGridColumns.current = 70;
+      numGridRows.current = 40;
     }
 
     // takes a constructor of an array of particles and renders them
