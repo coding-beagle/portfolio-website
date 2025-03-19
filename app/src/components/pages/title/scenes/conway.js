@@ -99,9 +99,6 @@ export default function Conway() {
       changeAlivePosition(gridX, gridY, aliveness) {
         gridRef.current[gridY][gridX].isAlive = aliveness;
         this.draw();
-        setTimeout(() => {
-          isDebouncing = true;
-        }, 30);
       }
 
       update(skipCheck = false) {
@@ -151,14 +148,10 @@ export default function Conway() {
             numGridColumns.current
           );
 
-          if (isDebouncing) {
-            if (rightClickRef.current) {
-              this.changeAlivePosition(mouseClickPos.x, mouseClickPos.y, false);
-            } else {
-              this.changeAlivePosition(mouseClickPos.x, mouseClickPos.y, true);
-            }
-
-            isDebouncing = false;
+          if (rightClickRef.current) {
+            this.changeAlivePosition(mouseClickPos.x, mouseClickPos.y, false);
+          } else {
+            this.changeAlivePosition(mouseClickPos.x, mouseClickPos.y, true);
           }
         }
 
