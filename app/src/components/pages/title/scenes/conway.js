@@ -17,7 +17,7 @@ export default function Conway() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
-  const simulationSpeedRef = useRef(100);
+  const simulationSpeedRef = useRef(175);
   const numGridColumns = useRef(30);
   const numGridRows = useRef(70);
   const gridRef = useRef(null);
