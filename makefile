@@ -23,10 +23,7 @@ build:
 
 deploy_manual:
 	make install; \
-	set -a; \
-	. ./app/.env; \
-	set +a; \
-	rm -rf $$BUILD_PATH \
+	rm -rf /home/nteagvxe/public_html/* \
 	make build; \
 	echo "Deployed successfully!"; \
 
