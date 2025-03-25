@@ -44,6 +44,7 @@ export default function Rain() {
     };
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("popstate", recalculateRect);
     const ctx = canvas.getContext("2d");
 
     const handleMouseMove = (event) => {
