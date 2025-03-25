@@ -120,7 +120,7 @@ export default function Title(text = "Nicholas Teague") {
           }}
           id="title"
         >
-          {text.text === "" ? "Nicholas Teague" : text.text}
+          {text.text === "" ? "Nicholas Teague" : text.text.replace("%20", " ")}
         </header>
         <div
           style={{
