@@ -33,11 +33,9 @@ deploy:
 		echo "Your branch is behind the remote branch."; \
 		git pull origin main; \
 		make install; \
+		rm -rf /home/nteagvxe/public_html/*; \
 		make build 2>&1 | tee /home/nteagvxe/deploy.log; \
 		if [ $$? -eq 0 ]; then \
-			rm -rf /home/nteagvxe/public_html/*; \
-			cp -r ./app/build/* /home/nteagvxe/public_html/; \
-			rm -rf ./app/build; \
 			echo "Deployed successfully!"; \
 		else \
 			echo "Deploy failed, check deploy.log for details"; \
