@@ -23,6 +23,10 @@ build:
 
 deploy_manual:
 	make install; \
+	set -a; \
+	. ./app/.env; \
+	set +a; \
+	rm -rf $$BUILD_PATH \
 	make build; \
 	echo "Deployed successfully!"; \
 
