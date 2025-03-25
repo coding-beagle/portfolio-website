@@ -23,7 +23,7 @@ build:
 
 deploy_manual:
 	make install; \
-	rm -rf /home/nteagvxe/public_html/* \
+	rm -rf /home/nteagvxe/public_html/*; \
 	make build; \
 	echo "Deployed successfully!"; \
 
