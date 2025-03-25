@@ -24,9 +24,6 @@ build:
 deploy_manual:
 	make install; \
 	make build; \
-	rm -rf /home/nteagvxe/public_html/*; \
-	cp -r ./app/build/* /home/nteagvxe/public_html/; \
-	rm -rf ./app/build; \
 	echo "Deployed successfully!"; \
 
 deploy:
