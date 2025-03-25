@@ -1,33 +1,38 @@
+import React from "react";
+import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
 import Title from "./components/pages/title/title";
-import Blog from "./components/pages/blog/blog";
 import defaultColours from "./themes/themes";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+
+// Wrapper component to handle location and pass path
+function AppWrapper() {
+  const location = useLocation();
+
+  // Remove the leading '/' from the pathname
+  const path = location.pathname.substring(1);
+
+  return (
+    <div
+      className="App"
+      style={{
+        backgroundColor: defaultColours.primary,
+        color: defaultColours.accent,
+        fontFamily: defaultColours.font,
+        height: "100vh",
+        margin: 0,
+      }}
+    >
+      <Title text={path} />
+    </div>
+  );
+}
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
-        <Route
-          path="/"
-          element={
-            <div
-              className="App"
-              style={{
-                backgroundColor: defaultColours.primary,
-                color: defaultColours.accent,
-                fontFamily: defaultColours.font,
-                height: "100vh",
-                margin: 0,
-              }}
-            >
-              <Title />
-            </div>
-          }
-        />
-        <Route path="/blog" element={<Blog />} />
+        <Route path="*" element={<AppWrapper />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

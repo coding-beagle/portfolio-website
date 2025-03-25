@@ -22,7 +22,7 @@ const Scenes = {
   CONWAY: 5,
 };
 
-export default function Title() {
+export default function Title(text = "Nicholas Teague") {
   const [isHover, setIsHover] = useState(false);
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
@@ -80,6 +80,8 @@ export default function Title() {
     return `rotate(${rotation}deg)`;
   };
 
+  console.log(text);
+
   return (
     <>
       <div
@@ -118,7 +120,7 @@ export default function Title() {
           }}
           id="title"
         >
-          Nicholas Teague
+          {text.text === "" ? "Nicholas Teague" : text.text}
         </header>
         <div
           style={{
