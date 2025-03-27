@@ -117,12 +117,13 @@ export default function Title(text = "Nicholas Teague") {
             userSelect: "none",
             msUserSelect: "none",
             transform: clicked ? `scale(1.1) ${getRandomShake()}` : "scale(1)",
+            whiteSpace: "pre-wrap", // Allows handling of newlines
           }}
           id="title"
         >
           {text.text === ""
             ? "Nicholas Teague"
-            : text.text.replaceAll("%20", " ")}
+            : decodeURIComponent(text.text).replace(/%0A/g, "\n")}
         </header>
         <div
           style={{
