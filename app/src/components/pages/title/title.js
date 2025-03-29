@@ -12,6 +12,7 @@ import {
 } from "@fortawesome/free-brands-svg-icons";
 import IconHover from "./iconHover";
 import Conway from "./scenes/conway";
+import WindTunnel from "./scenes/windtunnel";
 
 const Scenes = {
   SNOW: 0,
@@ -20,6 +21,7 @@ const Scenes = {
   STARS: 3,
   BOIDS: 4,
   CONWAY: 5,
+  WINDTUNNEL: 6,
 };
 
 export default function Title(text = "Nicholas Teague") {
@@ -70,6 +72,8 @@ export default function Title(text = "Nicholas Teague") {
         return <Boids />;
       case Scenes.CONWAY:
         return <Conway />;
+      case Scenes.WINDTUNNEL:
+        return <WindTunnel />;
       default:
         return;
     }
@@ -98,9 +102,20 @@ export default function Title(text = "Nicholas Teague") {
         <header
           onMouseEnter={() => setIsHover(true)}
           onMouseLeave={() => setIsHover(false)}
-          onMouseDown={() => {
+          onMouseDown={(event) => {
+            if (event.button === 0) {
+              setClicked(true);
+              setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
+            }
+          }}
+          onContextMenu={(event) => {
+            event.preventDefault();
             setClicked(true);
-            setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
+            setCurrentScene(
+              currentScene - 1 < 0
+                ? Object.keys(Scenes).length - 1
+                : currentScene - 1
+            );
           }}
           style={{
             fontSize: "5vw",
@@ -126,6 +141,7 @@ export default function Title(text = "Nicholas Teague") {
             : decodeURIComponent(text.text).replace(/%0A/g, "\n")}
         </header>
         <div
+          id="linkIcons"
           style={{
             display: "flex",
             justifyContent: "center",
