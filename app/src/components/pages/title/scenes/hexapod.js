@@ -78,8 +78,8 @@ export default function Hexapod() {
 
     // --- Constants ---
     const COXA_LENGTH = 25;
-    const FEMUR_LENGTH = 45;
-    const TIBIA_LENGTH = 70;
+    const FEMUR_LENGTH = 35;
+    const TIBIA_LENGTH = 90;
     const BODY_LENGTH = 130;
     const BODY_WIDTH = 100;
     const GROUND_LEVEL_Z = -80; // Where the feet ideally rest
@@ -541,8 +541,8 @@ export default function Hexapod() {
           } else if (index === 3) {
             angle1 =
               gaitCycle > 180
-                ? (Math.PI * (gaitCycle / 2)) / 180
-                : (Math.PI * (0 - (gaitCycle + 360) / 2)) / 180;
+                ? (Math.PI * (-45 + gaitCycle / 2)) / 180
+                : (Math.PI * (-45 - (gaitCycle + 360) / 2)) / 180;
           } else if (index === 4) {
             angle1 =
               gaitCycle > 180
