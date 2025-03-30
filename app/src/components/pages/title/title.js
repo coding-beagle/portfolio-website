@@ -13,6 +13,7 @@ import {
 import IconHover from "./iconHover";
 import Conway from "./scenes/conway";
 import WindTunnel from "./scenes/windtunnel";
+import Hexapod from "./scenes/hexapod";
 
 const Scenes = {
   SNOW: 0,
@@ -22,6 +23,7 @@ const Scenes = {
   BOIDS: 4,
   CONWAY: 5,
   WINDTUNNEL: 6,
+  HEXAPOD: 7,
 };
 
 export default function Title(text = "Nicholas Teague") {
@@ -74,6 +76,8 @@ export default function Title(text = "Nicholas Teague") {
         return <Conway />;
       case Scenes.WINDTUNNEL:
         return <WindTunnel />;
+      case Scenes.HEXAPOD:
+        return <Hexapod />;
       default:
         return;
     }
