@@ -97,7 +97,7 @@ export default function WindTunnel() {
         this.color = defaultColours.accent;
       }
 
-      update() {
+      update(densityMap) {
         const dx = this.x - mousePosRef.current.x;
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -138,7 +138,22 @@ export default function WindTunnel() {
           }
         }
 
+        // Move towards areas of low particle density
+        const gridX = Math.floor(this.x / 10);
+        const gridY = Math.floor(this.y / 10);
+        const density = densityMap[gridY]?.[gridX] || 0;
+
+        if (density < 5) {
+          // Threshold for low density
+          const angle = Math.atan2(dy, dx);
+          this.vx += Math.cos(angle) * 0.1;
+          this.vy += Math.sin(angle) * 0.1;
+        }
+
         this.x += (this.vx * simulationSpeedRef.current) / 100;
+        if (this.vx > maxWindSpeed) {
+          this.vx *= 0.99;
+        }
         this.y +=
           ((this.vy + Math.random() - 0.5) * simulationSpeedRef.current) / 100;
 
@@ -157,6 +172,23 @@ export default function WindTunnel() {
         ctx.fill();
         ctx.closePath();
       }
+    }
+
+    function calculateDensityMap(particles) {
+      const densityMap = [];
+      const gridSize = 15;
+
+      particles.forEach((particle) => {
+        const gridX = Math.floor(particle.x / gridSize);
+        const gridY = Math.floor(particle.y / gridSize);
+
+        if (!densityMap[gridY]) densityMap[gridY] = [];
+        if (!densityMap[gridY][gridX]) densityMap[gridY][gridX] = 0;
+
+        densityMap[gridY][gridX]++;
+      });
+
+      return densityMap;
     }
 
     function initParticles() {
@@ -183,10 +215,13 @@ export default function WindTunnel() {
         particles.splice(particleCountRef.current);
       }
 
+      const densityMap = calculateDensityMap(particles);
+
       particles.forEach((particle) => {
-        particle.update();
+        particle.update(densityMap);
         particle.draw();
       });
+
       animationFrameId = requestAnimationFrame(animate);
     }
 
@@ -268,7 +303,7 @@ export default function WindTunnel() {
               marginBottom: "0.5em",
             }}
           >
-            Click Umbrella Radius:
+            Click Shield Radius:
             <input
               type="range"
               min="10.0"
