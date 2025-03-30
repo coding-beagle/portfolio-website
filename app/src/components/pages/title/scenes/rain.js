@@ -190,6 +190,7 @@ export default function Rain() {
       canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("popstate", recalculateRect);
+      particles = [];
     };
   }, []);
 

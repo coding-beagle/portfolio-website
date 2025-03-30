@@ -88,8 +88,6 @@ export default function Title(text = "Nicholas Teague") {
     return `rotate(${rotation}deg)`;
   };
 
-  console.log(text);
-
   return (
     <>
       <div

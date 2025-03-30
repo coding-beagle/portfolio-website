@@ -154,6 +154,7 @@ export default function Snow() {
       // Cleanup function to cancel the animation frame
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resizeCanvas);
+      particles = [];
     };
   }, []);
 

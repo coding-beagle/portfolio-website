@@ -143,11 +143,11 @@ export default function WindTunnel() {
         const gridY = Math.floor(this.y / 10);
         const density = densityMap[gridY]?.[gridX] || 0;
 
-        if (density < 5) {
+        if (density < 1) {
           // Threshold for low density
           const angle = Math.atan2(dy, dx);
-          this.vx += Math.cos(angle) * 0.1;
-          this.vy += Math.sin(angle) * 0.1;
+          this.vx += Math.cos(angle) * 0.05;
+          this.vy += Math.sin(angle) * 0.05;
         }
 
         this.x += (this.vx * simulationSpeedRef.current) / 100;
@@ -176,7 +176,7 @@ export default function WindTunnel() {
 
     function calculateDensityMap(particles) {
       const densityMap = [];
-      const gridSize = 15;
+      const gridSize = 30;
 
       particles.forEach((particle) => {
         const gridX = Math.floor(particle.x / gridSize);
@@ -241,6 +241,9 @@ export default function WindTunnel() {
       canvas.removeEventListener("pointerdown", handleMouseDown);
       canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
+
+      // Clear particles array to free memory
+      particles = [];
     };
   }, []);
 
