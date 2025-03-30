@@ -213,6 +213,12 @@ export default function Hexapod() {
         this.jointPositions[3] = { x: tibiaEndX, y: tibiaEndY, z: tibiaEndZ };
       }
 
+      setAngles(angle1, angle2, angle3) {
+        this.coxaAngle = angle1;
+        this.femurAngle = angle2;
+        this.tibiaAngle = angle3;
+      }
+
       // --- Inverse Kinematics (IK) ---
       /**
        * Calculates the required leg angles (coxa, femur, tibia) to reach a target
@@ -505,6 +511,7 @@ export default function Hexapod() {
       { x: 0, y: -BODY_WIDTH * 0.6, z: 0 }, // Mid Left
       { x: BODY_LENGTH * 0.4, y: -BODY_WIDTH * 0.5, z: 0 }, // Front Left
     ];
+
     const legAngleOffsets = [
       // Angle relative to body's +X axis (forward)
       -Math.PI / 3, // Front Right (-60 deg)
@@ -517,16 +524,53 @@ export default function Hexapod() {
 
     const legs = [];
 
+    let gaitCycle = 0;
+
     function animate() {
       if (bodies.length > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // hahah dont worry about it
+        legs.forEach((leg, index) => {
+          let angle1;
+          if (index === 1 || index === 2 || index === 0) {
+            angle1 =
+              gaitCycle < 180
+                ? (Math.PI * (45 + gaitCycle / 2)) / 180
+                : (Math.PI * (45 - (gaitCycle + 360) / 2)) / 180;
+          } else if (index === 3) {
+            angle1 =
+              gaitCycle > 180
+                ? (Math.PI * (gaitCycle / 2)) / 180
+                : (Math.PI * (0 - (gaitCycle + 360) / 2)) / 180;
+          } else if (index === 4) {
+            angle1 =
+              gaitCycle > 180
+                ? (Math.PI * (315 + gaitCycle / 2)) / 180
+                : (Math.PI * (315 - (gaitCycle + 360) / 2)) / 180;
+          } else {
+            angle1 =
+              gaitCycle > 180
+                ? (Math.PI * (315 + gaitCycle / 2)) / 180
+                : (Math.PI * (315 - (gaitCycle + 360) / 2)) / 180;
+          }
+
+          const angle2 = (Math.PI * 40) / 180;
+          const angle3 = (Math.PI * -100) / 180;
+
+          leg.setAngles(angle1, angle2, angle3);
+
+          leg.calculateFK();
+        });
+
         bodies[0].update();
         bodies[0].draw();
         legs.forEach((leg) => {
-          leg.updateJointPositions(bodies[0].position);
           leg.draw(ctx, convert3DtoIsometric);
         });
+
+        gaitCycle += 1;
+        gaitCycle %= 360;
 
         animationFrameId = requestAnimationFrame(animate);
       }
