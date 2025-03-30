@@ -137,7 +137,7 @@ export default function Title(text = "Nicholas Teague") {
           id="title"
         >
           {text.text === ""
-            ? "Nicholas Teague"
+            ? "NTeague"
             : decodeURIComponent(text.text).replace(/%0A/g, "\n")}
         </header>
         <div
