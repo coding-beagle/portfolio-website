@@ -60,47 +60,35 @@ export default function Hexapod() {
       return {
         x: point.x * cosA - point.y * sinA,
         y: point.x * sinA + point.y * cosA,
-        z: point.z, // Z coordinate doesn't change when rotating around Z axis
+        z: point.z,
       };
     };
 
-    // --- Body Class ---
     class Body {
       constructor(x, y, z, width = 50, length = 80, height = 30) {
         this.position = { x: x, y: y, z: z }; // Body's center in world 3D space
         this.angle = 0; // Current rotation angle around Z axis
 
-        // Define LOCAL vertices relative to the body's center {0,0,0}
         const w2 = width / 2;
         const l2 = length / 2;
         const h2 = height / 2;
         this.localVertices = [
           { x: -w2, y: -l2, z: -h2 }, // 0: bottom-left-back
+          { x: -2 * w2, y: -6, z: -h2 }, // left middle?
           { x: w2, y: -l2, z: -h2 }, // 1: bottom-right-back
+          { x: 2 * w2, y: 6, z: -h2 }, // right middle?
           { x: w2, y: l2, z: -h2 }, // 2: bottom-right-front
           { x: -w2, y: l2, z: -h2 }, // 3: bottom-left-front
-          { x: -w2, y: -l2, z: h2 }, // 4: top-left-back
-          { x: w2, y: -l2, z: h2 }, // 5: top-right-back
-          { x: w2, y: l2, z: h2 }, // 6: top-right-front
-          { x: -w2, y: l2, z: h2 }, // 7: top-left-front
         ];
 
-        // Define edges using pairs of vertex indices
         this.edges = [
           [0, 1],
-          [1, 2],
-          [2, 3],
-          [3, 0], // Bottom face
-          [4, 5],
-          [5, 6],
-          [6, 7],
-          [7, 4], // Top face
-          [0, 4],
           [1, 5],
-          [2, 6],
-          [3, 7], // Vertical edges
+          [5, 4],
+          [4, 3],
+          [3, 2],
+          [2, 0],
         ];
-        // Store projected center for angle calculation
         this.projectedCenter = convert2DtoIsometric(this.position);
       }
 
@@ -109,32 +97,30 @@ export default function Hexapod() {
         this.projectedCenter = convert2DtoIsometric(this.position); // Recalculate in case position changes
         const dx = targetMouseX - this.projectedCenter[0];
         const dy = targetMouseY - this.projectedCenter[1];
-        // Calculate angle. Might need adjustment depending on base orientation.
-        // atan2 gives angle relative to positive X axis in screen space.
-        // Add Math.PI / 2 because atan2=0 is right, but maybe your model's "front" (e.g. +Y) points up on screen initially. Adjust as needed!
-        this.angle = Math.atan2(dy, dx); //+ Math.PI / 2; // Adjust this offset if needed
+
+        // const magnitudeDiff = Math.sqrt(dx ** 2 + dy ** 2);
+
+        this.position.x += dx * 0.01;
+        this.position.y += dy * 0.01;
+
+        this.angle = Math.atan2(dy, dx) + Math.PI / 3;
       }
 
       draw() {
         const finalProjectedVertices = [];
 
-        // 1. Rotate local vertices, translate to world, project to screen
         this.localVertices.forEach((vertex) => {
-          // Rotate around local Z axis
           const rotatedVertex = rotatePointZ(vertex, this.angle);
-          // Translate to world position
           const worldVertex = {
             x: rotatedVertex.x + this.position.x,
             y: rotatedVertex.y + this.position.y,
             z: rotatedVertex.z + this.position.z,
           };
-          // Project to screen
           finalProjectedVertices.push(convert2DtoIsometric(worldVertex));
         });
 
-        // 2. Draw the edges
         ctx.beginPath();
-        ctx.strokeStyle = "#FFF"; // Example color: white
+        ctx.strokeStyle = defaultColours.accent;
         this.edges.forEach((edgeIndices) => {
           const startPoint = finalProjectedVertices[edgeIndices[0]];
           const endPoint = finalProjectedVertices[edgeIndices[1]];
@@ -157,9 +143,9 @@ export default function Hexapod() {
     }
 
     const init = () => {
-      bodyRefs.current.push(
-        new Body(Math.random() * canvas.width, Math.random() * canvas.height, 0)
-      );
+      if (bodyRefs.current.length === 0) {
+        bodyRefs.current.push(new Body(100, 100, 0));
+      }
     };
 
     init();
