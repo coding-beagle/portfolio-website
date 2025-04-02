@@ -227,105 +227,120 @@ export default function Hexapod() {
        * @returns {boolean} - True if the target is reachable and angles were updated, false otherwise.
        */
       solveIK(targetWorldPos) {
-        const bodyPos = this.body.position;
-        const bodyAngle = this.body.angle;
+        // 1. targetWorldPos is assumed to be the target position relative
+        //    to the leg's mounting point on the robot's body.
 
-        // 1. Calculate World Mount Point (redundant, could use this.jointPositions[0] if FK is up-to-date)
-        const rotatedMountX =
-          this.mountOffset.x * Math.cos(bodyAngle) -
-          this.mountOffset.y * Math.sin(bodyAngle);
-        const rotatedMountY =
-          this.mountOffset.x * Math.sin(bodyAngle) +
-          this.mountOffset.y * Math.cos(bodyAngle);
-        const worldMountX = bodyPos.x + rotatedMountX;
-        const worldMountY = bodyPos.y + rotatedMountY;
-        const worldMountZ = bodyPos.z + this.mountOffset.z;
-        const worldMountPoint = {
-          x: worldMountX,
-          y: worldMountY,
-          z: worldMountZ,
-        };
-
-        // 2. Calculate Target Vector relative to World Mount Point
+        // 2. Create a working copy of the target vector relative to the mount point.
         const targetVectorWorld = {
-          x: targetWorldPos.x - worldMountPoint.x,
-          y: targetWorldPos.y - worldMountPoint.y,
-          z: targetWorldPos.z - worldMountPoint.z,
+          x: targetWorldPos.x,
+          y: targetWorldPos.y,
+          z: targetWorldPos.z,
         };
 
-        // 3. Transform Target Vector into Leg's Base Coordinate System (Undo Body Rotation + Offset)
-        // Angle to rotate target vector *back* to align with leg's base X-axis
-        const inverseBaseAngle = -(bodyAngle + this.bodyAngleOffset);
-        const cosInv = Math.cos(inverseBaseAngle);
-        const sinInv = Math.sin(inverseBaseAngle);
+        // 3. Transform Target Vector into the Leg's Base Coordinate System.
+        // The leg's base frame (where coxa angle 0 points along its X-axis)
+        // is rotated by 'this.bodyAngleOffset' around Z relative to the body/world frame.
+        // To get the target's coordinates *in the leg's frame*, we need to rotate
+        // the targetVectorWorld by the *negative* of this angle.
+        // Rotation matrix for angle -theta around Z:
+        // | cos(-theta)  -sin(-theta)  0 |   | cos(theta)   sin(theta)  0 |
+        // | sin(-theta)   cos(-theta)  0 | = |-sin(theta)   cos(theta)  0 |
+        // |      0            0       1 |   |      0            0       1 |
+        // x_leg = x_world * cos(offset) + y_world * sin(offset)
+        // y_leg = x_world * -sin(offset) + y_world * cos(offset)
+        // z_leg = z_world
 
-        // Target coordinates relative to mount point, as seen from leg's base orientation
+        const cosOffset = Math.cos(this.bodyAngleOffset);
+        const sinOffset = Math.sin(this.bodyAngleOffset);
+
         const targetLegX =
-          targetVectorWorld.x * cosInv - targetVectorWorld.y * sinInv;
+          targetVectorWorld.x * cosOffset + targetVectorWorld.y * sinOffset;
         const targetLegY =
-          targetVectorWorld.x * sinInv + targetVectorWorld.y * cosInv;
-        const targetLegZ = targetVectorWorld.z; // Z is unchanged by XY rotation
+          -targetVectorWorld.x * sinOffset + targetVectorWorld.y * cosOffset;
+        const targetLegZ = targetVectorWorld.z; // Z remains unchanged by rotation around Z
+
+        // --- Now proceed with IK using coordinates in the leg's frame ---
 
         // 4. Calculate Coxa Angle
-        // Angle needed in XY plane to point the coxa towards the target's XY projection
+        // This is the angle in the leg's XY plane needed to point the coxa
+        // towards the target's projection in that plane.
         const newCoxaAngle = Math.atan2(targetLegY, targetLegX);
 
         // 5. Prepare for 2D IK in the Leg's Vertical Plane
-        // Target coordinates relative to the *Coxa End Joint*
+        // This plane is now aligned with the rotated coxa.
+        // Calculate target coordinates relative to the *Coxa End Joint* (where the femur connects).
+
+        // horizontalDist is the length of the projection in the leg's XY plane.
         const horizontalDist = Math.sqrt(
           targetLegX * targetLegX + targetLegY * targetLegY
         );
-        // D_x: Horizontal distance in the vertical plane (along coxa direction) from coxa joint to target
-        const D_x = horizontalDist - Leg.COXA_LENGTH;
-        // D_z: Vertical distance from coxa joint to target
-        const D_z = targetLegZ; // Z relative to coxa joint (assumed at same Z as mount)
 
-        // 6. Perform 2D IK for Femur and Tibia
-        const L1 = Leg.FEMUR_LENGTH;
-        const L2 = Leg.TIBIA_LENGTH;
-        const distSq = D_x * D_x + D_z * D_z; // Squared distance from coxa joint to target
-        const dist = Math.sqrt(distSq);
+        // D_x: Horizontal distance *in the vertical plane along the coxa's direction*
+        //      from the femur joint (coxa end) to the target.
+        const D_x = horizontalDist - Leg.COXA_LENGTH;
+
+        // D_z: Vertical distance from the femur joint (coxa end) to the target.
+        //      We assume the coxa joint is at the same Z level as the mount point.
+        const D_z = targetLegZ;
+
+        // 6. Perform 2D IK for Femur and Tibia using D_x and D_z
+        const L1 = Leg.FEMUR_LENGTH; // Femur length
+        const L2 = Leg.TIBIA_LENGTH; // Tibia length
+        const distSq = D_x * D_x + D_z * D_z; // Squared distance from femur joint to target
+        const dist = Math.sqrt(distSq); // Direct distance from femur joint to target
 
         // --- Reachability Check ---
-        const epsilon = 1e-4; // Tolerance for float comparisons
+        const epsilon = 1e-4; // Tolerance for floating point comparisons
+        // Check if target is too far (straightened leg) or too close (folded leg)
+        // or if the horizontal distance requires stretching beyond max reach.
         if (
-          dist > L1 + L2 + epsilon ||
-          dist < Math.abs(L1 - L2) - epsilon ||
-          horizontalDist > Leg.COXA_LENGTH + L1 + L2 + epsilon
+          dist > L1 + L2 + epsilon || // Too far generally
+          dist < Math.abs(L1 - L2) - epsilon || // Too close generally (based on segment difference)
+          horizontalDist < Leg.COXA_LENGTH - (L1 + L2) - epsilon || // Cannot reach horizontally behind coxa base much
+          horizontalDist > Leg.COXA_LENGTH + L1 + L2 + epsilon // Cannot reach horizontally beyond max extension
         ) {
           // console.warn(`IK: Target unreachable. Dist: ${dist.toFixed(2)}, HorizDist: ${horizontalDist.toFixed(2)}`);
           return false; // Target is out of reach
         }
 
         // --- Calculate Angles using Law of Cosines ---
-        // Angle alpha2: Angle at the knee joint (between femur and tibia)
-        // Clamping needed due to potential floating point inaccuracies
+        // Find angles within the triangle formed by Femur(L1), Tibia(L2), and the direct distance (dist)
+
+        // Angle alpha2: Angle at the knee joint (between femur and tibia). Using Law of Cosines on side 'dist'.
+        // Clamp the argument due to potential floating point inaccuracies near -1 or 1.
         const cosAlpha2 = clamp(
           (distSq - L1 * L1 - L2 * L2) / (2 * L1 * L2),
           -1,
           1
         );
-        const alpha2 = Math.acos(cosAlpha2); // Angle between L1 and L2 extended straight (0 to PI)
+        const alpha2 = Math.acos(cosAlpha2); // Angle between L1 and L2 segments (0 to PI)
 
-        // Angle alpha1: Angle at the hip joint (between femur L1 and the direct line 'dist')
+        // Angle alpha1: Angle at the hip joint (between femur L1 and the direct line 'dist'). Using Law of Cosines on side L2.
         const cosAlpha1 = clamp(
           (distSq + L1 * L1 - L2 * L2) / (2 * dist * L1),
           -1,
           1
         );
-        let alpha1 = Math.acos(cosAlpha1);
+        let alpha1 = Math.acos(cosAlpha1); // Angle between L1 and 'dist' line (0 to PI)
 
-        // Angle beta: Angle of the direct line from coxa joint to target in the vertical plane
+        // Angle beta: Angle of the direct line 'dist' from the femur joint to the target, relative to the horizontal plane (along coxa direction).
         const beta = Math.atan2(D_z, D_x);
 
-        // --- Determine Femur and Tibia Angles based on Configuration (Elbow/Knee Up) ---
-        // For knee up, the femur angle relative to horizontal (beta) is reduced by alpha1
-        const newFemurAngle = beta - alpha1; // Angle relative to horizontal (positive = up)
+        // --- Determine Femur and Tibia Angles based on Configuration (assuming standard 'knee up/forward') ---
 
-        // Tibia angle relative to femur. alpha2 is angle between segments.
-        // If alpha2 is PI (straight), tibiaAngle should be 0.
-        // If alpha2 is < PI (bent), tibiaAngle should be negative for knee up.
-        const newTibiaAngle = -(Math.PI - alpha2); // Angle relative to femur
+        // newFemurAngle: Angle of the femur relative to the horizontal plane (along coxa direction).
+        // Positive angle means femur points upwards.
+        // It's the angle of the direct line (beta) minus the internal angle alpha1.
+        const newFemurAngle = beta - alpha1;
+
+        // newTibiaAngle: Angle of the tibia relative *to the femur*.
+        // If the leg were straight (alpha2 = PI), tibia angle would be 0 relative to femur.
+        // Since alpha2 is the angle *between* the segments (0 to PI), the servo angle
+        // for a standard knee configuration is typically defined such that straight is PI,
+        // and bending decreases the angle. Or, relative to femur, straight is 0.
+        // Here, alpha2 = PI means straight. We want the angle relative to the femur.
+        // For knee up/forward, a bend (alpha2 < PI) means a negative angle relative to the femur extension.
+        const newTibiaAngle = -(Math.PI - alpha2); // Relative angle: 0 when straight, negative when bent 'up'.
 
         // 7. Update Internal Angles
         this.coxaAngle = newCoxaAngle;
@@ -342,7 +357,7 @@ export default function Hexapod() {
        * @param {CanvasRenderingContext2D} ctx - The drawing context.
        * @param {function} convert3DtoIsometric - The projection function {x,y,z} -> [screenX, screenY].
        */
-      draw(ctx, convert3DtoIsometric) {
+      draw() {
         if (!this.jointPositions || this.jointPositions.length < 4) return;
 
         ctx.beginPath();
@@ -496,8 +511,14 @@ export default function Hexapod() {
 
       update() {
         this.angle = this.calculateTargetWorldAngle();
-        this.position.x += 1 * Math.cos(this.angle);
-        this.position.y += 1 * Math.sin(this.angle);
+        const dxMouse = this.position.x - mousePosRef.current.x;
+        const dyMouse = this.position.y - mousePosRef.current.y;
+        const distanceFromMouse = Math.sqrt(dxMouse ** 2 + dyMouse ** 2);
+        console.log(distanceFromMouse);
+        if (distanceFromMouse > 300) {
+          this.position.x += 1 * Math.cos(this.angle);
+          this.position.y += 1 * Math.sin(this.angle);
+        }
 
         this.recalculateWorldPoints();
       }
@@ -526,39 +547,153 @@ export default function Hexapod() {
 
     let gaitCycle = 0;
 
+    function binomialCoefficient(n, k) {
+      if (k < 0 || k > n) {
+        return 0; // Invalid input
+      }
+      if (k === 0 || k === n) {
+        return 1; // Base cases
+      }
+      // Take advantage of symmetry C(n, k) == C(n, n-k)
+      if (k > n / 2) {
+        k = n - k;
+      }
+      let res = 1;
+      for (let i = 1; i <= k; ++i) {
+        // Calculate (n - i + 1) / i iteratively
+        res = (res * (n - i + 1)) / i;
+      }
+      return res;
+    }
+
+    /**
+     * Calculates a point on a Bézier curve defined by the given control points
+     * for a specific parameter t (0 <= t <= 1).
+     * Uses the general Bézier curve formula (Bernstein polynomials).
+     * @param {Array<Object>} controlPoints - An array of control point objects {x, y, z}.
+     * @param {number} t - The parameter value, ranging from 0 to 1.
+     * @returns {Object} The calculated point {x, y, z} on the curve for parameter t.
+     */
+    function getPointOnBezierCurve(controlPoints, t) {
+      const n = controlPoints.length - 1; // Degree of the curve
+      let x = 0;
+      let y = 0;
+      let z = 0;
+
+      if (t < 0 || t > 1) {
+        console.warn("Parameter t should be between 0 and 1. Clamping.");
+        t = Math.max(0, Math.min(1, t));
+      }
+
+      for (let i = 0; i <= n; i++) {
+        const bernsteinCoefficient =
+          binomialCoefficient(n, i) * Math.pow(t, i) * Math.pow(1 - t, n - i);
+        x += controlPoints[i].x * bernsteinCoefficient;
+        y += controlPoints[i].y * bernsteinCoefficient;
+        z += controlPoints[i].z * bernsteinCoefficient;
+      }
+
+      return { x, y, z };
+    }
+
+    /**
+     * Creates an array of points representing a Bézier curve defined by a set of 3D control points.
+     *
+     * @param {Array<Object>} controlPoints - An array of control point objects, where each object
+     * has 'x', 'y', and 'z' properties (e.g., {x: 1, y: 2, z: 3}).
+     * Must contain at least 2 points.
+     * @param {number} resolution - The number of line segments to approximate the curve.
+     * A higher number results in a smoother curve. Must be >= 1.
+     * The function will return (resolution + 1) points.
+     * @returns {Array<Object> | null} An array of point objects {x, y, z} lying on the Bézier curve,
+     * including the start and end points, or null if inputs are invalid.
+     */
+    function createBezierCurvePoints(controlPoints, resolution) {
+      // --- Input Validation ---
+      if (!Array.isArray(controlPoints) || controlPoints.length < 2) {
+        console.error(
+          "Error: controlPoints must be an array with at least 2 points."
+        );
+        return null;
+      }
+      if (
+        typeof resolution !== "number" ||
+        !Number.isInteger(resolution) ||
+        resolution < 1
+      ) {
+        console.error(
+          "Error: resolution must be an integer greater than or equal to 1."
+        );
+        return null;
+      }
+      // Optional: Check if points have x, y, z properties (can be more robust)
+      for (const p of controlPoints) {
+        if (
+          typeof p?.x !== "number" ||
+          typeof p?.y !== "number" ||
+          typeof p?.z !== "number"
+        ) {
+          console.error(
+            "Error: Each control point must be an object with numeric x, y, and z properties."
+          );
+          return null;
+        }
+      }
+
+      // --- Calculation ---
+      const curvePoints = [];
+      const numPointsToCalculate = resolution + 1;
+
+      for (let i = 0; i < numPointsToCalculate; i++) {
+        // Calculate parameter t (from 0 to 1)
+        const t = i / resolution;
+        // Calculate the point on the curve for this t
+        const pointOnCurve = getPointOnBezierCurve(controlPoints, t);
+        curvePoints.push(pointOnCurve);
+      }
+
+      // Ensure the very last point is exactly the last control point
+      // (due to potential floating point inaccuracies)
+      if (resolution > 0) {
+        curvePoints[curvePoints.length - 1] = {
+          ...controlPoints[controlPoints.length - 1],
+        }; // Make a copy
+      } else {
+        // resolution === 1 means only start/end needed
+        curvePoints[0] = { ...controlPoints[0] };
+        curvePoints[1] = { ...controlPoints[controlPoints.length - 1] };
+      }
+
+      return curvePoints;
+    }
+
+    const controlPoints = [
+      { x: 3, y: 5, z: 50 },
+      { x: 0, y: 5, z: 80 },
+      { x: -3, y: 5, z: 50 },
+      { x: 3, y: 5, z: 50 },
+    ];
+
+    const controlPoints2 = [
+      { x: 3, y: -5, z: 50 },
+      { x: 0, y: -5, z: 80 },
+      { x: -3, y: -5, z: 50 },
+      { x: 3, y: -5, z: 50 },
+    ];
+
+    const animatedControlPoints = createBezierCurvePoints(controlPoints, 359);
+    const animatedControlPoints2 = createBezierCurvePoints(controlPoints2, 359);
+
     function animate() {
       if (bodies.length > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // hahah dont worry about it
         legs.forEach((leg, index) => {
-          let angle1;
-          if (index === 1 || index === 2 || index === 0) {
-            angle1 =
-              gaitCycle < 180
-                ? (Math.PI * (45 + gaitCycle / 2)) / 180
-                : (Math.PI * (45 - (gaitCycle + 360) / 2)) / 180;
-          } else if (index === 3) {
-            angle1 =
-              gaitCycle > 180
-                ? (Math.PI * (-45 + gaitCycle / 2)) / 180
-                : (Math.PI * (-45 - (gaitCycle + 360) / 2)) / 180;
-          } else if (index === 4) {
-            angle1 =
-              gaitCycle > 180
-                ? (Math.PI * (315 + gaitCycle / 2)) / 180
-                : (Math.PI * (315 - (gaitCycle + 360) / 2)) / 180;
+          if ([0, 1, 2].includes(index)) {
+            leg.solveIK({ x: 3, y: 5, z: 60 });
           } else {
-            angle1 =
-              gaitCycle > 180
-                ? (Math.PI * (315 + gaitCycle / 2)) / 180
-                : (Math.PI * (315 - (gaitCycle + 360) / 2)) / 180;
+            leg.solveIK({ x: 3, y: -5, z: 60 });
           }
-
-          const angle2 = (Math.PI * 40) / 180;
-          const angle3 = (Math.PI * -100) / 180;
-
-          leg.setAngles(angle1, angle2, angle3);
 
           leg.calculateFK();
         });
