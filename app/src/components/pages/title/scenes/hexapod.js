@@ -62,25 +62,11 @@ export default function Hexapod() {
       };
     };
 
-    // --- Basic Vector Math ---
-    const vecAdd = (v1, v2) => ({
-      x: v1.x + v2.x,
-      y: v1.y + v2.y,
-      z: v1.z + v2.z,
-    });
-    const vecSub = (v1, v2) => ({
-      x: v1.x - v2.x,
-      y: v1.y - v2.y,
-      z: v1.z - v2.z,
-    });
-    const vecMag = (v) => Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-    const vecScale = (v, s) => ({ x: v.x * s, y: v.y * s, z: v.z * s });
-
     // --- Constants ---
     const COXA_LENGTH = 25;
     const FEMUR_LENGTH = 35;
     const TIBIA_LENGTH = 90;
-    const BODY_LENGTH = 130;
+    const BODY_LENGTH = 200;
     const BODY_WIDTH = 100;
     const GROUND_LEVEL_Z = -80; // Where the feet ideally rest
     const BODY_HEIGHT_Z = -30 / 2; // From your body definition (z: -h2)
@@ -118,6 +104,9 @@ export default function Hexapod() {
         this.body = body;
         this.mountOffset = mountOffset;
         this.bodyAngleOffset = bodyAngleOffset;
+
+        this.nextPositions = [];
+        this.nextPosIndex = 0;
 
         // --- Current State Angles (radians) ---
         this.coxaAngle = 0; // Relative to bodyAngleOffset in XY plane
@@ -404,8 +393,10 @@ export default function Hexapod() {
       constructor(x, y, z) {
         this.position = { x: x, y: y, z: z };
         this.angle = 0;
+        this.targetAngle = 0;
         this.localPoints = this.defineLocalPoints();
         this.worldPoints = [];
+        this.isMoving = true;
         this.recalculateWorldPoints();
       }
 
@@ -510,14 +501,24 @@ export default function Hexapod() {
       }
 
       update() {
+        // console.log("Angle diff: ", Math.abs(this.angle - this.targetAngle));
+        // if (Math.abs(this.angle - this.targetAngle) > 0.1) {
+        //   this.angle += Math.sign(this.angle - this.targetAngle) * -0.01;
+        // }
         this.angle = this.calculateTargetWorldAngle();
-        const dxMouse = this.position.x - mousePosRef.current.x;
-        const dyMouse = this.position.y - mousePosRef.current.y;
+        // this.angle %= Math.PI * 2;
+
+        const screenPosApprox = convert3DtoIsometric(this.worldPoints[0]);
+
+        const dxMouse = mousePosRef.current.x - screenPosApprox[0];
+        const dyMouse = mousePosRef.current.y - screenPosApprox[1];
         const distanceFromMouse = Math.sqrt(dxMouse ** 2 + dyMouse ** 2);
-        console.log(distanceFromMouse);
-        if (distanceFromMouse > 300) {
+        if (distanceFromMouse > 100) {
+          this.isMoving = true;
           this.position.x += 1 * Math.cos(this.angle);
           this.position.y += 1 * Math.sin(this.angle);
+        } else {
+          this.isMoving = false;
         }
 
         this.recalculateWorldPoints();
@@ -546,6 +547,7 @@ export default function Hexapod() {
     const legs = [];
 
     let gaitCycle = 0;
+    let gaitCycle2 = 180;
 
     function binomialCoefficient(n, k) {
       if (k < 0 || k > n) {
@@ -668,33 +670,60 @@ export default function Hexapod() {
     }
 
     const controlPoints = [
-      { x: 3, y: 5, z: 50 },
-      { x: 0, y: 5, z: 80 },
-      { x: -3, y: 5, z: 50 },
-      { x: 3, y: 5, z: 50 },
+      { x: 2, y: 5, z: 90 },
+      { x: 0, y: 5, z: 90 },
+      { x: -2, y: 5, z: 90 },
+      { x: -2, y: 5, z: 120 },
+      { x: 2, y: 5, z: 120 },
+      { x: 2, y: 5, z: 90 },
     ];
 
     const controlPoints2 = [
-      { x: 3, y: -5, z: 50 },
-      { x: 0, y: -5, z: 80 },
-      { x: -3, y: -5, z: 50 },
-      { x: 3, y: -5, z: 50 },
+      { x: 2, y: -5, z: 90 },
+      { x: 0, y: -5, z: 90 },
+      { x: -2, y: -5, z: 90 },
+      { x: -2, y: -5, z: 120 },
+      { x: 2, y: -5, z: 120 },
+      { x: 2, y: -5, z: 90 },
     ];
 
-    const animatedControlPoints = createBezierCurvePoints(controlPoints, 359);
-    const animatedControlPoints2 = createBezierCurvePoints(controlPoints2, 359);
+    const standingPointRight = { x: 0, y: -5, z: 90 };
+    const standingPointLeft = { x: 0, y: 5, z: 90 };
+
+    let interpCounter;
+
+    const walkingPointsRight = createBezierCurvePoints(controlPoints, 359);
+    const walkingPointsLeft = createBezierCurvePoints(controlPoints2, 359);
 
     function animate() {
       if (bodies.length > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         legs.forEach((leg, index) => {
-          if ([0, 1, 2].includes(index)) {
-            leg.solveIK({ x: 3, y: 5, z: 60 });
+          if (leg.body.isMoving) {
+            if ([0, 1, 2].includes(index)) {
+              if ([1].includes(index)) {
+                leg.solveIK(walkingPointsRight[gaitCycle2]);
+              } else {
+                leg.solveIK(walkingPointsRight[gaitCycle]);
+              }
+            } else {
+              if ([3, 5].includes(index)) {
+                leg.solveIK(walkingPointsLeft[gaitCycle2]);
+              } else {
+                leg.solveIK(walkingPointsLeft[gaitCycle]);
+              }
+            }
           } else {
-            leg.solveIK({ x: 3, y: -5, z: 60 });
+            const legPos = leg.getFootTipPosition();
+            let standingPoint;
+            if ([0, 1, 2].includes(index)) {
+              standingPoint = standingPointLeft;
+            } else {
+              standingPoint = standingPointRight;
+            }
+            leg.solveIK(standingPoint);
           }
-
           leg.calculateFK();
         });
 
@@ -705,6 +734,8 @@ export default function Hexapod() {
         });
 
         gaitCycle += 1;
+        gaitCycle2 += 1;
+        gaitCycle2 %= 360;
         gaitCycle %= 360;
 
         animationFrameId = requestAnimationFrame(animate);
@@ -754,28 +785,7 @@ export default function Hexapod() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <div style={{ position: "absolute", top: "1em", left: "1em" }}></div>
       </div>
     </>
   );
