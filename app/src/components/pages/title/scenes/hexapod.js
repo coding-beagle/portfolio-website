@@ -6,6 +6,7 @@ export default function Hexapod() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const simulationSpeedRef = useRef(100);
+  const gaitCountRef = useRef(180);
 
   const mouseShieldRadiusRef = useRef(100);
   const [, setRender] = useState(0); // Dummy state to force re-render
@@ -515,8 +516,10 @@ export default function Hexapod() {
         const distanceFromMouse = Math.sqrt(dxMouse ** 2 + dyMouse ** 2);
         if (distanceFromMouse > 100) {
           this.isMoving = true;
-          this.position.x += 1 * Math.cos(this.angle);
-          this.position.y += 1 * Math.sin(this.angle);
+          this.position.x +=
+            ((1 * gaitCountRef.current) / 45) * Math.cos(this.angle);
+          this.position.y +=
+            ((1 * gaitCountRef.current) / 45) * Math.sin(this.angle);
         } else {
           this.isMoving = false;
         }
@@ -546,8 +549,10 @@ export default function Hexapod() {
 
     const legs = [];
 
+    gaitCountRef.current = 180;
+
     let gaitCycle = 0;
-    let gaitCycle2 = 180;
+    let gaitCycle2 = gaitCountRef.current / 2;
 
     function binomialCoefficient(n, k) {
       if (k < 0 || k > n) {
@@ -691,12 +696,28 @@ export default function Hexapod() {
     const standingPointLeft = { x: 0, y: 5, z: 90 };
 
     let interpCounter;
+    let walkingPointsLeft, walkingPointsRight;
+    const regenWalkCycle = () => {
+      walkingPointsRight = createBezierCurvePoints(
+        controlPoints,
+        360 - gaitCountRef.current - 1
+      );
+      walkingPointsLeft = createBezierCurvePoints(
+        controlPoints2,
+        360 - gaitCountRef.current - 1
+      );
+    };
 
-    const walkingPointsRight = createBezierCurvePoints(controlPoints, 359);
-    const walkingPointsLeft = createBezierCurvePoints(controlPoints2, 359);
+    regenWalkCycle();
 
+    let lastGaitCount = 0;
     function animate() {
       if (bodies.length > 0) {
+        if (lastGaitCount !== gaitCountRef.current) {
+          regenWalkCycle();
+          gaitCycle = 0;
+          gaitCycle2 = Math.ceil((360 - gaitCountRef.current) / 2);
+        }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         legs.forEach((leg, index) => {
@@ -725,6 +746,7 @@ export default function Hexapod() {
             leg.solveIK(standingPoint);
           }
           leg.calculateFK();
+          lastGaitCount = gaitCountRef.current;
         });
 
         bodies[0].update();
@@ -735,8 +757,8 @@ export default function Hexapod() {
 
         gaitCycle += 1;
         gaitCycle2 += 1;
-        gaitCycle2 %= 360;
-        gaitCycle %= 360;
+        gaitCycle2 %= 360 - gaitCountRef.current;
+        gaitCycle %= 360 - gaitCountRef.current;
 
         animationFrameId = requestAnimationFrame(animate);
       }
@@ -785,7 +807,28 @@ export default function Hexapod() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}></div>
+        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Walking Speed:
+            <input
+              type="range"
+              min="45"
+              max="330"
+              value={gaitCountRef.current}
+              onChange={(e) => {
+                gaitCountRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
+        </div>
       </div>
     </>
   );
