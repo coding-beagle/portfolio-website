@@ -26,12 +26,23 @@ const Scenes = {
   HEXAPOD: 7,
 };
 
-export default function Title(text = "Nicholas Teague") {
+export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   const [isHover, setIsHover] = useState(false);
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
   );
+
   const [clicked, setClicked] = useState(false);
+
+  useEffect(() => {
+    if (initialScene === "") {
+      setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
+    } else {
+      if (Scenes[initialScene] !== undefined) {
+        setCurrentScene(Scenes[initialScene]);
+      }
+    }
+  }, [initialScene]);
 
   useEffect(() => {
     // Trigger shake effect on initial load
@@ -138,9 +149,9 @@ export default function Title(text = "Nicholas Teague") {
           }}
           id="title"
         >
-          {text.text === ""
+          {text === "" || text === undefined
             ? "NTeague"
-            : decodeURIComponent(text.text).replace(/%0A/g, "\n")}
+            : decodeURIComponent(text).replace(/%0A/g, "\n")}
         </header>
         <div
           id="linkIcons"

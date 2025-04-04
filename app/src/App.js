@@ -10,6 +10,11 @@ function AppWrapper() {
   // Remove the leading '/' from the pathname
   const path = location.pathname.substring(1);
 
+  const search = location.search;
+  const queryString = search.includes("?") ? search.split("?")[1] : "";
+  const searchParams = new URLSearchParams(queryString);
+  const scene = searchParams.get("scene");
+
   return (
     <div
       className="App"
@@ -21,7 +26,7 @@ function AppWrapper() {
         margin: 0,
       }}
     >
-      <Title text={path} />
+      <Title text={path} initialScene={scene?.toUpperCase()} />
     </div>
   );
 }
