@@ -501,6 +501,20 @@ export default function Hexapod() {
         return targetWorldAngle;
       }
 
+      getCloseHexapod() {
+        for (const hexapod of bodies) {
+          if (
+            Math.abs(this.position.x - hexapod.body.position.x) < 300 &&
+            Math.abs(this.position.y - hexapod.body.position.y) < 300 &&
+            this.position.x !== hexapod.body.position.x &&
+            this.position.y !== hexapod.body.position.y
+          ) {
+            return { x: hexapod.body.position.x, y: hexapod.body.position.y };
+          }
+        }
+        return null; // Return null if no close hexapod is found
+      }
+
       update() {
         // console.log("Angle diff: ", Math.abs(this.angle - this.targetAngle));
         // if (Math.abs(this.angle - this.targetAngle) > 0.1) {
@@ -514,17 +528,79 @@ export default function Hexapod() {
         const dxMouse = mousePosRef.current.x - screenPosApprox[0];
         const dyMouse = mousePosRef.current.y - screenPosApprox[1];
         const distanceFromMouse = Math.sqrt(dxMouse ** 2 + dyMouse ** 2);
+
+        const closeHex = this.getCloseHexapod();
+
         if (distanceFromMouse > 100) {
+          if (closeHex) {
+            const dx = this.position.x - closeHex.x;
+            const dy = this.position.y - closeHex.y;
+            const angleAway = Math.atan2(dy, dx);
+
+            this.position.x +=
+              ((1 * gaitCountRef.current) / 45) * Math.cos(angleAway);
+            this.position.y +=
+              ((1 * gaitCountRef.current) / 45) * Math.sin(angleAway);
+          } else {
+            this.position.x +=
+              ((1 * gaitCountRef.current) / 45) * Math.cos(this.angle);
+            this.position.y +=
+              ((1 * gaitCountRef.current) / 45) * Math.sin(this.angle);
+          }
           this.isMoving = true;
-          this.position.x +=
-            ((1 * gaitCountRef.current) / 45) * Math.cos(this.angle);
-          this.position.y +=
-            ((1 * gaitCountRef.current) / 45) * Math.sin(this.angle);
         } else {
           this.isMoving = false;
         }
 
         this.recalculateWorldPoints();
+      }
+    }
+
+    class Hexapod {
+      constructor(x, y, z) {
+        this.body = new Body(x, y, z);
+        this.legs = [];
+        for (let i = 0; i < 6; i++) {
+          this.legs.push(
+            new Leg(this.body, legMountOffsets[i], legAngleOffsets[i])
+          );
+        }
+      }
+
+      update() {
+        this.body.update();
+        this.body.draw();
+        this.legs.forEach((leg, index) => {
+          if (leg.body.isMoving) {
+            if ([0, 1, 2].includes(index)) {
+              if ([1].includes(index)) {
+                leg.solveIK(walkingPointsRight[gaitCycle2]);
+              } else {
+                leg.solveIK(walkingPointsRight[gaitCycle]);
+              }
+            } else {
+              if ([3, 5].includes(index)) {
+                leg.solveIK(walkingPointsLeft[gaitCycle2]);
+              } else {
+                leg.solveIK(walkingPointsLeft[gaitCycle]);
+              }
+            }
+          } else {
+            const legPos = leg.getFootTipPosition();
+            let standingPoint;
+            if ([0, 1, 2].includes(index)) {
+              standingPoint = standingPointLeft;
+            } else {
+              standingPoint = standingPointRight;
+            }
+            leg.solveIK(standingPoint);
+          }
+          leg.calculateFK();
+        });
+
+        this.legs.forEach((leg) => {
+          leg.draw(ctx, convert3DtoIsometric);
+        });
       }
     }
 
@@ -546,8 +622,6 @@ export default function Hexapod() {
       Math.PI, // Mid Left (180 deg)
       (-2 * Math.PI) / 3, // Front Left (-120 deg)
     ];
-
-    const legs = [];
 
     gaitCountRef.current = 180;
 
@@ -720,41 +794,11 @@ export default function Hexapod() {
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        legs.forEach((leg, index) => {
-          if (leg.body.isMoving) {
-            if ([0, 1, 2].includes(index)) {
-              if ([1].includes(index)) {
-                leg.solveIK(walkingPointsRight[gaitCycle2]);
-              } else {
-                leg.solveIK(walkingPointsRight[gaitCycle]);
-              }
-            } else {
-              if ([3, 5].includes(index)) {
-                leg.solveIK(walkingPointsLeft[gaitCycle2]);
-              } else {
-                leg.solveIK(walkingPointsLeft[gaitCycle]);
-              }
-            }
-          } else {
-            const legPos = leg.getFootTipPosition();
-            let standingPoint;
-            if ([0, 1, 2].includes(index)) {
-              standingPoint = standingPointLeft;
-            } else {
-              standingPoint = standingPointRight;
-            }
-            leg.solveIK(standingPoint);
-          }
-          leg.calculateFK();
-          lastGaitCount = gaitCountRef.current;
+        bodies.forEach((hexapod) => {
+          hexapod.update();
         });
 
-        bodies[0].update();
-        bodies[0].draw();
-        legs.forEach((leg) => {
-          leg.draw(ctx, convert3DtoIsometric);
-        });
-
+        lastGaitCount = gaitCountRef.current;
         gaitCycle += 1;
         gaitCycle2 += 1;
         gaitCycle2 %= 360 - gaitCountRef.current;
@@ -766,12 +810,14 @@ export default function Hexapod() {
 
     const init = () => {
       if (bodies.length === 0) {
-        bodies.push(new Body(500, 100, 0));
-      }
-      if (typeof bodies[0] !== "undefined") {
-        // Check if body exists before creating legs
-        for (let i = 0; i < 6; i++) {
-          legs.push(new Leg(bodies[0], legMountOffsets[i], legAngleOffsets[i]));
+        for (let i = 0; i < 5; i++) {
+          bodies.push(
+            new Hexapod(
+              Math.random() * canvas.width,
+              Math.random() * canvas.height,
+              0
+            )
+          );
         }
       }
     };
