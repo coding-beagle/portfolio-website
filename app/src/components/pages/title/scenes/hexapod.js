@@ -6,6 +6,7 @@ export default function Hexapod() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const simulationSpeedRef = useRef(100);
+  const bodyCountRef = useRef(2);
   const gaitCountRef = useRef(180);
 
   const mouseShieldRadiusRef = useRef(100);
@@ -516,12 +517,7 @@ export default function Hexapod() {
       }
 
       update() {
-        // console.log("Angle diff: ", Math.abs(this.angle - this.targetAngle));
-        // if (Math.abs(this.angle - this.targetAngle) > 0.1) {
-        //   this.angle += Math.sign(this.angle - this.targetAngle) * -0.01;
-        // }
         this.angle = this.calculateTargetWorldAngle();
-        // this.angle %= Math.PI * 2;
 
         const screenPosApprox = convert3DtoIsometric(this.worldPoints[0]);
 
@@ -537,10 +533,15 @@ export default function Hexapod() {
             const dy = this.position.y - closeHex.y;
             const angleAway = Math.atan2(dy, dx);
 
-            this.position.x +=
+            const velX =
               ((1 * gaitCountRef.current) / 45) * Math.cos(angleAway);
-            this.position.y +=
+            const velY =
               ((1 * gaitCountRef.current) / 45) * Math.sin(angleAway);
+
+            // const magnitude = Math.sqrt(velX ** 2 + velY ** 2);
+
+            this.position.x += velX;
+            this.position.y += velY;
           } else {
             this.position.x +=
               ((1 * gaitCountRef.current) / 45) * Math.cos(this.angle);
@@ -785,8 +786,25 @@ export default function Hexapod() {
     regenWalkCycle();
 
     let lastGaitCount = 0;
+    let lastBodyCount = 0;
     function animate() {
       if (bodies.length > 0) {
+        // check for changes in hexCount array:
+
+        if (bodyCountRef.current !== lastBodyCount) {
+          if (bodyCountRef.current > lastBodyCount) {
+            bodies.push(
+              new Hexapod(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height,
+                0
+              )
+            );
+          } else {
+            bodies.splice(bodyCountRef.current);
+          }
+        }
+
         if (lastGaitCount !== gaitCountRef.current) {
           regenWalkCycle();
           gaitCycle = 0;
@@ -799,6 +817,7 @@ export default function Hexapod() {
         });
 
         lastGaitCount = gaitCountRef.current;
+        lastBodyCount = bodies.length;
         gaitCycle += 1;
         gaitCycle2 += 1;
         gaitCycle2 %= 360 - gaitCountRef.current;
@@ -810,7 +829,7 @@ export default function Hexapod() {
 
     const init = () => {
       if (bodies.length === 0) {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < bodyCountRef.current; i++) {
           bodies.push(
             new Hexapod(
               Math.random() * canvas.width,
@@ -820,6 +839,7 @@ export default function Hexapod() {
           );
         }
       }
+      lastBodyCount = bodyCountRef.current;
     };
 
     init();
@@ -854,6 +874,26 @@ export default function Hexapod() {
       />
       <div style={{ zIndex: 10 }}>
         <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Hexapod Count:
+            <input
+              type="range"
+              min="1"
+              max="10"
+              value={bodyCountRef.current}
+              onChange={(e) => {
+                bodyCountRef.current = Number(e.target.value);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
+              style={{ marginLeft: "0.5em" }}
+            />
+          </div>
           <div
             style={{
               display: "flex",

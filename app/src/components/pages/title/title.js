@@ -22,8 +22,8 @@ const Scenes = {
   STARS: 3,
   BOIDS: 4,
   CONWAY: 5,
-  WINDTUNNEL: 6,
-  HEXAPOD: 7,
+  // WINDTUNNEL: 6,
+  HEXAPOD: 6,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -85,8 +85,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
         return <Boids />;
       case Scenes.CONWAY:
         return <Conway />;
-      case Scenes.WINDTUNNEL:
-        return <WindTunnel />;
+      // case Scenes.WINDTUNNEL:  // need to let this cook a bit
+      //   return <WindTunnel />;
       case Scenes.HEXAPOD:
         return <Hexapod />;
       default:
@@ -131,7 +131,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             );
           }}
           style={{
-            fontSize: "5vw",
+            fontSize: "5em",
             textAlign: "center",
             color: isHover ? defaultColours.secondary : defaultColours.accent,
             fontWeight: "bold",

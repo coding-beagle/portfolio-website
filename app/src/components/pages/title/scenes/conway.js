@@ -29,6 +29,24 @@ export default function Conway() {
 
   let isDebouncing = true;
 
+  const squarifyGrid = (columns = false) => {
+    if (columns) {
+      // yeah these are swapped unfortunately hahhaah
+      const newColumns = Math.round(
+        (numGridRows.current / canvasRef.current.width) *
+          canvasRef.current.height
+      );
+      numGridColumns.current = newColumns;
+    } else {
+      // yeah these are swapped unfortunately hahhaah
+      const newRows = Math.round(
+        (numGridColumns.current / canvasRef.current.height) *
+          canvasRef.current.width
+      );
+      numGridRows.current = newRows;
+    }
+  };
+
   useEffect(() => {
     let animationFrameId;
 
@@ -67,6 +85,9 @@ export default function Conway() {
     if (checkMobile()) {
       numGridColumns.current = 70;
       numGridRows.current = 40;
+      squarifyGrid(true);
+    } else {
+      squarifyGrid(false);
     }
 
     // takes a constructor of an array of particles and renders them
@@ -103,7 +124,6 @@ export default function Conway() {
 
       update(skipCheck = false) {
         if (this.numColumns !== numGridColumns.current) {
-          console.log(gridRef.current);
           this.updating = true;
           let rowDiff = numGridColumns.current - this.numColumns;
           if (rowDiff > 0) {
@@ -308,17 +328,17 @@ export default function Conway() {
       rightClickRef.current = false;
     };
 
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("pointerdown", handleMouseDown);
+    window.addEventListener("pointerup", handleMouseUp);
     document.addEventListener("contextmenu", handleContextMenu);
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("pointerdown", handleMouseDown);
+      window.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       document.removeEventListener("contextmenu", handleContextMenu);
     };
@@ -383,6 +403,33 @@ export default function Conway() {
               marginBottom: "0.5em",
             }}
           >
+            Squarify Tiles Via:
+            <button
+              style={{ marginLeft: "0.5em" }}
+              onClick={(e) => {
+                squarifyGrid(true);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
+            >
+              Columns
+            </button>
+            <button
+              style={{ marginLeft: "0.5em" }}
+              onClick={(e) => {
+                squarifyGrid(false);
+                setRender((prev) => prev + 1); // Force re-render to update slider UI
+              }}
+            >
+              Rows
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
             Simulation Speed:
             <input
               type="range"
@@ -413,13 +460,13 @@ export default function Conway() {
             >
               <FontAwesomeIcon icon={isPlaying.current ? faPause : faPlay} />
             </button>
-            <button style={{ marginLeft: "0.5em" }}>
-              <FontAwesomeIcon
-                icon={faForwardStep}
-                onClick={(e) => {
-                  gridManagerRef.current.update(names.SKIPCHECK);
-                }}
-              />
+            <button
+              style={{ marginLeft: "0.5em" }}
+              onClick={(e) => {
+                gridManagerRef.current.update(names.SKIPCHECK);
+              }}
+            >
+              <FontAwesomeIcon icon={faForwardStep} />
             </button>
           </div>
           <div

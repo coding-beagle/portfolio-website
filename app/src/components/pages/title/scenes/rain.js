@@ -176,18 +176,18 @@ export default function Rain() {
     initParticles();
     animate();
 
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("touchmove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("touchmove", handleMouseMove);
+    window.addEventListener("pointerdown", handleMouseDown);
+    window.addEventListener("pointerup", handleMouseUp);
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("touchmove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("touchmove", handleMouseMove);
+      window.removeEventListener("pointerdown", handleMouseDown);
+      window.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("popstate", recalculateRect);
       particles = [];
