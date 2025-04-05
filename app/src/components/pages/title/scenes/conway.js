@@ -328,17 +328,17 @@ export default function Conway() {
       rightClickRef.current = false;
     };
 
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
+    canvas.addEventListener("pointermove", handleMouseMove);
+    canvas.addEventListener("pointerdown", handleMouseDown);
+    canvas.addEventListener("pointerup", handleMouseUp);
     document.addEventListener("contextmenu", handleContextMenu);
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
+      canvas.removeEventListener("pointermove", handleMouseMove);
+      canvas.removeEventListener("pointerdown", handleMouseDown);
+      canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       document.removeEventListener("contextmenu", handleContextMenu);
     };
