@@ -12,8 +12,9 @@ import {
 } from "@fortawesome/free-brands-svg-icons";
 import IconHover from "./iconHover";
 import Conway from "./scenes/conway";
-import WindTunnel from "./scenes/windtunnel";
+// import WindTunnel from "./scenes/windtunnel";
 import Hexapod from "./scenes/hexapod";
+import Mandelbrot from "./scenes/mandelbrot";
 
 const Scenes = {
   SNOW: 0,
@@ -24,6 +25,7 @@ const Scenes = {
   CONWAY: 5,
   // WINDTUNNEL: 6,
   HEXAPOD: 6,
+  MANDELBROT: 7,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -89,6 +91,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
       //   return <WindTunnel />;
       case Scenes.HEXAPOD:
         return <Hexapod />;
+      case Scenes.MANDELBROT:
+        return <Mandelbrot />;
       default:
         return;
     }
