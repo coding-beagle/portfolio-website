@@ -5,11 +5,12 @@ import { faWandMagic } from "@fortawesome/free-solid-svg-icons";
 
 export default function Mandelbrot() {
   const canvasRef = useRef(null);
-  const drawAreaRef = useRef(2000);
+  const drawAreaRef = useRef(400);
   const drawResolutionRef = useRef(5);
   const [, setRender] = useState(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
+  const drawEverythingRef = useRef(() => {});
 
   const maxIterCount = 1000;
   let transformX = 0;
@@ -64,12 +65,16 @@ export default function Mandelbrot() {
     resolution = drawResolutionRef.current,
     drawAll = false
   ) {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
     let startX, startY, endX, endY;
     if (drawAll) {
+      console.log("clearing all!");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
       startX = 0;
       startY = 0;
-      endX = canvasRef.current.width;
-      endY = canvasRef.current.height;
+      endX = canvas.width;
+      endY = canvas.height;
     } else {
       startX = position.x - drawAreaRef.current / 2;
       startY = position.y - drawAreaRef.current / 2;
@@ -80,13 +85,8 @@ export default function Mandelbrot() {
     // Use nested loops instead of recursion for pixel-by-pixel drawing
     for (let y = startY; y < endY; y += resolution) {
       for (let x = startX; x < endX; x += resolution) {
-        canvasRef.current.getContext("2d").fillStyle = calculateMandelbrot(
-          x,
-          y
-        );
-        canvasRef.current
-          .getContext("2d")
-          .fillRect(x, y, resolution, resolution);
+        ctx.fillStyle = calculateMandelbrot(x, y);
+        ctx.fillRect(x, y, resolution, resolution);
       }
     }
   }
@@ -117,6 +117,11 @@ export default function Mandelbrot() {
     }
 
     // Start the animation
+    drawEverythingRef.current = () => {
+      drawMandelbrotArea({ x: 0, y: 0 }, drawResolutionRef.current, true);
+    };
+
+    drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
     animate();
 
     function handlePan(deltaX, deltaY) {
@@ -125,6 +130,8 @@ export default function Mandelbrot() {
 
       centerX -= (deltaX / canvas.width) * viewWidth;
       centerY -= (deltaY / canvas.height) * viewHeight;
+
+      drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
     }
 
     const handleMouseMove = (event) => {
@@ -178,6 +185,8 @@ export default function Mandelbrot() {
       // Adjust center to keep mouse position fixed in complex plane
       centerX += complexBefore[0] - complexAfter[0];
       centerY += complexBefore[1] - complexAfter[1];
+
+      drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
     };
 
     window.addEventListener("pointermove", handleMouseMove);
@@ -249,23 +258,23 @@ export default function Mandelbrot() {
               style={{ marginLeft: "0.5em" }}
             />
           </div>
-          {/* <div
+          <div
             style={{
               display: "flex",
               alignItems: "center",
               marginBottom: "0.5em",
             }}
           >
-            Ai Upscaling:
+            Draw Everything:
             <button
               style={{ marginLeft: "0.5em" }}
               onClick={() => {
-                drawMandelbrotArea({ x: 0, y: 0 }, 5, true);
+                drawEverythingRef.current();
               }}
             >
               <FontAwesomeIcon icon={faWandMagic} />
             </button>
-          </div> */}
+          </div>
         </div>
       </div>
     </>
