@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
-import { Spin } from "antd";
 
 export default function Mandelbrot() {
   const canvasRef = useRef(null);

@@ -1,7 +1,6 @@
 // import { Popover } from "antd";
 import { faMouse } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import defaultColours from "../../../../themes/themes";
 
 // const mouseContent = (
 //   <div
