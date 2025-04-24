@@ -8,6 +8,7 @@ import {
   faPause,
   faPlay,
 } from "@fortawesome/free-solid-svg-icons";
+import MouseTooltip from "../utilities/popovers";
 
 const names = {
   SKIPCHECK: true,
@@ -514,6 +515,9 @@ export default function Conway() {
               <FontAwesomeIcon icon={faDice} />
             </button>
           </div>
+        </div>
+        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+          <MouseTooltip />
         </div>
       </div>
     </>

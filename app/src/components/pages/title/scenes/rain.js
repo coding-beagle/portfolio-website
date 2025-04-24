@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
+import MouseTooltip from "../utilities/popovers";
 
 export default function Rain() {
   const canvasRef = useRef(null);
@@ -266,6 +267,9 @@ export default function Rain() {
               style={{ marginLeft: "0.5em" }}
             />
           </div>
+        </div>
+        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+          <MouseTooltip />
         </div>
       </div>
     </>

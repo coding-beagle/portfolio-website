@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faWandMagic } from "@fortawesome/free-solid-svg-icons";
+import MouseTooltip from "../utilities/popovers";
+import { Spin } from "antd";
 
 export default function Mandelbrot() {
   const canvasRef = useRef(null);
@@ -11,15 +11,14 @@ export default function Mandelbrot() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const drawEverythingRef = useRef(() => {});
+  const currentlyDrawingRef = useRef(false);
 
-  const maxIterCount = 250;
+  const maxIterCount = 1000;
   let transformX = 0;
   let transformY = 0;
   let startClick = { x: 0, y: 0 };
   let centerX = 0; // Center point X in the complex plane
   let centerY = 0; // Center point Y in the complex plane
-
-  let currentlyDrawing = false;
 
   let zoomLevel = 1; // Zoom factor
 
@@ -60,6 +59,7 @@ export default function Mandelbrot() {
     return count;
   }
 
+  const maxIterColour = defaultColours.primary;
   const maxColour = defaultColours.secondary;
   const minColour = defaultColours.primary;
 
@@ -85,10 +85,8 @@ export default function Mandelbrot() {
 
   function colourInterp(value) {
     if (value == maxIterCount) {
-      return maxColour;
+      return maxIterColour;
     }
-
-    console.log("value = ", value);
 
     const r = Math.floor(
       clamp(colourMinComponents.r + value * colourSteps.r, 0, 255)
@@ -112,7 +110,7 @@ export default function Mandelbrot() {
     resolution = 21 - drawResolutionRef.current,
     drawAll = false
   ) {
-    currentlyDrawing = true;
+    currentlyDrawingRef.current = true;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     let startX, startY, endX, endY;
@@ -136,7 +134,7 @@ export default function Mandelbrot() {
         ctx.fillRect(x, y, resolution, resolution);
       }
     }
-    currentlyDrawing = false;
+    currentlyDrawingRef.current = false;
   }
 
   useEffect(() => {
@@ -158,7 +156,10 @@ export default function Mandelbrot() {
         cancelAnimationFrame(animationFrameId);
       }
 
-      if (currentRes > 21 - drawResolutionRef.current && !currentlyDrawing) {
+      if (
+        currentRes > 21 - drawResolutionRef.current &&
+        !currentlyDrawingRef.current
+      ) {
         console.log(21 - drawResolutionRef.current);
         drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true);
         currentRes -= 1;
@@ -292,6 +293,11 @@ export default function Mandelbrot() {
               style={{ marginLeft: "0.5em" }}
             />
           </div>
+        </div>
+      </div>
+      <div style={{ zIndex: 10 }}>
+        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+          <MouseTooltip />
         </div>
       </div>
     </>
