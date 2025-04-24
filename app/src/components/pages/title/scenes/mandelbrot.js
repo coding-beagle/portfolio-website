@@ -6,18 +6,20 @@ import { faWandMagic } from "@fortawesome/free-solid-svg-icons";
 export default function Mandelbrot() {
   const canvasRef = useRef(null);
   const drawAreaRef = useRef(400);
-  const drawResolutionRef = useRef(5);
+  const drawResolutionRef = useRef(15);
   const [, setRender] = useState(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const drawEverythingRef = useRef(() => {});
 
-  const maxIterCount = 1000;
+  const maxIterCount = 250;
   let transformX = 0;
   let transformY = 0;
   let startClick = { x: 0, y: 0 };
   let centerX = 0; // Center point X in the complex plane
   let centerY = 0; // Center point Y in the complex plane
+
+  let currentlyDrawing = false;
 
   let zoomLevel = 1; // Zoom factor
 
@@ -54,22 +56,67 @@ export default function Mandelbrot() {
 
       count += 1;
     }
-    if (count == maxIterCount) {
-      return defaultColours.primary;
+
+    return count;
+  }
+
+  const maxColour = defaultColours.secondary;
+  const minColour = defaultColours.primary;
+
+  const colourMaxComponents = {
+    r: parseInt(maxColour.slice(1, 3), 16),
+    g: parseInt(maxColour.slice(3, 5), 16),
+    b: parseInt(maxColour.slice(5, 7), 16),
+  };
+
+  const colourMinComponents = {
+    r: parseInt(minColour.slice(1, 3), 16),
+    g: parseInt(minColour.slice(3, 5), 16),
+    b: parseInt(minColour.slice(5, 7), 16),
+  };
+
+  const colourSteps = {
+    r: (colourMaxComponents.r - colourMinComponents.r) / maxIterCount,
+    g: (colourMaxComponents.g - colourMinComponents.g) / maxIterCount,
+    b: (colourMaxComponents.b - colourMinComponents.b) / maxIterCount,
+  };
+
+  const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+
+  function colourInterp(value) {
+    if (value == maxIterCount) {
+      return maxColour;
     }
-    return defaultColours.secondary;
+
+    console.log("value = ", value);
+
+    const r = Math.floor(
+      clamp(colourMinComponents.r + value * colourSteps.r, 0, 255)
+    );
+    const g = Math.floor(
+      clamp(colourMinComponents.g + value * colourSteps.g, 0, 255)
+    );
+    const b = Math.floor(
+      clamp(colourMinComponents.b + value * colourSteps.b, 0, 255)
+    );
+
+    const rHex = r.toString(16).padStart(2, "0");
+    const gHex = g.toString(16).padStart(2, "0");
+    const bHex = b.toString(16).padStart(2, "0");
+
+    return `#${rHex}${gHex}${bHex}`;
   }
 
   function drawMandelbrotArea(
     position,
-    resolution = drawResolutionRef.current,
+    resolution = 21 - drawResolutionRef.current,
     drawAll = false
   ) {
+    currentlyDrawing = true;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     let startX, startY, endX, endY;
     if (drawAll) {
-      console.log("clearing all!");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       startX = 0;
       startY = 0;
@@ -85,10 +132,11 @@ export default function Mandelbrot() {
     // Use nested loops instead of recursion for pixel-by-pixel drawing
     for (let y = startY; y < endY; y += resolution) {
       for (let x = startX; x < endX; x += resolution) {
-        ctx.fillStyle = calculateMandelbrot(x, y);
+        ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
         ctx.fillRect(x, y, resolution, resolution);
       }
     }
+    currentlyDrawing = false;
   }
 
   useEffect(() => {
@@ -102,6 +150,7 @@ export default function Mandelbrot() {
     window.addEventListener("resize", resizeCanvas);
 
     let animationFrameId;
+    let currentRes = 10;
 
     function animate() {
       // Cancel previous animation frame if it exists
@@ -109,8 +158,11 @@ export default function Mandelbrot() {
         cancelAnimationFrame(animationFrameId);
       }
 
-      // Draw the Mandelbrot set around the current mouse position
-      drawMandelbrotArea(mousePosRef.current);
+      if (currentRes > 21 - drawResolutionRef.current && !currentlyDrawing) {
+        console.log(21 - drawResolutionRef.current);
+        drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true);
+        currentRes -= 1;
+      }
 
       // Request the next frame
       animationFrameId = requestAnimationFrame(animate);
@@ -118,13 +170,14 @@ export default function Mandelbrot() {
 
     // Start the animation
     drawEverythingRef.current = () => {
-      drawMandelbrotArea({ x: 0, y: 0 }, drawResolutionRef.current, true);
+      drawMandelbrotArea({ x: 0, y: 0 }, 21 - drawResolutionRef.current, true);
     };
 
     drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
     animate();
 
     function handlePan(deltaX, deltaY) {
+      currentRes = 10;
       const viewWidth = 4 / zoomLevel;
       const viewHeight = 3 / zoomLevel;
 
@@ -171,6 +224,7 @@ export default function Mandelbrot() {
     const handleWheel = (event) => {
       const mouseX = event.clientX - canvas.offsetLeft;
       const mouseY = event.clientY - canvas.offsetTop;
+      currentRes = 10;
 
       // Get complex coordinates before zoom
       const complexBefore = mapToComplex(mouseX, mouseY);
@@ -225,31 +279,11 @@ export default function Mandelbrot() {
               marginBottom: "0.5em",
             }}
           >
-            Draw Radius:
-            <input
-              type="range"
-              min="10"
-              max="2000"
-              value={drawAreaRef.current}
-              onChange={(e) => {
-                drawAreaRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Draw Resolution:
+            Max Draw Resolution:
             <input
               type="range"
               min="1.0"
-              max="30.0"
+              max="20.0"
               value={drawResolutionRef.current}
               onChange={(e) => {
                 drawResolutionRef.current = Number(e.target.value);
@@ -257,23 +291,6 @@ export default function Mandelbrot() {
               }}
               style={{ marginLeft: "0.5em" }}
             />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Draw Everything:
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={() => {
-                drawEverythingRef.current();
-              }}
-            >
-              <FontAwesomeIcon icon={faWandMagic} />
-            </button>
           </div>
         </div>
       </div>
