@@ -159,9 +159,8 @@ export default function Mandelbrot() {
         currentRes > 21 - drawResolutionRef.current &&
         !currentlyDrawingRef.current
       ) {
-        console.log(21 - drawResolutionRef.current);
-        drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true);
         currentRes -= 1;
+        drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true);
       }
 
       // Request the next frame
