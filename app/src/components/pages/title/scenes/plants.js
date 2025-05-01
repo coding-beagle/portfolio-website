@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Plants() {
   const canvasRef = useRef(null);
@@ -158,68 +159,29 @@ export default function Plants() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Plant Count:
-            <input
-              type="range"
-              min="1"
-              max="50"
-              value={particleCountRef.current}
-              onChange={(e) => {
-                particleCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="1000.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Length:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationLengthRef.current}
-              onChange={(e) => {
-                simulationLengthRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Plant Count:",
+              valueRef: particleCountRef,
+              minValue: "1",
+              maxValue: "50",
+            },
+            {
+              title: "Simulation Speed:",
+              valueRef: simulationSpeedRef,
+              minValue: "1",
+              maxValue: "1000.0",
+            },
+            {
+              title: "Simulation Length:",
+              valueRef: simulationLengthRef,
+              minValue: "1",
+              maxValue: "200.0",
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
       </div>
     </>
   );

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Stars() {
   const canvasRef = useRef(null);
@@ -326,45 +327,25 @@ export default function Stars() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Star Count:
-            <input
-              type="range"
-              min="1"
-              max="50"
-              value={particleCount}
-              onChange={(e) => setParticleCount(Number(e.target.value))}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="75.0"
-              max="150.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1);
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Star Count:",
+              valueRef: particleCount,
+              minValue: "1",
+              maxValue: "1000",
+              isState: true,
+              valueSetter: setParticleCount,
+            },
+            {
+              title: "Simulation Speed:",
+              valueRef: simulationSpeedRef,
+              minValue: "1",
+              maxValue: "200.0",
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
         <div style={{ position: "absolute", top: "1em", right: "1em" }}>
           <MouseTooltip />
         </div>

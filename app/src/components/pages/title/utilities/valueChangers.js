@@ -7,6 +7,8 @@ export function Slider({
   minValue,
   maxValue,
   callback = null,
+  isState = false,
+  valueSetter = null,
 }) {
   return (
     <div
@@ -23,7 +25,11 @@ export function Slider({
         max={maxValue}
         value={valueRef.current}
         onChange={(e) => {
-          valueRef.current = Number(e.target.value);
+          if (!isState) {
+            valueRef.current = Number(e.target.value);
+          } else {
+            valueSetter(Number(e.target.value));
+          }
           if (callback) {
             callback();
           }
