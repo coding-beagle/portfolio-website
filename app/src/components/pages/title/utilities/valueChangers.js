@@ -42,7 +42,6 @@ export function Slider({
 }
 
 export function SliderGroup({ rerenderSetter, valueArrays }) {
-  console.log(valueArrays);
   return (
     <div style={{ position: "absolute", top: "1em", left: "1em" }}>
       {valueArrays.map((element, index) => (

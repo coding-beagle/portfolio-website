@@ -14,7 +14,8 @@ export default function Hexapod() {
   const mouseShieldRadiusRef = useRef(100);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
-  let bodies = [];
+  let hexapodArray = [];
+  let heartArray = [];
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -505,7 +506,7 @@ export default function Hexapod() {
       }
 
       getCloseHexapod() {
-        for (const hexapod of bodies) {
+        for (const hexapod of hexapodArray) {
           if (
             Math.abs(this.position.x - hexapod.body.position.x) < 300 &&
             Math.abs(this.position.y - hexapod.body.position.y) < 300 &&
@@ -605,6 +606,22 @@ export default function Hexapod() {
           leg.draw(ctx, convert3DtoIsometric);
         });
       }
+    }
+
+    function isMouseCloseToHexapod() {
+      const currentPos = mousePosRef.current;
+
+      return hexapodArray.some((hexapod) => {
+        const isometric_pos = convert3DtoIsometric(hexapod.body.position);
+        if (
+          Math.abs(currentPos.x - isometric_pos[0]) < 200 &&
+          Math.abs(currentPos.y - isometric_pos[1]) < 200
+        ) {
+          return true;
+        } else {
+          return false;
+        }
+      });
     }
 
     const legMountOffsets = [
@@ -751,6 +768,92 @@ export default function Hexapod() {
       return curvePoints;
     }
 
+    const MAX_HEART_LIFECYCLE = 150;
+    const HEART_WIDTH = canvas.width / 50;
+    const HEART_HEIGHT = canvas.height / 25;
+
+    class Heart {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.lifeCycle = 0;
+        this.deleted = false;
+      }
+
+      update() {
+        this.y -= 0.1;
+        this.lifeCycle += 1;
+        if (this.lifeCycle > MAX_HEART_LIFECYCLE) {
+          this.deleted = true;
+        }
+      }
+
+      draw() {
+        if (this.deleted) {
+          return;
+        }
+        ctx.save();
+        ctx.beginPath();
+        var topCurveHeight = HEART_HEIGHT * 0.3;
+        ctx.moveTo(this.x, this.y + topCurveHeight);
+        // top left curve
+        ctx.bezierCurveTo(
+          this.x,
+          this.y,
+          this.x - HEART_WIDTH / 2,
+          this.y,
+          this.x - HEART_WIDTH / 2,
+          this.y + topCurveHeight
+        );
+
+        // bottom left curve
+        ctx.bezierCurveTo(
+          this.x - HEART_WIDTH / 2,
+          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          this.x,
+          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          this.x,
+          this.y + HEART_HEIGHT
+        );
+
+        // bottom right curve
+        ctx.bezierCurveTo(
+          this.x,
+          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          this.x + HEART_WIDTH / 2,
+          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          this.x + HEART_WIDTH / 2,
+          this.y + topCurveHeight
+        );
+
+        // top right curve
+        ctx.bezierCurveTo(
+          this.x + HEART_WIDTH / 2,
+          this.y,
+          this.x,
+          this.y,
+          this.x,
+          this.y + topCurveHeight
+        );
+
+        ctx.closePath();
+
+        const hexOpacity = Math.floor(
+          clamp(
+            30 +
+              ((MAX_HEART_LIFECYCLE - this.lifeCycle) / MAX_HEART_LIFECYCLE) *
+                255,
+            0,
+            255
+          )
+        ).toString(16);
+
+        ctx.fillStyle = defaultColours.tertiaryAccent + hexOpacity;
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     const controlPoints = [
       { x: 2, y: 5, z: 90 },
       { x: 0, y: 5, z: 90 },
@@ -787,15 +890,17 @@ export default function Hexapod() {
 
     regenWalkCycle();
 
+    let canGenerateHeart = true;
+
     let lastGaitCount = 0;
     let lastBodyCount = 0;
     function animate() {
-      if (bodies.length > 0) {
+      if (hexapodArray.length > 0) {
         // check for changes in hexCount array:
 
         if (bodyCountRef.current !== lastBodyCount) {
           if (bodyCountRef.current > lastBodyCount) {
-            bodies.push(
+            hexapodArray.push(
               new Hexapod(
                 Math.random() * canvas.width,
                 Math.random() * canvas.height,
@@ -803,7 +908,7 @@ export default function Hexapod() {
               )
             );
           } else {
-            bodies.splice(bodyCountRef.current);
+            hexapodArray.splice(bodyCountRef.current);
           }
         }
 
@@ -814,25 +919,45 @@ export default function Hexapod() {
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        bodies.forEach((hexapod) => {
+        hexapodArray.forEach((hexapod) => {
           hexapod.update();
         });
 
         lastGaitCount = gaitCountRef.current;
-        lastBodyCount = bodies.length;
+        lastBodyCount = hexapodArray.length;
         gaitCycle += 1;
         gaitCycle2 += 1;
         gaitCycle2 %= 360 - gaitCountRef.current;
         gaitCycle %= 360 - gaitCountRef.current;
+        if (gaitCycle == 0) {
+          canGenerateHeart = true;
+        }
+
+        if (mouseClickRef.current) {
+          if (isMouseCloseToHexapod() && canGenerateHeart) {
+            heartArray.push(
+              new Heart(mousePosRef.current.x, mousePosRef.current.y)
+            );
+            canGenerateHeart = false;
+          }
+        }
+
+        heartArray.forEach((heart, index) => {
+          if (heart.deleted) {
+            heartArray.splice(index, 1);
+          }
+          heart.update();
+          heart.draw();
+        });
 
         animationFrameId = requestAnimationFrame(animate);
       }
     }
 
     const init = () => {
-      if (bodies.length === 0) {
+      if (hexapodArray.length === 0) {
         for (let i = 0; i < bodyCountRef.current; i++) {
-          bodies.push(
+          hexapodArray.push(
             new Hexapod(
               Math.random() * canvas.width,
               Math.random() * canvas.height,
@@ -854,7 +979,7 @@ export default function Hexapod() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      bodies = [];
+      hexapodArray = [];
 
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("touchmove", handleMouseMove);
