@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Rain() {
   const canvasRef = useRef(null);
@@ -9,6 +10,8 @@ export default function Rain() {
   const particleCountRef = useRef(2000);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
+  const titleShieldRadiusRef = useRef(30);
+  const recalculateRectRef = useRef(() => {});
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
@@ -20,7 +23,6 @@ export default function Rain() {
     let particles = [];
     const gravity = 0.5;
     const windSpeed = 0.2;
-    const titleShieldRadius = 30;
     let animationFrameId;
     const maxFallSpeed = 13;
     const maxWindSpeed = Math.random() * 10;
@@ -28,14 +30,16 @@ export default function Rain() {
     const recalculateRect = () => {
       let rect = element.getBoundingClientRect();
       rect_padded = {
-        left: rect.left - titleShieldRadius,
-        right: rect.right + titleShieldRadius,
-        top: rect.top - titleShieldRadius,
-        bottom: rect.bottom + titleShieldRadius,
+        left: rect.left - titleShieldRadiusRef.current,
+        right: rect.right + titleShieldRadiusRef.current,
+        top: rect.top - titleShieldRadiusRef.current,
+        bottom: rect.bottom + titleShieldRadiusRef.current,
       };
       elementCenterX = rect.left + rect.width / 2;
       elementCenterY = rect.top + rect.height / 2;
     };
+
+    recalculateRectRef.current = recalculateRect;
 
     const canvas = canvasRef.current;
     const resizeCanvas = () => {
@@ -206,68 +210,37 @@ export default function Rain() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Particle Count:
-            <input
-              type="range"
-              min="100"
-              max="10000"
-              value={particleCountRef.current}
-              onChange={(e) => {
-                particleCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Click Umbrella Radius:
-            <input
-              type="range"
-              min="10.0"
-              max="300.0"
-              value={mouseShieldRadiusRef.current}
-              onChange={(e) => {
-                mouseShieldRadiusRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Particle Count:",
+              valueRef: particleCountRef,
+              minValue: "100",
+              maxValue: "10000",
+            },
+            {
+              title: "Simulation Speed:",
+              valueRef: simulationSpeedRef,
+              minValue: "1",
+              maxValue: "200.0",
+            },
+            {
+              title: "Click Umbrella Radius:",
+              valueRef: mouseShieldRadiusRef,
+              minValue: "10.0",
+              maxValue: "300.0",
+            },
+            {
+              title: "Title Umbrella Radius:",
+              valueRef: titleShieldRadiusRef,
+              minValue: "1.0",
+              maxValue: "100.0",
+              callback: recalculateRectRef.current,
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
+
         <div style={{ position: "absolute", top: "1em", right: "1em" }}>
           <MouseTooltip />
         </div>

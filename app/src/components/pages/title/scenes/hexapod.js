@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Hexapod() {
   const canvasRef = useRef(null);
@@ -874,48 +875,24 @@ export default function Hexapod() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Hexapod Count:
-            <input
-              type="range"
-              min="1"
-              max="10"
-              value={bodyCountRef.current}
-              onChange={(e) => {
-                bodyCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Walking Speed:
-            <input
-              type="range"
-              min="45"
-              max="330"
-              value={gaitCountRef.current}
-              onChange={(e) => {
-                gaitCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Hexapod Count:",
+              valueRef: bodyCountRef,
+              minValue: "1",
+              maxValue: "15",
+            },
+            {
+              title: "Walking Speed:",
+              valueRef: gaitCountRef,
+              minValue: "45",
+              maxValue: "330",
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
+
         <div style={{ zIndex: 10 }}>
           <div style={{ position: "absolute", top: "1em", right: "1em" }}>
             <MouseTooltip />

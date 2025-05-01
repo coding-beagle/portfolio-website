@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Snow() {
   const canvasRef = useRef(null);
@@ -9,24 +10,7 @@ export default function Snow() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    // const element = document.getElementById("title");
-    // let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    // let elementCenterX = 0;
-    // let elementCenterY = 0;
-    const titleShieldRadius = 30;
-
-    // const recalculateRect = () => {
-    //   let rect = element.getBoundingClientRect();
-
-    //   rect_padded = {
-    //     left: rect.left - titleShieldRadius,
-    //     right: rect.right + titleShieldRadius,
-    //     top: rect.top - titleShieldRadius,
-    //     bottom: rect.bottom + titleShieldRadius,
-    //   };
-    //   elementCenterX = rect.left + rect.width / 2;
-    //   elementCenterY = rect.top + rect.height / 2;
-    // };
+    // const titleShieldRadius = 30;
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
@@ -38,25 +22,9 @@ export default function Snow() {
     const ctx = canvas.getContext("2d");
 
     let particles = [];
-    const gravity = 0.05;
+    const gravity = Math.random() > 0.1 ? 0.05 : -0.05;
     const maxSpeed = 1;
     let animationFrameId;
-
-    // const getMousePos = (canvas, evt) => {
-    //   let rect = canvas.getBoundingClientRect();
-    //   return {
-    //     x: evt.clientX - rect.left,
-    //     y: evt.clientY - rect.top,
-    //   };
-    // };
-
-    // const inElement = (rect, x, y) => {
-    //   return (
-    //     x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-    //   );
-    // };
-
-    // recalculateRect();
 
     class Particle {
       constructor(x, y) {
@@ -66,6 +34,19 @@ export default function Snow() {
         this.vy = Math.random() * 2 - 1;
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.accent;
+      }
+
+      reset() {
+        if (gravity > 0.0) {
+          this.y = 0;
+          this.vy *= -0.5;
+          this.x = Math.random() * canvas.width;
+          this.vx = Math.random() * 2 - 1;
+        } else {
+          this.y = canvas.height;
+          this.x = Math.random() * canvas.width;
+          this.vx = Math.random() * 2 - 1;
+        }
       }
 
       update() {
@@ -84,27 +65,24 @@ export default function Snow() {
         //   }
         // }
 
-        if (this.y + this.size > canvas.height) {
-          this.y = 0;
-          this.vy *= -0.5;
-          this.x = Math.random() * canvas.width;
+        if (this.y + this.size > canvas.height && gravity > 0.0) {
+          this.reset();
         }
 
-        if (this.y + this.size < 0) {
-          this.y = canvas.height;
-          this.vy *= -0.5;
+        if (this.y + this.size < 0.0 && gravity < 0.0) {
+          this.reset();
         }
 
-        if (this.vy > maxSpeed) {
-          this.vy -= Math.random(0.1, 0.5);
+        if (Math.abs(this.vy) > maxSpeed) {
+          this.vy -= Math.random(0.1, 0.5) * Math.sign(gravity);
         }
 
-        if (this.vy < maxSpeed) {
-          this.vy += Math.random(0.1, 0.5);
+        if (Math.abs(this.vy) < maxSpeed) {
+          this.vy += Math.random(0.1, 0.5) * Math.sign(gravity);
         }
 
         if (this.x + this.size > canvas.width || this.x - this.size < 0) {
-          this.vx *= -1;
+          this.reset();
         }
       }
 
@@ -168,49 +146,25 @@ export default function Snow() {
           left: 0,
         }}
       />
+
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Particle Count:
-            <input
-              type="range"
-              min="100"
-              max="10000"
-              value={particleCountRef.current}
-              onChange={(e) => {
-                particleCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Particle Count:",
+              valueRef: particleCountRef,
+              minValue: "100",
+              maxValue: "10000",
+            },
+            {
+              title: "Simulation Speed:",
+              valueRef: simulationSpeedRef,
+              minValue: "1",
+              maxValue: "200.0",
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
       </div>
     </>
   );

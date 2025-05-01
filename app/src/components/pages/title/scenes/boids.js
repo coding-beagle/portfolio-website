@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
+import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Boids() {
   const canvasRef = useRef(null);
@@ -203,48 +204,24 @@ export default function Boids() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Bird Count:
-            <input
-              type="range"
-              min="2"
-              max="300"
-              value={particleCountRef.current}
-              onChange={(e) => {
-                particleCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-        </div>
+        <SliderGroup
+          valueArrays={[
+            {
+              title: "Bird Count:",
+              valueRef: particleCountRef,
+              minValue: "2",
+              maxValue: "300",
+            },
+            {
+              title: "Simulation Speed:",
+              valueRef: simulationSpeedRef,
+              minValue: "1",
+              maxValue: "200.0",
+            },
+          ]}
+          rerenderSetter={setRender}
+        />
+
         <div style={{ position: "absolute", top: "1em", right: "1em" }}>
           <MouseTooltip />
         </div>
