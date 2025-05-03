@@ -327,6 +327,7 @@ export default function Mandelbrot() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
+      workerInstance.terminate();
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);
