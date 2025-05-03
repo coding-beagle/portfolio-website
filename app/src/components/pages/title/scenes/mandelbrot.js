@@ -369,6 +369,72 @@ export default function Mandelbrot() {
     canvas.addEventListener("pointerup", handleMouseUp);
     window.addEventListener("wheel", handleWheel);
 
+    let lastTouchDistance = null;
+    let lastTouchCenter = null;
+
+    const handleTouchStart = (event) => {
+      if (event.touches.length === 2) {
+        // Pinch start
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
+
+        lastTouchCenter = {
+          x: (event.touches[0].clientX + event.touches[1].clientX) / 2,
+          y: (event.touches[0].clientY + event.touches[1].clientY) / 2,
+        };
+      }
+    };
+
+    const handleTouchMove = (event) => {
+      if (event.touches.length === 2 && lastTouchDistance !== null) {
+        // Pinch-to-zoom
+        const dx = event.touches[0].clientX - event.touches[1].clientX;
+        const dy = event.touches[0].clientY - event.touches[1].clientY;
+        const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+        const zoomFactor = currentDistance / lastTouchDistance;
+        zoomLevel *= zoomFactor;
+
+        const currentCenter = {
+          x: (event.touches[0].clientX + event.touches[1].clientX) / 2,
+          y: (event.touches[0].clientY + event.touches[1].clientY) / 2,
+        };
+
+        const complexBefore = mapToComplex(
+          lastTouchCenter.x,
+          lastTouchCenter.y
+        );
+        const complexAfter = mapToComplex(currentCenter.x, currentCenter.y);
+
+        centerX += complexBefore[0] - complexAfter[0];
+        centerY += complexBefore[1] - complexAfter[1];
+
+        lastTouchDistance = currentDistance;
+        lastTouchCenter = currentCenter;
+
+        drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
+      } else if (event.touches.length === 1) {
+        // Single-finger pan
+        const touch = event.touches[0];
+        const dx = touch.clientX - mousePosRef.current.x;
+        const dy = touch.clientY - mousePosRef.current.y;
+
+        handlePan(dx, dy);
+
+        mousePosRef.current = { x: touch.clientX, y: touch.clientY };
+      }
+    };
+
+    const handleTouchEnd = () => {
+      lastTouchDistance = null;
+      lastTouchCenter = null;
+    };
+
+    canvas.addEventListener("touchstart", handleTouchStart);
+    canvas.addEventListener("touchmove", handleTouchMove);
+    canvas.addEventListener("touchend", handleTouchEnd);
+
     return () => {
       cancelAnimationFrame(animationFrameId);
       workerInstanceRef.current?.terminate();
@@ -378,6 +444,9 @@ export default function Mandelbrot() {
       canvas.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("touchstart", handleTouchStart);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      canvas.removeEventListener("touchend", handleTouchEnd);
     };
   }, []);
 
