@@ -13,6 +13,7 @@ export default function Mandelbrot() {
   const mouseClickRef = useRef(false);
   const drawEverythingRef = useRef(() => {});
   const currentlyDrawingRef = useRef(false);
+  const currentThemeRef = useRef(0);
 
   const maxIterColourRef = useRef("");
   const maxColourRef = useRef("");
@@ -41,9 +42,15 @@ export default function Mandelbrot() {
     ],
     [
       "Experimental",
-      defaultColours.accent,
-      defaultColours.secondary,
       defaultColours.primary,
+      defaultColours.tertiaryAccent,
+      defaultColours.primary,
+    ],
+    [
+      "Flashbang",
+      defaultColours.tertiaryAccent,
+      defaultColours.primary,
+      defaultColours.accent,
     ],
   ];
 
@@ -133,9 +140,9 @@ export default function Mandelbrot() {
   };
 
   calculateColourComponents(
-    themesList[0][1],
-    themesList[0][2],
-    themesList[0][3]
+    themesList[currentThemeRef.current][1],
+    themesList[currentThemeRef.current][2],
+    themesList[currentThemeRef.current][3]
   );
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
@@ -419,6 +426,7 @@ export default function Mandelbrot() {
                 key={index}
                 style={{ marginLeft: "0.5em" }}
                 onClick={() => {
+                  currentThemeRef.current = index;
                   calculateColourComponents(theme[1], theme[2], theme[3]);
                   drawEverythingRef.current();
                 }}
