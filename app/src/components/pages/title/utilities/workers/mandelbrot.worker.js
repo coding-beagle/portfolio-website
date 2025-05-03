@@ -72,7 +72,7 @@ export default () => {
     let zIm = 0;
     let count = 0;
     let nextZReal, nextZIm;
-    while (zReal ** 2 + zIm ** 2 <= 4 && count < 1000) {
+    while (zReal ** 2 + zIm ** 2 <= 4 && count < 2000) {
       nextZReal = zReal * zReal - zIm * zIm + cX;
       nextZIm = 2 * zReal * zIm + cY;
 

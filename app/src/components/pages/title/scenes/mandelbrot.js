@@ -54,7 +54,7 @@ export default function Mandelbrot() {
     ],
   ];
 
-  const maxIterCount = 1000;
+  const maxIterCount = 2000;
   let transformX = 0;
   let transformY = 0;
   let startClick = { x: 0, y: 0 };
