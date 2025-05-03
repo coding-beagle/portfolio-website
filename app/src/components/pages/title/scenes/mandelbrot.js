@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import MouseTooltip from "../utilities/popovers";
+import Worker from "../utilities/workers/mandelbrot.worker";
+import WorkerFactory from "../utilities/workerFactory";
 
 export default function Mandelbrot() {
   const canvasRef = useRef(null);
@@ -11,6 +13,30 @@ export default function Mandelbrot() {
   const mouseClickRef = useRef(false);
   const drawEverythingRef = useRef(() => {});
   const currentlyDrawingRef = useRef(false);
+
+  const maxIterColourRef = useRef("");
+  const maxColourRef = useRef("");
+  const minColourRef = useRef("");
+  const colourMaxComponentsRef = useRef("");
+  const colourMinComponentsRef = useRef("");
+  const colourStepsRef = useRef("");
+
+  const workerInstance = new WorkerFactory(Worker);
+
+  const themesList = [
+    [
+      "Default",
+      defaultColours.primary,
+      defaultColours.secondary,
+      defaultColours.primary,
+    ],
+    [
+      "Experimental",
+      defaultColours.accent,
+      defaultColours.secondary,
+      defaultColours.primary,
+    ],
+  ];
 
   const maxIterCount = 1000;
   let transformX = 0;
@@ -24,7 +50,7 @@ export default function Mandelbrot() {
   function mapToComplex(pixelX, pixelY) {
     // Calculate the view dimensions in the complex plane
     const viewWidth = 4 / zoomLevel; // 4 units wide at zoom level 1
-    const viewHeight = 2.25 / zoomLevel; // 3 units high at zoom level 1
+    const viewHeight = 2.25 / zoomLevel; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
     const percentX = (pixelX + transformX) / canvasRef.current.width;
@@ -58,43 +84,73 @@ export default function Mandelbrot() {
     return count;
   }
 
-  const maxIterColour = defaultColours.primary;
-  const maxColour = defaultColours.secondary;
-  const minColour = defaultColours.primary;
+  const calculateColourComponents = (
+    maxIterationColour,
+    maxInterpColour,
+    minInterpColour
+  ) => {
+    maxIterColourRef.current = maxIterationColour;
+    maxColourRef.current = maxInterpColour;
+    minColourRef.current = minInterpColour;
 
-  const colourMaxComponents = {
-    r: parseInt(maxColour.slice(1, 3), 16),
-    g: parseInt(maxColour.slice(3, 5), 16),
-    b: parseInt(maxColour.slice(5, 7), 16),
+    colourMaxComponentsRef.current = {
+      r: parseInt(maxColourRef.current.slice(1, 3), 16),
+      g: parseInt(maxColourRef.current.slice(3, 5), 16),
+      b: parseInt(maxColourRef.current.slice(5, 7), 16),
+    };
+
+    colourMinComponentsRef.current = {
+      r: parseInt(minColourRef.current.slice(1, 3), 16),
+      g: parseInt(minColourRef.current.slice(3, 5), 16),
+      b: parseInt(minColourRef.current.slice(5, 7), 16),
+    };
+
+    colourStepsRef.current = {
+      r:
+        (colourMaxComponentsRef.current.r - colourMinComponentsRef.current.r) /
+        maxIterCount,
+      g:
+        (colourMaxComponentsRef.current.g - colourMinComponentsRef.current.g) /
+        maxIterCount,
+      b:
+        (colourMaxComponentsRef.current.b - colourMinComponentsRef.current.b) /
+        maxIterCount,
+    };
   };
 
-  const colourMinComponents = {
-    r: parseInt(minColour.slice(1, 3), 16),
-    g: parseInt(minColour.slice(3, 5), 16),
-    b: parseInt(minColour.slice(5, 7), 16),
-  };
-
-  const colourSteps = {
-    r: (colourMaxComponents.r - colourMinComponents.r) / maxIterCount,
-    g: (colourMaxComponents.g - colourMinComponents.g) / maxIterCount,
-    b: (colourMaxComponents.b - colourMinComponents.b) / maxIterCount,
-  };
+  calculateColourComponents(
+    themesList[0][1],
+    themesList[0][2],
+    themesList[0][3]
+  );
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
   function colourInterp(value) {
     if (value == maxIterCount) {
-      return maxIterColour;
+      return maxIterColourRef.current;
     }
 
     const r = Math.floor(
-      clamp(colourMinComponents.r + value * colourSteps.r, 0, 255)
+      clamp(
+        colourMinComponentsRef.current.r + value * colourStepsRef.current.r,
+        0,
+        255
+      )
     );
     const g = Math.floor(
-      clamp(colourMinComponents.g + value * colourSteps.g, 0, 255)
+      clamp(
+        colourMinComponentsRef.current.g + value * colourStepsRef.current.g,
+        0,
+        255
+      )
     );
     const b = Math.floor(
-      clamp(colourMinComponents.b + value * colourSteps.b, 0, 255)
+      clamp(
+        colourMinComponentsRef.current.b + value * colourStepsRef.current.b,
+        0,
+        255
+      )
     );
 
     const rHex = r.toString(16).padStart(2, "0");
@@ -104,10 +160,11 @@ export default function Mandelbrot() {
     return `#${rHex}${gHex}${bHex}`;
   }
 
-  function drawMandelbrotArea(
+  async function drawMandelbrotArea(
     position,
     resolution = 21 - drawResolutionRef.current,
-    drawAll = false
+    drawAll = false,
+    drawWithWebworker = false
   ) {
     currentlyDrawingRef.current = true;
     const canvas = canvasRef.current;
@@ -126,10 +183,30 @@ export default function Mandelbrot() {
       endY = position.y + drawAreaRef.current / 2;
     }
 
-    // Use nested loops instead of recursion for pixel-by-pixel drawing
     for (let y = startY; y < endY; y += resolution) {
       for (let x = startX; x < endX; x += resolution) {
-        ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
+        if (drawWithWebworker) {
+          workerInstance.postMessage({
+            pixelX: x,
+            pixelY: y,
+            zoomLevel: zoomLevel,
+            transformX: transformX,
+            transformY: transformY,
+            canvasWidth: canvasRef.current.width,
+            canvasHeight: canvasRef.current.height,
+            centerX: centerX,
+            centerY: centerY,
+          });
+          await new Promise((resolve) => {
+            workerInstance.onmessage = (event) => {
+              ctx.fillStyle = colourInterp(event.data);
+              resolve();
+            };
+          });
+        } else {
+          ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
+        }
+
         ctx.fillRect(x, y, resolution, resolution);
       }
     }
@@ -149,7 +226,7 @@ export default function Mandelbrot() {
     let animationFrameId;
     let currentRes = 10;
 
-    function animate() {
+    async function animate() {
       // Cancel previous animation frame if it exists
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
@@ -160,17 +237,17 @@ export default function Mandelbrot() {
         !currentlyDrawingRef.current
       ) {
         currentRes -= 1;
-        drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true);
+        await drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true, true);
       }
+
+      drawEverythingRef.current = async () => {
+        currentRes = 10;
+        await drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
+      };
 
       // Request the next frame
       animationFrameId = requestAnimationFrame(animate);
     }
-
-    // Start the animation
-    drawEverythingRef.current = () => {
-      drawMandelbrotArea({ x: 0, y: 0 }, 21 - drawResolutionRef.current, true);
-    };
 
     drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
     animate();
@@ -290,6 +367,27 @@ export default function Mandelbrot() {
               }}
               style={{ marginLeft: "0.5em" }}
             />
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            Toggle Theme:
+            {themesList.map((theme, index) => (
+              <button
+                key={index}
+                style={{ marginLeft: "0.5em" }}
+                onClick={() => {
+                  calculateColourComponents(theme[1], theme[2], theme[3]);
+                  drawEverythingRef.current();
+                }}
+              >
+                {theme[0]}
+              </button>
+            ))}
           </div>
         </div>
       </div>
