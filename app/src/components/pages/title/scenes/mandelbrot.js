@@ -387,6 +387,7 @@ export default function Mandelbrot() {
     };
 
     const handleTouchMove = (event) => {
+      event.preventDefault();
       if (event.touches.length === 2 && lastTouchDistance !== null) {
         // Pinch-to-zoom
         const dx = event.touches[0].clientX - event.touches[1].clientX;
