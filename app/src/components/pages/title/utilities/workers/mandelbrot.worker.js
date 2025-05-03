@@ -12,7 +12,9 @@ export default () => {
       data.canvasWidth,
       data.canvasHeight,
       data.centerX,
-      data.centerY
+      data.centerY,
+      data.xAspectRatio,
+      data.yAspectRatio
     );
     // eslint-disable-next-line no-restricted-globals
     self.postMessage(results);
@@ -27,7 +29,9 @@ export default () => {
     canvasWidth,
     canvasHeight,
     centerX,
-    centerY
+    centerY,
+    xAspectRatio,
+    yAspectRatio
   ) {
     return rowPixels.map((pixelX) =>
       calculateMandelbrot(
@@ -39,7 +43,9 @@ export default () => {
         canvasWidth,
         canvasHeight,
         centerX,
-        centerY
+        centerY,
+        xAspectRatio,
+        yAspectRatio
       )
     );
   }
@@ -53,7 +59,9 @@ export default () => {
     canvasWidth,
     canvasHeight,
     centerX,
-    centerY
+    centerY,
+    xAspectRatio,
+    yAspectRatio
   ) {
     const c = mapToComplex(
       pixelX,
@@ -64,7 +72,9 @@ export default () => {
       canvasWidth,
       canvasHeight,
       centerX,
-      centerY
+      centerY,
+      xAspectRatio,
+      yAspectRatio
     ); // real or fake it is what it is ykwim
     const cX = c[0];
     const cY = c[1];
@@ -94,11 +104,13 @@ export default () => {
     canvasWidth,
     canvasHeight,
     centerX,
-    centerY
+    centerY,
+    xAspectRatio,
+    yAspectRatio
   ) {
     // Calculate the view dimensions in the complex plane
-    const viewWidth = 4 / zoomLevel; // 4 units wide at zoom level 1
-    const viewHeight = 2.25 / zoomLevel; // 2.25 units high at zoom level 1
+    const viewWidth = xAspectRatio / zoomLevel; // 4 units wide at zoom level 1
+    const viewHeight = yAspectRatio / zoomLevel; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
     const percentX = (pixelX + transformX) / canvasWidth;

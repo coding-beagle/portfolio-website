@@ -70,8 +70,9 @@ export default function Mandelbrot() {
     }
 
     // Calculate the view dimensions in the complex plane
-    const viewWidth = 4 / zoomLevel; // 4 units wide at zoom level 1
-    const viewHeight = 2.25 / zoomLevel; // 2.25 units high at zoom level 1
+    const viewWidth =
+      ((canvasRef.current.width / canvasRef.current.height) * 2) / zoomLevel; // 4 units wide at zoom level 1
+    const viewHeight = 2 / zoomLevel; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
     const percentX = (pixelX + transformX) / canvasRef.current.width;
@@ -181,8 +182,6 @@ export default function Mandelbrot() {
     return `#${rHex}${gHex}${bHex}`;
   }
 
-  let lastColour = [[]];
-
   async function drawMandelbrotArea(
     position,
     resolution = 21 - drawResolutionRef.current,
@@ -218,6 +217,8 @@ export default function Mandelbrot() {
         const chunkSize = 160; // Adjust this based on observed limits
         for (let i = 0; i < x_array.length; i += chunkSize) {
           const chunk = x_array.slice(i, i + chunkSize);
+          const aspectRatio =
+            (canvasRef.current.width / canvasRef.current.height) * 2;
           workerInstanceRef.current.postMessage({
             rowPixels: chunk,
             rowY: y,
@@ -228,6 +229,8 @@ export default function Mandelbrot() {
             canvasHeight: canvasRef.current.height,
             centerX: centerX,
             centerY: centerY,
+            xAspectRatio: aspectRatio,
+            yAspectRatio: 2,
           });
 
           let returned_data = [];
@@ -363,12 +366,6 @@ export default function Mandelbrot() {
       drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
     };
 
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("wheel", handleWheel);
-
     let lastTouchDistance = null;
     let lastTouchCenter = null;
 
@@ -432,6 +429,17 @@ export default function Mandelbrot() {
       lastTouchCenter = null;
     };
 
+    const handleResize = () => {
+      resizeCanvas();
+      drawEverythingRef.current();
+    };
+
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("touchmove", handleMouseMove);
+    canvas.addEventListener("pointerdown", handleMouseDown);
+    canvas.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("wheel", handleWheel);
+    window.addEventListener("resize", handleResize);
     canvas.addEventListener("touchstart", handleTouchStart);
     canvas.addEventListener("touchmove", handleTouchMove);
     canvas.addEventListener("touchend", handleTouchEnd);
@@ -440,6 +448,7 @@ export default function Mandelbrot() {
       cancelAnimationFrame(animationFrameId);
       workerInstanceRef.current?.terminate();
       window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("resize", drawEverythingRef.current);
       window.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);
       canvas.removeEventListener("pointerup", handleMouseUp);
