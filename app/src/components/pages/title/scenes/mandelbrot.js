@@ -21,7 +21,16 @@ export default function Mandelbrot() {
   const colourMinComponentsRef = useRef("");
   const colourStepsRef = useRef("");
 
-  const workerInstance = new WorkerFactory(Worker);
+  const workerInstanceRef = useRef(null);
+
+  useEffect(() => {
+    workerInstanceRef.current = new WorkerFactory(Worker);
+
+    return () => {
+      workerInstanceRef.current.terminate();
+      workerInstanceRef.current = null;
+    };
+  }, []);
 
   const themesList = [
     [
@@ -48,6 +57,11 @@ export default function Mandelbrot() {
   let zoomLevel = 1; // Zoom factor
 
   function mapToComplex(pixelX, pixelY) {
+    // Return early if canvasRef.current is null
+    if (!canvasRef.current) {
+      return [0, 0];
+    }
+
     // Calculate the view dimensions in the complex plane
     const viewWidth = 4 / zoomLevel; // 4 units wide at zoom level 1
     const viewHeight = 2.25 / zoomLevel; // 2.25 units high at zoom level 1
@@ -160,6 +174,8 @@ export default function Mandelbrot() {
     return `#${rHex}${gHex}${bHex}`;
   }
 
+  let lastColour = [[]];
+
   async function drawMandelbrotArea(
     position,
     resolution = 21 - drawResolutionRef.current,
@@ -171,7 +187,9 @@ export default function Mandelbrot() {
     const ctx = canvas.getContext("2d");
     let startX, startY, endX, endY;
     if (drawAll) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!drawWithWebworker) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
       startX = 0;
       startY = 0;
       endX = canvas.width;
@@ -183,12 +201,19 @@ export default function Mandelbrot() {
       endY = position.y + drawAreaRef.current / 2;
     }
 
-    for (let y = startY; y < endY; y += resolution) {
-      for (let x = startX; x < endX; x += resolution) {
-        if (drawWithWebworker) {
-          workerInstance.postMessage({
-            pixelX: x,
-            pixelY: y,
+    if (drawWithWebworker) {
+      for (let y = startY; y < endY; y += resolution) {
+        const x_array = [];
+        for (let x = startX; x < endX; x += resolution) {
+          x_array.push(x);
+        }
+
+        const chunkSize = 160; // Adjust this based on observed limits
+        for (let i = 0; i < x_array.length; i += chunkSize) {
+          const chunk = x_array.slice(i, i + chunkSize);
+          workerInstanceRef.current.postMessage({
+            rowPixels: chunk,
+            rowY: y,
             zoomLevel: zoomLevel,
             transformX: transformX,
             transformY: transformY,
@@ -197,19 +222,31 @@ export default function Mandelbrot() {
             centerX: centerX,
             centerY: centerY,
           });
+
+          let returned_data = [];
           await new Promise((resolve) => {
-            workerInstance.onmessage = (event) => {
-              ctx.fillStyle = colourInterp(event.data);
+            workerInstanceRef.current.onmessage = (event) => {
+              returned_data = event.data;
               resolve();
             };
           });
-        } else {
-          ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
-        }
 
-        ctx.fillRect(x, y, resolution, resolution);
+          returned_data.forEach((x_data, index) => {
+            const x = chunk[index];
+            ctx.fillStyle = colourInterp(x_data);
+            ctx.fillRect(x, y, resolution, resolution);
+          });
+        }
+      }
+    } else {
+      for (let y = startY; y < endY; y += resolution) {
+        for (let x = startX; x < endX; x += resolution) {
+          ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
+          ctx.fillRect(x, y, resolution, resolution);
+        }
       }
     }
+
     currentlyDrawingRef.current = false;
   }
 
@@ -327,7 +364,7 @@ export default function Mandelbrot() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      workerInstance.terminate();
+      workerInstanceRef.current?.terminate();
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);

@@ -3,9 +3,9 @@ export default () => {
   // eslint-disable-next-line no-restricted-globals
   self.addEventListener("message", (event) => {
     const data = event.data;
-    const result = calculateMandelbrot(
-      data.pixelX,
-      data.pixelY,
+    const results = calculateMandelbrotRow(
+      data.rowPixels,
+      data.rowY, // Correctly pass rowY as a separate parameter
       data.zoomLevel,
       data.transformX,
       data.transformY,
@@ -15,8 +15,34 @@ export default () => {
       data.centerY
     );
     // eslint-disable-next-line no-restricted-globals
-    self.postMessage(result);
+    self.postMessage(results);
   });
+
+  function calculateMandelbrotRow(
+    rowPixels,
+    rowY, // Correctly pass rowY as a separate parameter
+    zoomLevel,
+    transformX,
+    transformY,
+    canvasWidth,
+    canvasHeight,
+    centerX,
+    centerY
+  ) {
+    return rowPixels.map((pixelX) =>
+      calculateMandelbrot(
+        pixelX,
+        rowY, // Use rowY here
+        zoomLevel,
+        transformX,
+        transformY,
+        canvasWidth,
+        canvasHeight,
+        centerX,
+        centerY
+      )
+    );
+  }
 
   function calculateMandelbrot(
     pixelX,
