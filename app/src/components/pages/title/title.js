@@ -16,6 +16,7 @@ import Hexapod from "./scenes/hexapod";
 import Mandelbrot from "./scenes/mandelbrot";
 import Plants from "./scenes/plants";
 import Fire from "./scenes/fire";
+import FireWorks from "./scenes/firework";
 
 const Scenes = {
   0: Snow,
@@ -27,6 +28,7 @@ const Scenes = {
   6: Hexapod,
   7: Mandelbrot,
   8: Fire,
+  9: FireWorks,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -75,7 +77,6 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   }, [clicked]);
 
   const renderScene = () => {
-    console.log(currentScene);
     return Scenes[currentScene];
   };
 
