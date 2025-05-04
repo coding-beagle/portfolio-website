@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import defaultColours from "../../../../themes/themes";
 import { SliderGroup } from "../utilities/valueChangers";
+import MouseTooltip from "../utilities/popovers";
 
 export default function Fire() {
   const canvasRef = useRef(null);
@@ -263,6 +264,9 @@ export default function Fire() {
           ]}
           rerenderSetter={setRender}
         />
+      </div>
+      <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+        <MouseTooltip />
       </div>
     </>
   );
