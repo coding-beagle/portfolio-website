@@ -452,7 +452,7 @@ export default function Mandelbrot() {
       window.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);
       canvas.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("resize", resizeCanvas);
+      window.removeEventListener("resize", handleResize);
       window.removeEventListener("wheel", handleWheel);
       canvas.removeEventListener("touchstart", handleTouchStart);
       canvas.removeEventListener("touchmove", handleTouchMove);

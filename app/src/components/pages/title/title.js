@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, createElement } from "react";
 import defaultColours from "../../../themes/themes";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
-import Sun from "./scenes/plants";
 import Stars from "./scenes/stars";
 import Boids from "./scenes/boids";
 import {
@@ -15,17 +14,19 @@ import Conway from "./scenes/conway";
 // import WindTunnel from "./scenes/windtunnel";
 import Hexapod from "./scenes/hexapod";
 import Mandelbrot from "./scenes/mandelbrot";
+import Plants from "./scenes/plants";
+import Fire from "./scenes/fire";
 
 const Scenes = {
-  SNOW: 0,
-  RAIN: 1,
-  SUN: 2,
-  STARS: 3,
-  BOIDS: 4,
-  CONWAY: 5,
-  // WINDTUNNEL: 6,
-  HEXAPOD: 6,
-  MANDELBROT: 7,
+  0: Snow,
+  1: Rain,
+  2: Plants,
+  3: Stars,
+  4: Boids,
+  5: Conway,
+  6: Hexapod,
+  7: Mandelbrot,
+  8: Fire,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -74,28 +75,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   }, [clicked]);
 
   const renderScene = () => {
-    switch (currentScene) {
-      case Scenes.SNOW:
-        return <Snow />;
-      case Scenes.RAIN:
-        return <Rain />;
-      case Scenes.SUN: // need to let this cook a bit
-        return <Sun />;
-      case Scenes.STARS:
-        return <Stars />;
-      case Scenes.BOIDS:
-        return <Boids />;
-      case Scenes.CONWAY:
-        return <Conway />;
-      // case Scenes.WINDTUNNEL:  // need to let this cook a bit
-      //   return <WindTunnel />;
-      case Scenes.HEXAPOD:
-        return <Hexapod />;
-      case Scenes.MANDELBROT:
-        return <Mandelbrot />;
-      default:
-        return;
-    }
+    console.log(currentScene);
+    return Scenes[currentScene];
   };
 
   const getRandomShake = () => {
@@ -115,7 +96,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
           position: "relative",
         }}
       >
-        {renderScene()}
+        {createElement(renderScene())}
         <header
           onMouseEnter={() => setIsHover(true)}
           onMouseLeave={() => setIsHover(false)}
