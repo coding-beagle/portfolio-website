@@ -78,8 +78,10 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   };
 
   const getRandomShake = () => {
-    const rotation = (Math.random() - 0.5) * 20;
-    return `rotate(${rotation}deg)`;
+    const rotation = (Math.random() - 0.5) * 30; // Increased rotation for a more exaggerated effect
+    const xOffset = (Math.random() - 0.5) * 30; // Add horizontal shake
+    const yOffset = (Math.random() - 0.5) * 30; // Add vertical shake
+    return `rotate(${rotation}deg) translate(${xOffset}px, ${yOffset}px)`;
   };
 
   return (
