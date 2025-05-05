@@ -1,4 +1,4 @@
-import { useEffect, useState, createElement } from "react";
+import { useEffect, useState, createElement, useRef } from "react";
 import defaultColours from "../../../themes/themes";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
@@ -49,23 +49,20 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     }
   }, [initialScene]);
 
+  const intervalRef = useRef(null);
+
   useEffect(() => {
-    // Trigger shake effect on initial load
-    setClicked(true);
-    setIsHover(true);
-    setTimeout(() => {
-      setClicked(false);
-    }, 200);
-    setTimeout(() => {
+    intervalRef.current = setInterval(() => {
       setClicked(true);
-    }, 250);
-    setTimeout(() => {
-      setClicked(true);
-    }, 500);
-    setTimeout(() => {
-      setClicked(false);
+      setTimeout(() => {
+        setClicked(false);
+      }, 200);
+    }, Math.random() * 1000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
       setIsHover(false);
-    }, 1000);
+    };
   }, []);
 
   useEffect(() => {
@@ -102,6 +99,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
           onMouseEnter={() => setIsHover(true)}
           onMouseLeave={() => setIsHover(false)}
           onMouseDown={(event) => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
             if (event.button === 0) {
               setClicked(true);
               setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
