@@ -189,7 +189,8 @@ export default function Stars() {
       }
 
       update() {
-        if (!this.isActive && Math.random() < this.shootingStarChance) {
+        if (!this.isActive && Math.random() < this.shootingStarChance / 2) {
+          // Reduce the chance of activation to make it harder for all comets to be active at once
           this.isActive = true;
         }
 
@@ -198,6 +199,22 @@ export default function Stars() {
         const distance = Math.sqrt(mouseDx ** 2 + mouseDy ** 2);
 
         if (this.isActive) {
+          // Check for collisions with stars
+          if (mouseClickRef.current) {
+            stars = stars.filter((star) => {
+              const dx = this.x - star.x;
+              const dy = this.y - star.y;
+              const distance = Math.sqrt(dx ** 2 + dy ** 2);
+
+              if (distance < this.size + star.size) {
+                this.size += 0.5; // Increase comet size slightly
+                return false; // Remove the star
+              }
+
+              return true; // Keep the star
+            });
+          }
+
           if (!(distance < mouseTriggerDistance && mouseClickRef.current)) {
             this.isActiveCounter++;
           }
@@ -243,7 +260,11 @@ export default function Stars() {
 
           this.trailSizes = this.trailSizes.map((size) => size - 0.1);
 
-          if (this.isActiveCounter > maxShootingStarCounter) {
+          // Ensure fade-out completes before resetting
+          if (
+            this.isActiveCounter > maxShootingStarCounter &&
+            this.size <= 0.01 // Check if the comet has fully faded out
+          ) {
             this.isActive = false;
             this.isActiveCounter = 0;
             this.x = Math.random() * canvas.width;

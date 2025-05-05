@@ -43,8 +43,12 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     if (initialScene === "") {
       setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
     } else {
-      if (Scenes[initialScene] !== undefined) {
-        setCurrentScene(Scenes[initialScene]);
+      const sceneIndex = Object.entries(Scenes).find(
+        ([, Component]) =>
+          Component.name.toLowerCase() === initialScene.toLowerCase()
+      )?.[0];
+      if (sceneIndex !== undefined) {
+        setCurrentScene(parseInt(sceneIndex, 10));
       }
     }
   }, [initialScene]);
