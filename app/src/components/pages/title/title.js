@@ -19,16 +19,29 @@ import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
 
 const Scenes = {
-  0: { component: Snow, sceneName: "snow" },
-  1: { component: Rain, sceneName: "rain" },
-  2: { component: Plants, sceneName: "plants" },
-  3: { component: Stars, sceneName: "stars" },
-  4: { component: Boids, sceneName: "boids" },
-  5: { component: Conway, sceneName: "conway" },
-  6: { component: Hexapod, sceneName: "hexapod" },
-  7: { component: Mandelbrot, sceneName: "mandelbrot" },
-  8: { component: Fire, sceneName: "fire" },
-  9: { component: Fireworks, sceneName: "fireworks" },
+  0: { component: Snow },
+  1: { component: Rain },
+  2: { component: Plants },
+  3: { component: Stars },
+  4: { component: Boids },
+  5: { component: Conway },
+  6: { component: Hexapod },
+  7: { component: Mandelbrot },
+  8: { component: Fire },
+  9: { component: Fireworks },
+};
+
+const sceneNameToIndex = {
+  snow: 0,
+  rain: 1,
+  plants: 2,
+  stars: 3,
+  boids: 4,
+  conway: 5,
+  hexapod: 6,
+  mandelbrot: 7,
+  fire: 8,
+  fireworks: 9,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -43,11 +56,9 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     if (initialScene === "") {
       setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
     } else {
-      const sceneIndex = Object.entries(Scenes).find(
-        ([, { sceneName }]) => sceneName === initialScene.toLowerCase()
-      )?.[0];
+      const sceneIndex = sceneNameToIndex[initialScene.toLowerCase()];
       if (sceneIndex !== undefined) {
-        setCurrentScene(parseInt(sceneIndex, 10));
+        setCurrentScene(sceneIndex);
       }
     }
   }, [initialScene]);
