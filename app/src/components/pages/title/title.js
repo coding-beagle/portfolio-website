@@ -19,16 +19,16 @@ import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
 
 const Scenes = {
-  0: Snow,
-  1: Rain,
-  2: Plants,
-  3: Stars,
-  4: Boids,
-  5: Conway,
-  6: Hexapod,
-  7: Mandelbrot,
-  8: Fire,
-  9: Fireworks,
+  0: { component: Snow, sceneName: "snow" },
+  1: { component: Rain, sceneName: "rain" },
+  2: { component: Plants, sceneName: "plants" },
+  3: { component: Stars, sceneName: "stars" },
+  4: { component: Boids, sceneName: "boids" },
+  5: { component: Conway, sceneName: "conway" },
+  6: { component: Hexapod, sceneName: "hexapod" },
+  7: { component: Mandelbrot, sceneName: "mandelbrot" },
+  8: { component: Fire, sceneName: "fire" },
+  9: { component: Fireworks, sceneName: "fireworks" },
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -44,8 +44,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
       setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
     } else {
       const sceneIndex = Object.entries(Scenes).find(
-        ([, Component]) =>
-          Component.name.toLowerCase() === initialScene.toLowerCase()
+        ([, { sceneName }]) => sceneName === initialScene.toLowerCase()
       )?.[0];
       if (sceneIndex !== undefined) {
         setCurrentScene(parseInt(sceneIndex, 10));
@@ -78,7 +77,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   }, [clicked]);
 
   const renderScene = () => {
-    return Scenes[currentScene];
+    return Scenes[currentScene].component;
   };
 
   const getRandomShake = () => {
@@ -161,8 +160,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
         >
           Current scene:{" "}
           {Object.entries(Scenes).find(
-            ([, Component]) => Component === Scenes[currentScene]
-          )?.[1]?.name || "Unknown"}
+            ([, { component }]) => component === Scenes[currentScene].component
+          )?.[1]?.sceneName || "Unknown"}
         </div>
         <div
           id="linkIcons"
