@@ -53,12 +53,21 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
+    console.log(initialScene);
     if (initialScene === "") {
       setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
     } else {
-      const sceneIndex = sceneNameToIndex[initialScene.toLowerCase()];
+      const normalizedScene = decodeURIComponent(
+        initialScene.trim().toLowerCase()
+      );
+      const sceneIndex = sceneNameToIndex[normalizedScene];
       if (sceneIndex !== undefined) {
         setCurrentScene(sceneIndex);
+      } else {
+        console.warn(
+          `Invalid initialScene: "${initialScene}". Falling back to a random scene.`
+        );
+        setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
       }
     }
   }, [initialScene]);
