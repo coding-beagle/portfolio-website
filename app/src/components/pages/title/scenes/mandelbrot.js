@@ -52,6 +52,12 @@ export default function Mandelbrot() {
       defaultColours.primary,
       defaultColours.accent,
     ],
+    [
+      "Adorned",
+      defaultColours.secondary,
+      defaultColours.accent,
+      defaultColours.primary,
+    ],
   ];
 
   const maxIterCount = 2000;
