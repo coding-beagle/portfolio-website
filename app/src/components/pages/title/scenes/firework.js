@@ -3,7 +3,7 @@ import defaultColours from "../../../../themes/themes";
 import { SliderGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
 
-export default function FireWorks() {
+export default function Fireworks() {
   const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
@@ -71,7 +71,7 @@ export default function FireWorks() {
         this.x = Math.random() * canvasRef.current.width;
         this.y = canvasRef.current.height;
         this.vx = (Math.random() - 0.5) * maxFireworkSpeed;
-        this.vy = -(Math.random() + 5 * maxFireworkRiseSpeed);
+        this.vy = -(Math.random() + 2 * maxFireworkRiseSpeed);
         this.size = Math.random() * 2 + 1;
         this.color = defaultColours.accent;
         this.points = [];
@@ -81,9 +81,7 @@ export default function FireWorks() {
         this.exploded = false;
         this.explodeCount = 0;
         this.postExplodeCount = 0;
-        this.explodeDelay = Math.floor(
-          Math.random() * 50 * (100 / simulationSpeedRef.current)
-        );
+        this.explodeDelay = Math.floor((Math.random() + 500) * 100);
       }
 
       update() {
@@ -91,12 +89,14 @@ export default function FireWorks() {
           this.y += (this.vy * simulationSpeedRef.current) / 100;
           this.x += (this.vx * simulationSpeedRef.current) / 100;
 
-          this.explodeCount += 1;
           if (
-            this.explodeCount > this.explodeDelay ||
-            this.y < canvasRef.current.height / 3
+            this.y > 0 && // Top portion of the screen
+            this.y < canvasRef.current.height / 3 // Adjusted to top third
           ) {
-            this.exploded = true;
+            this.explodeCount += 1;
+            if (this.explodeCount > this.explodeDelay || !this.exploded) {
+              this.exploded = true;
+            }
 
             if (this.type === "Circle") {
               const chaffCount = Math.floor(Math.random() * 100) + 20;

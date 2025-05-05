@@ -16,7 +16,7 @@ import Hexapod from "./scenes/hexapod";
 import Mandelbrot from "./scenes/mandelbrot";
 import Plants from "./scenes/plants";
 import Fire from "./scenes/fire";
-import FireWorks from "./scenes/firework";
+import Fireworks from "./scenes/firework";
 
 const Scenes = {
   0: Snow,
@@ -28,7 +28,7 @@ const Scenes = {
   6: Hexapod,
   7: Mandelbrot,
   8: Fire,
-  9: FireWorks,
+  9: Fireworks,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
@@ -140,6 +140,27 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             : decodeURIComponent(text).replace(/%0A/g, "\n")}
         </header>
         <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            fontWeight: "bold",
+            fontSize: "1.5em",
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
+            KhtmlUserSelect: "none",
+            MozUserSelect: "none",
+            userSelect: "none",
+            msUserSelect: "none",
+            zIndex: 100,
+            paddingBottom: "0.5em", // Added bottom padding
+          }}
+        >
+          Current scene:{" "}
+          {Object.entries(Scenes).find(
+            ([, Component]) => Component === Scenes[currentScene]
+          )?.[1]?.name || "Unknown"}
+        </div>
+        <div
           id="linkIcons"
           style={{
             display: "flex",
@@ -147,6 +168,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             gap: "1em",
             fontSize: "3em",
             zIndex: 100,
+            paddingBottom: "1em", // Added bottom padding
           }}
         >
           <IconHover
