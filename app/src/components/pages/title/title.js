@@ -53,7 +53,6 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   const [clicked, setClicked] = useState(false);
 
   useEffect(() => {
-    console.log(initialScene);
     if (initialScene === "") {
       setCurrentScene(Math.floor(Math.random() * Object.keys(Scenes).length));
     } else {
@@ -105,6 +104,13 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     const xOffset = (Math.random() - 0.5) * 30; // Add horizontal shake
     const yOffset = (Math.random() - 0.5) * 30; // Add vertical shake
     return `rotate(${rotation}deg) translate(${xOffset}px, ${yOffset}px)`;
+  };
+
+  const getSceneName = (index) => {
+    return (
+      Object.entries(sceneNameToIndex).find(([, i]) => i === index)?.[0] ||
+      "Unknown"
+    );
   };
 
   return (
@@ -178,10 +184,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             paddingBottom: "0.5em", // Added bottom padding
           }}
         >
-          Current scene:{" "}
-          {Object.entries(Scenes).find(
-            ([, { component }]) => component === Scenes[currentScene].component
-          )?.[1]?.sceneName || "Unknown"}
+          Current scene: {getSceneName(currentScene)}
         </div>
         <div
           id="linkIcons"
