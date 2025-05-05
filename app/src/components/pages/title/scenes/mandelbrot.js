@@ -7,7 +7,7 @@ import WorkerFactory from "../utilities/workerFactory";
 export default function Mandelbrot() {
   const canvasRef = useRef(null);
   const drawAreaRef = useRef(400);
-  const drawResolutionRef = useRef(15);
+  const drawResolutionRef = useRef(20);
   const [, setRender] = useState(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
