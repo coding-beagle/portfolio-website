@@ -78,8 +78,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
       setClicked(true);
       setTimeout(() => {
         setClicked(false);
-      }, 200);
-    }, Math.random() * 1000);
+      }, 500);
+    }, 1500);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -91,7 +91,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     if (clicked) {
       setTimeout(() => {
         setClicked(false);
-      }, 300);
+      }, 500);
     }
   }, [clicked]);
 
@@ -100,10 +100,25 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   };
 
   const getRandomShake = () => {
-    const rotation = (Math.random() - 0.5) * 30; // Increased rotation for a more exaggerated effect
-    const xOffset = (Math.random() - 0.5) * 30; // Add horizontal shake
-    const yOffset = (Math.random() - 0.5) * 30; // Add vertical shake
-    return `rotate(${rotation}deg) translate(${xOffset}px, ${yOffset}px)`;
+    const animationName = `cartoony-shake-${Math.random()
+      .toString(36)
+      .substr(2, 5)}`; // Unique animation name
+
+    const keyframes = `
+      @keyframes ${animationName} {
+        0% { transform: translate(0, 0) rotate(0deg); }
+        25% { transform: translate(-10px, -5px) rotate(-5deg); }
+        50% { transform: translate(12px, 6px) rotate(4deg); }
+        75% { transform: translate(-8px, 4px) rotate(-3deg); }
+        100% { transform: translate(0, 0) rotate(0deg); }
+      }
+    `;
+
+    // Inject the keyframes into a style tag
+    const styleSheet = document.styleSheets[0];
+    styleSheet.insertRule(keyframes, styleSheet.cssRules.length);
+
+    return animationName; // Return the animation name
   };
 
   const getSceneName = (index) => {
@@ -159,7 +174,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             MozUserSelect: "none",
             userSelect: "none",
             msUserSelect: "none",
-            transform: clicked ? `scale(1.1) ${getRandomShake()}` : "scale(1)",
+            transform: clicked ? "scale(1.1)" : "scale(1)",
+            animation: clicked ? `${getRandomShake()} 0.5s ease` : "none", // Apply the shake animation
             whiteSpace: "pre-wrap", // Allows handling of newlines
           }}
           id="title"
