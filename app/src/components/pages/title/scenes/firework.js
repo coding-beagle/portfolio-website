@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
 
 export default function Fireworks() {
@@ -205,13 +205,14 @@ export default function Fireworks() {
       />
 
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

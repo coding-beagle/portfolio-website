@@ -178,12 +178,74 @@ export function Slider({
   );
 }
 
-export function SliderGroup({ rerenderSetter, valueArrays }) {
+export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
+  return (
+    <div>
+      {title}{" "}
+      <button
+        onClick={() => {
+          rerenderSetter((prev) => prev + 1);
+          callback();
+        }}
+      >
+        {buttonText}
+      </button>
+    </div>
+  );
+}
+
+export function ChangerGroup({ rerenderSetter, valueArrays }) {
   return (
     <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-      {valueArrays.map((element, index) => (
-        <Slider key={index} {...element} rerenderSetter={rerenderSetter} />
-      ))}
+      {valueArrays.map((element, index) => {
+        if (Array.isArray(element)) {
+          // Render any number of value changers side by side
+          return (
+            <div
+              key={index}
+              style={{
+                display: "flex",
+                gap: "0.5em",
+                alignItems: "center",
+                marginBottom: "0.5em",
+              }}
+            >
+              {element.map((subElement, subIndex) => {
+                if (subElement.type === "slider")
+                  return (
+                    <Slider
+                      key={subIndex}
+                      {...subElement}
+                      rerenderSetter={rerenderSetter}
+                    />
+                  );
+                if (subElement.type === "button")
+                  return (
+                    <ChangerButton
+                      key={subIndex}
+                      {...subElement}
+                      rerenderSetter={rerenderSetter}
+                    />
+                  );
+                return null;
+              })}
+            </div>
+          );
+        }
+        if (element.type === "slider")
+          return (
+            <Slider key={index} {...element} rerenderSetter={rerenderSetter} />
+          );
+        if (element.type === "button")
+          return (
+            <ChangerButton
+              key={index}
+              {...element}
+              rerenderSetter={rerenderSetter}
+            />
+          );
+        return null;
+      })}
     </div>
   );
 }

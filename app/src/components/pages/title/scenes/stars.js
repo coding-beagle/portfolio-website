@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Stars() {
   const { theme } = useTheme();
@@ -624,7 +624,7 @@ export default function Stars() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Star Count:",
@@ -633,12 +633,14 @@ export default function Stars() {
               maxValue: "1000",
               isState: true,
               valueSetter: setParticleCount,
+              type: "slider",
             },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "500.0",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Boids() {
   const { theme } = useTheme();
@@ -231,31 +231,35 @@ export default function Boids() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Bird Count:",
               valueRef: particleCountRef,
               minValue: "2",
               maxValue: "300",
+              type: "slider",
             },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
             },
             {
               title: "Attraction to Mouse (Main Bird):",
               valueRef: attractionStrengthRef,
               minValue: "1",
               maxValue: "200",
+              type: "slider",
             },
             {
               title: "Attraction to Main Bird (Other Birds):",
               valueRef: secondaryAttractionStrengthRef,
               minValue: "1",
               maxValue: "200",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

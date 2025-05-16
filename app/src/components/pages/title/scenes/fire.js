@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 import MouseTooltip from "../utilities/popovers";
 
 export default function Fire() {
@@ -248,19 +248,21 @@ export default function Fire() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Fire Size:",
               valueRef: fireSizeRef,
               minValue: "1",
               maxValue: "800",
+              type: "slider",
             },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

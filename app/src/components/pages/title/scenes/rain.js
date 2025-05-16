@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Rain() {
   const { theme } = useTheme();
@@ -211,25 +211,28 @@ export default function Rain() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Particle Count:",
               valueRef: particleCountRef,
               minValue: "100",
               maxValue: "10000",
+              type: "slider",
             },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
             },
             {
               title: "Click Umbrella Radius:",
               valueRef: mouseShieldRadiusRef,
               minValue: "10.0",
               maxValue: "300.0",
+              type: "slider",
             },
             {
               title: "Title Umbrella Radius:",
@@ -237,6 +240,7 @@ export default function Rain() {
               minValue: "1.0",
               maxValue: "100.0",
               callback: recalculateRectRef.current,
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

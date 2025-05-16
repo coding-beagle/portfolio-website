@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Hexapod() {
   const { theme } = useTheme();
@@ -1022,19 +1022,21 @@ export default function Hexapod() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Hexapod Count:",
               valueRef: bodyCountRef,
               minValue: "1",
               maxValue: "15",
+              type: "slider",
             },
             {
               title: "Walking Speed:",
               valueRef: gaitCountRef,
               minValue: "45",
               maxValue: "330",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

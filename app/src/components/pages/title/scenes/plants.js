@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { SliderGroup } from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Plants() {
   const { theme } = useTheme();
@@ -160,25 +160,28 @@ export default function Plants() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <SliderGroup
+        <ChangerGroup
           valueArrays={[
             {
               title: "Plant Count:",
               valueRef: particleCountRef,
               minValue: "1",
               maxValue: "50",
+              type: "slider",
             },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "1000.0",
+              type: "slider",
             },
             {
               title: "Simulation Length:",
               valueRef: simulationLengthRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
             },
           ]}
           rerenderSetter={setRender}

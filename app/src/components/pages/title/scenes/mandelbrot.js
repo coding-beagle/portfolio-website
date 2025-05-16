@@ -3,6 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
+import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Mandelbrot() {
   const { theme } = useTheme();
@@ -273,6 +274,80 @@ export default function Mandelbrot() {
     currentlyDrawingRef.current = false;
   }
 
+  const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
+  const valueChangers = [
+    {
+      type: "slider",
+      title: "Max Draw Resolution:",
+      valueRef: drawResolutionRef,
+      minValue: 1,
+      maxValue: 20,
+      callback: () => {},
+    },
+    [
+      {
+        type: "button",
+        title: "Toggle Theme:",
+        buttonText: themesList[0][0],
+        callback: () => {
+          currentThemeRef.current = 0;
+          calculateColourComponents(
+            themesList[0][1],
+            themesList[0][2],
+            themesList[0][3]
+          );
+          setRender((prev) => prev + 1);
+          drawEverythingRef.current();
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: themesList[1][0],
+        callback: () => {
+          currentThemeRef.current = 1;
+          calculateColourComponents(
+            themesList[1][1],
+            themesList[1][2],
+            themesList[1][3]
+          );
+          setRender((prev) => prev + 1);
+          drawEverythingRef.current();
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: themesList[2][0],
+        callback: () => {
+          currentThemeRef.current = 2;
+          calculateColourComponents(
+            themesList[2][1],
+            themesList[2][2],
+            themesList[2][3]
+          );
+          setRender((prev) => prev + 1);
+          drawEverythingRef.current();
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: themesList[3][0],
+        callback: () => {
+          currentThemeRef.current = 3;
+          calculateColourComponents(
+            themesList[3][1],
+            themesList[3][2],
+            themesList[3][3]
+          );
+          setRender((prev) => prev + 1);
+          drawEverythingRef.current();
+        },
+      },
+    ],
+  ];
+
   useEffect(() => {
     const canvas = canvasRef.current;
 
@@ -484,129 +559,92 @@ export default function Mandelbrot() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+        <ChangerGroup
+          rerenderSetter={setRerender}
+          valueArrays={valueChangers}
+        />
+        {/* Show color pickers if Custom theme is selected */}
+        {currentThemeRef.current === themesList.length - 1 && (
           <div
             style={{
               display: "flex",
-              alignItems: "center",
+              flexDirection: "column",
+              gap: "0.5em",
               marginBottom: "0.5em",
+              position: "absolute",
+              top: "6em",
+              left: "1em",
+              zIndex: 11,
             }}
           >
-            Max Draw Resolution:
-            <input
-              type="range"
-              min="1.0"
-              max="20.0"
-              value={drawResolutionRef.current}
-              onChange={(e) => {
-                drawResolutionRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Toggle Theme:
-            {themesList.map((theme, index) => (
-              <button
-                key={index}
-                style={{ marginLeft: "0.5em" }}
-                onClick={() => {
-                  currentThemeRef.current = index;
-                  calculateColourComponents(theme[1], theme[2], theme[3]);
-                  setRender((prev) => prev + 1); // Force re-render to update UI for custom theme
+            <label>
+              Max Iteration Colour:
+              <input
+                type="color"
+                value={customColours[0]}
+                onChange={(e) => {
+                  const newColours = [
+                    e.target.value,
+                    customColours[1],
+                    customColours[2],
+                  ];
+                  setCustomColours(newColours);
+                  calculateColourComponents(
+                    newColours[0],
+                    newColours[1],
+                    newColours[2]
+                  );
                   drawEverythingRef.current();
                 }}
-              >
-                {theme[0]}
-              </button>
-            ))}
+                style={{ marginLeft: "0.5em" }}
+              />
+            </label>
+            <label>
+              Max Interp Colour:
+              <input
+                type="color"
+                value={customColours[1]}
+                onChange={(e) => {
+                  const newColours = [
+                    customColours[0],
+                    e.target.value,
+                    customColours[2],
+                  ];
+                  setCustomColours(newColours);
+                  calculateColourComponents(
+                    newColours[0],
+                    newColours[1],
+                    newColours[2]
+                  );
+                  drawEverythingRef.current();
+                }}
+                style={{ marginLeft: "0.5em" }}
+              />
+            </label>
+            <label>
+              Min Interp Colour:
+              <input
+                type="color"
+                value={customColours[2]}
+                onChange={(e) => {
+                  const newColours = [
+                    customColours[0],
+                    customColours[1],
+                    e.target.value,
+                  ];
+                  setCustomColours(newColours);
+                  calculateColourComponents(
+                    newColours[0],
+                    newColours[1],
+                    newColours[2]
+                  );
+                  drawEverythingRef.current();
+                }}
+                style={{ marginLeft: "0.5em" }}
+              />
+            </label>
           </div>
-          {/* Show color pickers if Custom theme is selected */}
-          {currentThemeRef.current === themesList.length - 1 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.5em",
-                marginBottom: "0.5em",
-              }}
-            >
-              <label>
-                Max Iteration Colour:
-                <input
-                  type="color"
-                  value={customColours[0]}
-                  onChange={(e) => {
-                    const newColours = [
-                      e.target.value,
-                      customColours[1],
-                      customColours[2],
-                    ];
-                    setCustomColours(newColours);
-                    calculateColourComponents(
-                      newColours[0],
-                      newColours[1],
-                      newColours[2]
-                    );
-                    drawEverythingRef.current();
-                  }}
-                  style={{ marginLeft: "0.5em" }}
-                />
-              </label>
-              <label>
-                Max Interp Colour:
-                <input
-                  type="color"
-                  value={customColours[1]}
-                  onChange={(e) => {
-                    const newColours = [
-                      customColours[0],
-                      e.target.value,
-                      customColours[2],
-                    ];
-                    setCustomColours(newColours);
-                    calculateColourComponents(
-                      newColours[0],
-                      newColours[1],
-                      newColours[2]
-                    );
-                    drawEverythingRef.current();
-                  }}
-                  style={{ marginLeft: "0.5em" }}
-                />
-              </label>
-              <label>
-                Min Interp Colour:
-                <input
-                  type="color"
-                  value={customColours[2]}
-                  onChange={(e) => {
-                    const newColours = [
-                      customColours[0],
-                      customColours[1],
-                      e.target.value,
-                    ];
-                    setCustomColours(newColours);
-                    calculateColourComponents(
-                      newColours[0],
-                      newColours[1],
-                      newColours[2]
-                    );
-                    drawEverythingRef.current();
-                  }}
-                  style={{ marginLeft: "0.5em" }}
-                />
-              </label>
-            </div>
-          )}
-        </div>
+        )}
       </div>
       <div style={{ zIndex: 10 }}>
         <div style={{ position: "absolute", top: "1em", right: "1em" }}>
