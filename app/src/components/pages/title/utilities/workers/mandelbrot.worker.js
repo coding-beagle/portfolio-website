@@ -17,7 +17,10 @@ export default () => {
       data.yAspectRatio
     );
     // eslint-disable-next-line no-restricted-globals
-    self.postMessage(results);
+    self.postMessage({
+      results,
+      drawGeneration: data.drawGeneration, // Echo back the generation
+    });
   });
 
   function calculateMandelbrotRow(

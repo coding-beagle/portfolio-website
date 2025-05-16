@@ -23,6 +23,11 @@ export default function Mandelbrot() {
   const colourStepsRef = useRef("");
 
   const workerInstanceRef = useRef(null);
+  const drawGenerationRef = useRef(0); // Track current draw generation
+  const centerXRef = useRef(0); // Center point X in the complex plane
+  const centerYRef = useRef(0); // Center point Y in the complex plane
+  const zoomLevelRef = useRef(1); // Zoom factor
+  const startClickRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     workerInstanceRef.current = new WorkerFactory(Worker);
@@ -63,11 +68,6 @@ export default function Mandelbrot() {
   const maxIterCount = 2000;
   let transformX = 0;
   let transformY = 0;
-  let startClick = { x: 0, y: 0 };
-  let centerX = 0; // Center point X in the complex plane
-  let centerY = 0; // Center point Y in the complex plane
-
-  let zoomLevel = 1; // Zoom factor
 
   function mapToComplex(pixelX, pixelY) {
     // Return early if canvasRef.current is null
@@ -77,8 +77,9 @@ export default function Mandelbrot() {
 
     // Calculate the view dimensions in the complex plane
     const viewWidth =
-      ((canvasRef.current.width / canvasRef.current.height) * 2) / zoomLevel; // 4 units wide at zoom level 1
-    const viewHeight = 2 / zoomLevel; // 2.25 units high at zoom level 1
+      ((canvasRef.current.width / canvasRef.current.height) * 2) /
+      zoomLevelRef.current; // 4 units wide at zoom level 1
+    const viewHeight = 2 / zoomLevelRef.current; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
     const percentX = (pixelX + transformX) / canvasRef.current.width;
@@ -86,8 +87,8 @@ export default function Mandelbrot() {
 
     // Map to complex plane coordinates, centered on centerX,centerY
     return [
-      centerX + (percentX - 0.5) * viewWidth,
-      centerY + (percentY - 0.5) * viewHeight,
+      centerXRef.current + (percentX - 0.5) * viewWidth,
+      centerYRef.current + (percentY - 0.5) * viewHeight,
     ];
   }
 
@@ -155,7 +156,7 @@ export default function Mandelbrot() {
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
   function colourInterp(value) {
-    if (value == maxIterCount) {
+    if (value === maxIterCount) {
       return maxIterColourRef.current;
     }
 
@@ -195,6 +196,8 @@ export default function Mandelbrot() {
     drawWithWebworker = false
   ) {
     currentlyDrawingRef.current = true;
+    drawGenerationRef.current += 1; // Increment generation for each new draw
+    const thisDrawGeneration = drawGenerationRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     let startX, startY, endX, endY;
@@ -222,30 +225,47 @@ export default function Mandelbrot() {
 
         const chunkSize = 160; // Adjust this based on observed limits
         for (let i = 0; i < x_array.length; i += chunkSize) {
+          // Cancel if a new draw has started
+          if (drawGenerationRef.current !== thisDrawGeneration) {
+            currentlyDrawingRef.current = false;
+            return;
+          }
           const chunk = x_array.slice(i, i + chunkSize);
           const aspectRatio =
             (canvasRef.current.width / canvasRef.current.height) * 2;
           workerInstanceRef.current.postMessage({
             rowPixels: chunk,
             rowY: y,
-            zoomLevel: zoomLevel,
+            zoomLevel: zoomLevelRef.current,
             transformX: transformX,
             transformY: transformY,
             canvasWidth: canvasRef.current.width,
             canvasHeight: canvasRef.current.height,
-            centerX: centerX,
-            centerY: centerY,
+            centerX: centerXRef.current,
+            centerY: centerYRef.current,
             xAspectRatio: aspectRatio,
             yAspectRatio: 2,
+            drawGeneration: thisDrawGeneration, // Pass generation to worker (optional)
           });
 
           let returned_data = [];
           await new Promise((resolve) => {
             workerInstanceRef.current.onmessage = (event) => {
-              returned_data = event.data;
+              // Only use the result if the drawGeneration matches
+              if (event.data.drawGeneration !== thisDrawGeneration) {
+                currentlyDrawingRef.current = false;
+                return;
+              }
+              returned_data = event.data.results;
               resolve();
             };
           });
+
+          // Cancel if a new draw has started
+          if (drawGenerationRef.current !== thisDrawGeneration) {
+            currentlyDrawingRef.current = false;
+            return;
+          }
 
           returned_data.forEach((x_data, index) => {
             const x = chunk[index];
@@ -307,11 +327,11 @@ export default function Mandelbrot() {
 
     function handlePan(deltaX, deltaY) {
       currentRes = 10;
-      const viewWidth = 4 / zoomLevel;
-      const viewHeight = 3 / zoomLevel;
+      const viewWidth = 4 / zoomLevelRef.current;
+      const viewHeight = 3 / zoomLevelRef.current;
 
-      centerX -= (deltaX / canvas.width) * viewWidth;
-      centerY -= (deltaY / canvas.height) * viewHeight;
+      centerXRef.current -= (deltaX / canvas.width) * viewWidth;
+      centerYRef.current -= (deltaY / canvas.height) * viewHeight;
 
       drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
     }
@@ -327,20 +347,20 @@ export default function Mandelbrot() {
         return;
       }
 
-      const dx = mousePosRef.current.x - startClick.x;
-      const dy = mousePosRef.current.y - startClick.y;
+      const dx = mousePosRef.current.x - startClickRef.current.x;
+      const dy = mousePosRef.current.y - startClickRef.current.y;
 
       handlePan(dx, dy);
 
       // Update startClick to the current mouse position
-      startClick = { ...mousePosRef.current };
+      startClickRef.current = { ...mousePosRef.current };
     };
 
     const handleMouseDown = (event) => {
       mouseClickRef.current = true;
       const rect = canvas.getBoundingClientRect();
 
-      startClick = {
+      startClickRef.current = {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       };
@@ -360,14 +380,14 @@ export default function Mandelbrot() {
 
       // Apply zoom factor (e.g., multiply by 1.1 for zoom in, 0.9 for zoom out)
       const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
-      zoomLevel *= zoomFactor;
+      zoomLevelRef.current *= zoomFactor;
 
       // Get complex coordinates after zoom
       const complexAfter = mapToComplex(mouseX, mouseY);
 
       // Adjust center to keep mouse position fixed in complex plane
-      centerX += complexBefore[0] - complexAfter[0];
-      centerY += complexBefore[1] - complexAfter[1];
+      centerXRef.current += complexBefore[0] - complexAfter[0];
+      centerYRef.current += complexBefore[1] - complexAfter[1];
 
       drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
     };
@@ -398,7 +418,7 @@ export default function Mandelbrot() {
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
 
         const zoomFactor = currentDistance / lastTouchDistance;
-        zoomLevel *= zoomFactor;
+        zoomLevelRef.current *= zoomFactor;
 
         const currentCenter = {
           x: (event.touches[0].clientX + event.touches[1].clientX) / 2,
@@ -411,8 +431,8 @@ export default function Mandelbrot() {
         );
         const complexAfter = mapToComplex(currentCenter.x, currentCenter.y);
 
-        centerX += complexBefore[0] - complexAfter[0];
-        centerY += complexBefore[1] - complexAfter[1];
+        centerXRef.current += complexBefore[0] - complexAfter[0];
+        centerYRef.current += complexBefore[1] - complexAfter[1];
 
         lastTouchDistance = currentDistance;
         lastTouchCenter = currentCenter;
