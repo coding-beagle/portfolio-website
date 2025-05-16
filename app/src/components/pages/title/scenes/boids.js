@@ -9,7 +9,11 @@ export default function Boids() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const particleCountRef = useRef(10);
-  const simulationSpeedRef = useRef(30);
+  const simulationSpeedRef = useRef(100);
+  const primaryColorRef = useRef(theme.accent);
+  const secondaryColorRef = useRef(theme.secondaryAccent);
+  const attractionStrengthRef = useRef(100);
+  const secondaryAttractionStrengthRef = useRef(100);
   const speedLim = 5;
   const [, setRender] = useState(0); // Dummy state to force re-render
 
@@ -33,8 +37,8 @@ export default function Boids() {
         this.y = y;
         this.dx = Math.random() * 2 - 1;
         this.dy = Math.random() * 2 - 1;
-        this.size = 10;
-        this.colour = theme.accent;
+        this.size = Math.random() * 8 + 6; // random size between 6 and 14
+        this.colour = primaryColorRef.current;
       }
 
       draw() {
@@ -48,8 +52,9 @@ export default function Boids() {
         this.dx_to_mouse = mousePosRef.current.x - this.x;
         this.dy_to_mouse = mousePosRef.current.y - this.y;
 
-        this.dx += this.dx_to_mouse / 1000;
-        this.dy += this.dy_to_mouse / 1000;
+        // Attraction is now directly proportional to the slider value
+        this.dx += (this.dx_to_mouse * attractionStrengthRef.current) / 100000;
+        this.dy += (this.dy_to_mouse * attractionStrengthRef.current) / 100000;
 
         const currentSpeed = Math.sqrt(this.dx ** 2 + this.dy ** 2);
         if (currentSpeed > speedLim) {
@@ -70,8 +75,8 @@ export default function Boids() {
         this.y = y;
         this.dx = Math.random();
         this.dy = Math.random();
-        this.size = 10;
-        this.colour = theme.secondaryAccent;
+        this.size = Math.random() * 8 + 6; // random size between 6 and 14
+        this.colour = secondaryColorRef.current;
       }
 
       draw() {
@@ -100,8 +105,11 @@ export default function Boids() {
         this.dx_to_bird = this.PrimaryBird.x - this.x;
         this.dy_to_bird = this.PrimaryBird.y - this.y;
 
-        this.dx += this.dx_to_bird / 1000;
-        this.dy += this.dy_to_bird / 1000;
+        // Attraction is now directly proportional to the slider value
+        this.dx +=
+          (this.dx_to_bird * secondaryAttractionStrengthRef.current) / 100000;
+        this.dy +=
+          (this.dy_to_bird * secondaryAttractionStrengthRef.current) / 100000;
 
         const currentSpeed = Math.sqrt(this.dx ** 2 + this.dy ** 2);
         if (currentSpeed > speedLim) {
@@ -180,6 +188,10 @@ export default function Boids() {
     initParticles();
     animate();
 
+    // Attach particles array to canvas for theme effect access
+    canvas._particles = particles;
+    window.boidsParticles = particles;
+
     canvas.addEventListener("pointermove", handleMouseMove);
     canvas.addEventListener("pointerdown", handleMouseDown);
     canvas.addEventListener("pointerup", handleMouseUp);
@@ -193,6 +205,20 @@ export default function Boids() {
       window.removeEventListener("resize", resizeCanvas);
     };
   }, []);
+
+  // Update colorRefs and all birds' colors on theme change
+  useEffect(() => {
+    primaryColorRef.current = theme.accent;
+    secondaryColorRef.current = theme.secondaryAccent;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (canvas._particles) {
+      if (canvas._particles[0]) canvas._particles[0].colour = theme.accent;
+      for (let i = 1; i < canvas._particles.length; i++) {
+        canvas._particles[i].colour = theme.secondaryAccent;
+      }
+    }
+  }, [theme]);
 
   return (
     <>
@@ -218,6 +244,18 @@ export default function Boids() {
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+            },
+            {
+              title: "Attraction to Mouse (Main Bird):",
+              valueRef: attractionStrengthRef,
+              minValue: "1",
+              maxValue: "200",
+            },
+            {
+              title: "Attraction to Main Bird (Other Birds):",
+              valueRef: secondaryAttractionStrengthRef,
+              minValue: "1",
+              maxValue: "200",
             },
           ]}
           rerenderSetter={setRender}
