@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import MouseTooltip from "../utilities/popovers";
+import { ChangerGroup } from "../utilities/valueChangers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleXmark,
@@ -8,7 +10,6 @@ import {
   faPause,
   faPlay,
 } from "@fortawesome/free-solid-svg-icons";
-import MouseTooltip from "../utilities/popovers";
 
 const names = {
   SKIPCHECK: true,
@@ -538,6 +539,126 @@ export default function Conway() {
     }
   }, [theme]);
 
+  // ValueChangers config for Conway
+  const setRerender = setRender;
+  const valueChangers = [
+    [
+      {
+        type: "button",
+        title: "",
+        buttonText: showPatternPreviewRef.current
+          ? "Close Pattern Preview"
+          : "Open Pattern Preview",
+        callback: () => {
+          showPatternPreviewRef.current = !showPatternPreviewRef.current;
+          setRender((r) => r + 1);
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: "Clear Pattern",
+        callback: () => {
+          setPatternText("");
+          setPatternPreview(null);
+        },
+      },
+    ],
+
+    {
+      type: "slider",
+      title: "Row Count:",
+      valueRef: numGridColumns,
+      minValue: 6,
+      maxValue: 300,
+      callback: () => {},
+    },
+    {
+      type: "slider",
+      title: "Column Count:",
+      valueRef: numGridRows,
+      minValue: 6,
+      maxValue: 300,
+      callback: () => {},
+    },
+    [
+      {
+        type: "button",
+        title: "Squarify Tiles Via:",
+        buttonText: "Columns",
+        callback: () => {
+          squarifyGrid(true);
+          setRender((prev) => prev + 1);
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: "Rows",
+        callback: () => {
+          squarifyGrid(false);
+          setRender((prev) => prev + 1);
+        },
+      },
+    ],
+    {
+      type: "slider",
+      title: "Simulation Speed:",
+      valueRef: simulationSpeedRef,
+      minValue: 100,
+      maxValue: 200,
+      callback: () => {},
+    },
+    [
+      {
+        type: "button",
+        title: "Stop / Start Simulation:",
+        buttonText: (
+          <FontAwesomeIcon icon={isPlaying.current ? faPause : faPlay} />
+        ),
+        callback: () => {
+          isPlaying.current = !isPlaying.current;
+          setRender((prev) => prev + 1);
+        },
+      },
+      {
+        type: "button",
+        title: "",
+        buttonText: <FontAwesomeIcon icon={faForwardStep} />,
+        callback: () => {
+          gridManagerRef.current.update(names.SKIPCHECK);
+        },
+      },
+    ],
+    {
+      type: "button",
+      title: "Clear All Cells:",
+      buttonText: <FontAwesomeIcon icon={faCircleXmark} />,
+      callback: () => {
+        for (let i = 0; i < numGridColumns.current; i++) {
+          for (let j = 0; j < numGridRows.current; j++) {
+            gridRef.current[i][j].isAlive = false;
+          }
+        }
+        gridManagerRef.current.draw();
+      },
+    },
+    {
+      type: "button",
+      title: "Generate White Noise:",
+      buttonText: <FontAwesomeIcon icon={faDice} />,
+      callback: () => {
+        for (let i = 0; i < numGridColumns.current; i++) {
+          for (let j = 0; j < numGridRows.current; j++) {
+            let isAlive = Math.random() > 0.5;
+            gridRef.current[i][j].isAlive = isAlive;
+          }
+        }
+        gridManagerRef.current.draw();
+      },
+    },
+  ];
+
   return (
     <>
       <canvas
@@ -549,347 +670,160 @@ export default function Conway() {
         }}
       />
       <div style={{ zIndex: 10 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          {/* Pattern preview toggle button moved here */}
+        <ChangerGroup
+          rerenderSetter={setRerender}
+          valueArrays={valueChangers}
+        />
+        {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
+        {showPatternPreviewRef.current && (
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
+              marginBottom: "1em",
+              background: theme.primary,
+              color: theme.text,
+              padding: "1em",
+              borderRadius: 8,
+              position: "absolute",
+              top: "3.5em",
+              left: "1em",
+              zIndex: 30,
+              minWidth: 320,
+              boxShadow: "0 2px 16px #000a",
+              border: `1px solid ${theme.border || "#333"}`,
             }}
           >
-            <button
-              onClick={() => {
-                showPatternPreviewRef.current = !showPatternPreviewRef.current;
-                setRender((r) => r + 1);
-              }}
-            >
-              {showPatternPreviewRef.current
-                ? "Close Pattern Preview"
-                : "Open Pattern Preview"}
-            </button>
-            <button
-              style={{ marginLeft: "0.5em", fontSize: 12 }}
-              onClick={() => {
-                setPatternText("");
-                setPatternPreview(null);
-              }}
-              title="Clear pattern text"
-            >
-              Clear Pattern
-            </button>
-          </div>
-          {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
-          {showPatternPreviewRef.current && (
-            <div
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>
+              Paste a <code>.cells</code> pattern here to preview:
+            </div>
+            <textarea
+              value={patternText}
+              onChange={handlePatternInput}
+              placeholder={"Paste .cells pattern here..."}
+              rows={6}
               style={{
-                marginBottom: "1em",
-                background: theme.primary,
+                width: "100%",
+                fontFamily: "monospace",
+                marginBottom: 8,
+                background: theme.inputBackground || theme.background,
                 color: theme.text,
-                padding: "1em",
-                borderRadius: 8,
-                position: "absolute",
-                top: "3.5em",
-                left: "1em",
-                zIndex: 30,
-                minWidth: 320,
-                boxShadow: "0 2px 16px #000a",
                 border: `1px solid ${theme.border || "#333"}`,
+                borderRadius: 4,
+                padding: 4,
               }}
-            >
-              <div style={{ marginBottom: 4, fontWeight: 600 }}>
-                Paste a <code>.cells</code> pattern here to preview:
-              </div>
-              <textarea
-                value={patternText}
-                onChange={handlePatternInput}
-                placeholder={"Paste .cells pattern here..."}
-                rows={6}
+            />
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button
+                onClick={() => {
+                  setPatternText("");
+                  setPatternPreview(null);
+                }}
+                style={{ fontSize: 12 }}
+                title="Clear pattern text"
+              >
+                Clear Pattern
+              </button>
+              <button
+                onClick={async () => {
+                  setShowPatternBrowser((v) => !v);
+                  if (patternList.length === 0) await fetchPatternList();
+                }}
+                style={{ fontSize: 12 }}
+                title="Browse local patterns"
+              >
+                {showPatternBrowser ? "Close Browser" : "Browse Patterns"}
+              </button>
+            </div>
+            {showPatternBrowser && (
+              <div
                 style={{
-                  width: "100%",
-                  fontFamily: "monospace",
-                  marginBottom: 8,
-                  background: theme.inputBackground || theme.background,
-                  color: theme.text,
+                  maxHeight: 300,
+                  overflowY: "auto",
+                  background: theme.modalBrowserBackground || theme.background,
                   border: `1px solid ${theme.border || "#333"}`,
                   borderRadius: 4,
+                  marginBottom: 8,
                   padding: 4,
                 }}
-              />
-              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                <button
-                  onClick={() => {
-                    setPatternText("");
-                    setPatternPreview(null);
-                  }}
-                  style={{ fontSize: 12 }}
-                  title="Clear pattern text"
-                >
-                  Clear Pattern
-                </button>
-                <button
-                  onClick={async () => {
-                    setShowPatternBrowser((v) => !v);
-                    if (patternList.length === 0) await fetchPatternList();
-                  }}
-                  style={{ fontSize: 12 }}
-                  title="Browse local patterns"
-                >
-                  {showPatternBrowser ? "Close Browser" : "Browse Patterns"}
-                </button>
-              </div>
-              {showPatternBrowser && (
-                <div
-                  style={{
-                    maxHeight: 300,
-                    overflowY: "auto",
-                    background:
-                      theme.modalBrowserBackground || theme.background,
-                    border: `1px solid ${theme.border || "#333"}`,
-                    borderRadius: 4,
-                    marginBottom: 8,
-                    padding: 4,
-                  }}
-                >
-                  {patternList.length === 0 && <div>Loading patterns...</div>}
-                  {patternList.map((pattern) => (
-                    <div
-                      key={pattern.filename}
-                      style={{
-                        cursor: "pointer",
-                        padding: "2px 0",
-                        color: theme.link || "#8cf",
-                        textDecoration: "underline",
-                        fontSize: 13,
-                      }}
-                      title={
-                        pattern.description +
-                        (pattern.author ? `\nBy: ${pattern.author}` : "")
-                      }
-                      onClick={async () => {
-                        const url = `/cells/${pattern.filename}`;
-                        try {
-                          const resp = await fetch(url);
-                          if (!resp.ok) {
-                            alert("Pattern not found in local cells folder");
-                            return;
-                          }
-                          const text = await resp.text();
-                          setPatternText(text);
-                          setPatternPreview(parseCellsPattern(text));
-                          setShowPatternBrowser(false);
-                        } catch (err) {
-                          alert("Failed to fetch pattern: " + err.message);
+              >
+                {patternList.length === 0 && <div>Loading patterns...</div>}
+                {patternList.map((pattern) => (
+                  <div
+                    key={pattern.filename}
+                    style={{
+                      cursor: "pointer",
+                      padding: "2px 0",
+                      color: theme.link || "#8cf",
+                      textDecoration: "underline",
+                      fontSize: 13,
+                    }}
+                    title={
+                      pattern.description +
+                      (pattern.author ? `\nBy: ${pattern.author}` : "")
+                    }
+                    onClick={async () => {
+                      const url = `/cells/${pattern.filename}`;
+                      try {
+                        const resp = await fetch(url);
+                        if (!resp.ok) {
+                          alert("Pattern not found in local cells folder");
+                          return;
                         }
+                        const text = await resp.text();
+                        setPatternText(text);
+                        setPatternPreview(parseCellsPattern(text));
+                        setShowPatternBrowser(false);
+                      } catch (err) {
+                        alert("Failed to fetch pattern: " + err.message);
+                      }
+                    }}
+                  >
+                    <b>{pattern.name}</b>{" "}
+                    <span
+                      style={{
+                        color: theme.subtleText || "#aaa",
+                        fontSize: 11,
                       }}
                     >
-                      <b>{pattern.name}</b>{" "}
-                      <span
+                      ({pattern.filename})
+                    </span>
+                    <div
+                      style={{
+                        color: theme.subtleText || "#ccc",
+                        fontSize: 11,
+                      }}
+                    >
+                      {pattern.description}
+                    </div>
+                    {pattern.author && (
+                      <div
                         style={{
                           color: theme.subtleText || "#aaa",
                           fontSize: 11,
                         }}
                       >
-                        ({pattern.filename})
-                      </span>
-                      <div
-                        style={{
-                          color: theme.subtleText || "#ccc",
-                          fontSize: 11,
-                        }}
-                      >
-                        {pattern.description}
+                        By: {pattern.author}
                       </div>
-                      {pattern.author && (
-                        <div
-                          style={{
-                            color: theme.subtleText || "#aaa",
-                            fontSize: 11,
-                          }}
-                        >
-                          By: {pattern.author}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
-              <div
-                style={{
-                  display: "inline-block",
-                  background: theme.previewBackground || theme.background,
-                  padding: 8,
-                  borderRadius: 4,
-                }}
-              >
-                {patternPreview}
+                    )}
+                  </div>
+                ))}
               </div>
+            )}
+            <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
+            <div
+              style={{
+                display: "inline-block",
+                background: theme.previewBackground || theme.background,
+                padding: 8,
+                borderRadius: 4,
+              }}
+            >
+              {patternPreview}
             </div>
-          )}
-          {/* Simulation settings sliders/buttons below */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Row Count:
-            <input
-              type="range"
-              min="6"
-              max="300"
-              value={numGridColumns.current}
-              onChange={(e) => {
-                numGridColumns.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
           </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Column Count:
-            <input
-              type="range"
-              min="6"
-              max="300"
-              value={numGridRows.current}
-              onChange={(e) => {
-                numGridRows.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Squarify Tiles Via:
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                squarifyGrid(true);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-            >
-              Columns
-            </button>
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                squarifyGrid(false);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-            >
-              Rows
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="100.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Stop / Start Simulation:
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                isPlaying.current = !isPlaying.current;
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-            >
-              <FontAwesomeIcon icon={isPlaying.current ? faPause : faPlay} />
-            </button>
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                gridManagerRef.current.update(names.SKIPCHECK);
-              }}
-            >
-              <FontAwesomeIcon icon={faForwardStep} />
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Clear All Cells:
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                for (let i = 0; i < numGridColumns.current; i++) {
-                  for (let j = 0; j < numGridRows.current; j++) {
-                    gridRef.current[i][j].isAlive = false;
-                  }
-                }
-                gridManagerRef.current.draw();
-              }}
-            >
-              <FontAwesomeIcon icon={faCircleXmark} />
-            </button>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Generate White Noise:
-            <button
-              style={{ marginLeft: "0.5em" }}
-              onClick={(e) => {
-                for (let i = 0; i < numGridColumns.current; i++) {
-                  for (let j = 0; j < numGridRows.current; j++) {
-                    let isAlive = Math.random() > 0.5;
-                    gridRef.current[i][j].isAlive = isAlive;
-                  }
-                }
-                gridManagerRef.current.draw();
-              }}
-            >
-              <FontAwesomeIcon icon={faDice} />
-            </button>
-          </div>
-        </div>
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
-        </div>
+        )}
+      </div>
+      <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+        <MouseTooltip />
       </div>
     </>
   );

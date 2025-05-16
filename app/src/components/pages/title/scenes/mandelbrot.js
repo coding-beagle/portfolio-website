@@ -369,6 +369,8 @@ export default function Mandelbrot() {
                 drawEverythingRef.current();
               },
             },
+          ],
+          [
             {
               type: "color",
               title: "Max Interp Colour:",
@@ -388,6 +390,8 @@ export default function Mandelbrot() {
                 drawEverythingRef.current();
               },
             },
+          ],
+          [
             {
               type: "color",
               title: "Min Interp Colour:",
