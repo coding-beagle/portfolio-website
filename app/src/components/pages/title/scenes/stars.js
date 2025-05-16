@@ -244,41 +244,60 @@ export default function Stars() {
 
     // Explosion effect class
     class BlackHoleExplosion {
-      constructor(x, y) {
+      constructor(x, y, waveCount = 3) {
         this.x = x;
         this.y = y;
-        this.radius = 0;
-        this.maxRadius = 120;
-        this.alpha = 1;
+        this.waves = [];
+        this.waveCount = waveCount;
+        for (let i = 0; i < waveCount; i++) {
+          this.waves.push({
+            radius: 0,
+            maxRadius: 220 + i * 80, // Each wave is bigger
+            alpha: 1 - i * 0.2, // Each wave is fainter
+            speed: 10 + i * 3, // Each wave moves faster
+          });
+        }
       }
       update() {
-        this.radius += 8;
-        this.alpha -= 0.04;
+        this.waves.forEach((wave) => {
+          wave.radius += wave.speed;
+          wave.alpha -= 0.018 + wave.speed * 0.0007;
+        });
       }
       draw() {
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, this.alpha);
-        const gradient = ctx.createRadialGradient(
-          this.x,
-          this.y,
-          0,
-          this.x,
-          this.y,
-          this.radius
-        );
-        gradient.addColorStop(0, "rgba(255,255,255,0.8)");
-        gradient.addColorStop(0.3, "rgba(0,200,255,0.5)");
-        gradient.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-        ctx.closePath();
-        ctx.globalAlpha = 1;
-        ctx.restore();
+        this.waves.forEach((wave, idx) => {
+          if (wave.alpha <= 0) return;
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, wave.alpha);
+          const gradient = ctx.createRadialGradient(
+            this.x,
+            this.y,
+            0,
+            this.x,
+            this.y,
+            wave.radius
+          );
+          gradient.addColorStop(
+            0,
+            idx === 0 ? "rgba(255,255,255,0.9)" : "rgba(0,200,255,0.5)"
+          );
+          gradient.addColorStop(0.2, "rgba(0,200,255,0.4)");
+          gradient.addColorStop(0.7, "rgba(0,0,0,0.1)");
+          gradient.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, wave.radius, 0, Math.PI * 2);
+          ctx.fillStyle = gradient;
+          ctx.fill();
+          ctx.closePath();
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        });
       }
       isDone() {
-        return this.alpha <= 0 || this.radius > this.maxRadius;
+        // Done if all waves are faded or too big
+        return this.waves.every(
+          (wave) => wave.alpha <= 0 || wave.radius > wave.maxRadius
+        );
       }
     }
 
@@ -502,7 +521,7 @@ export default function Stars() {
             // Collision detected! Trigger explosion at midpoint
             const midX = (bh1.x + bh2.x) / 2;
             const midY = (bh1.y + bh2.y) / 2;
-            explosions.push(new BlackHoleExplosion(midX, midY));
+            explosions.push(new BlackHoleExplosion(midX, midY, 3));
             toRemove.add(i);
             toRemove.add(j);
           }
