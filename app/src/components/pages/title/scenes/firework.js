@@ -7,6 +7,7 @@ export default function Fireworks() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
+  const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
 
   useEffect(() => {
@@ -74,7 +75,7 @@ export default function Fireworks() {
         this.vx = (Math.random() - 0.5) * maxFireworkSpeed;
         this.vy = -(Math.random() + 2 * maxFireworkRiseSpeed);
         this.size = Math.random() * 2 + 1;
-        this.color = theme.accent;
+        this.color = colorRef.current;
         this.points = [];
         const fireworkTypesKeys = Object.keys(fireWorkTypes);
         this.type =
@@ -166,6 +167,10 @@ export default function Fireworks() {
       animationFrameId = requestAnimationFrame(animate);
     }
 
+    // Attach fireworks array to canvas for theme effect access
+    canvas._fireworks = fireworks;
+    window.fireworks = fireworks;
+
     animate();
 
     return () => {
@@ -175,6 +180,18 @@ export default function Fireworks() {
       fireworks = [];
     };
   }, []);
+
+  // Update colorRef and all fireworks' colors on theme change
+  useEffect(() => {
+    colorRef.current = theme.accent;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (canvas._fireworks) {
+      canvas._fireworks.forEach((firework) => {
+        firework.color = theme.accent;
+      });
+    }
+  }, [theme]);
 
   return (
     <>
