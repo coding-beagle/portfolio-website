@@ -15,6 +15,11 @@ export default function Hexapod() {
   const mouseShieldRadiusRef = useRef(100);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
+  // Theme color refs for dynamic updates
+  const accentColorRef = useRef(theme.accent);
+  const secondaryAccentColorRef = useRef(theme.secondaryAccent);
+  const tertiaryAccentColorRef = useRef(theme.tertiaryAccent);
+
   let hexapodArray = [];
   let heartArray = [];
 
@@ -352,12 +357,12 @@ export default function Hexapod() {
        * @param {CanvasRenderingContext2D} ctx - The drawing context.
        * @param {function} convert3DtoIsometric - The projection function {x,y,z} -> [screenX, screenY].
        */
-      draw() {
+      draw(ctx, convert3DtoIsometric) {
         if (!this.jointPositions || this.jointPositions.length < 4) return;
 
         ctx.beginPath();
         // Use a distinct color for legs, maybe slightly transparent
-        ctx.strokeStyle = theme.secondaryAccent; // Dark grey, slightly transparent
+        ctx.strokeStyle = secondaryAccentColorRef.current; // Dark grey, slightly transparent
         ctx.lineWidth = 3; // Make legs reasonably thick
 
         // Project all points first
@@ -440,7 +445,7 @@ export default function Hexapod() {
           const screenPos = convert3DtoIsometric(point);
           ctx.lineTo(screenPos[0], screenPos[1]);
         });
-        ctx.strokeStyle = theme.accent;
+        ctx.strokeStyle = accentColorRef.current;
         ctx.stroke();
       }
 
@@ -849,7 +854,7 @@ export default function Hexapod() {
           )
         ).toString(16);
 
-        ctx.fillStyle = theme.tertiaryAccent + hexOpacity;
+        ctx.fillStyle = tertiaryAccentColorRef.current + hexOpacity;
         ctx.fill();
         ctx.restore();
       }
@@ -989,6 +994,22 @@ export default function Hexapod() {
       window.removeEventListener("resize", resizeCanvas);
     };
   }, []);
+
+  // Theme update effect
+  useEffect(() => {
+    accentColorRef.current = theme.accent;
+    secondaryAccentColorRef.current = theme.secondaryAccent;
+    tertiaryAccentColorRef.current = theme.tertiaryAccent;
+    // Redraw on theme change
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      if (ctx && hexapodArray.length > 0) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        hexapodArray.forEach((hexapod) => hexapod.update());
+        heartArray.forEach((heart) => heart.draw());
+      }
+    }
+  }, [theme]);
 
   return (
     <>

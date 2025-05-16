@@ -29,6 +29,10 @@ export default function Conway() {
   const rightClickRef = useRef(false);
   const currentTimer = useRef(0);
 
+  // Use refs for theme colors
+  const primaryColorRef = useRef(theme.primary);
+  const secondaryColorRef = useRef(theme.secondary);
+
   let isDebouncing = true;
 
   const squarifyGrid = (columns = false) => {
@@ -108,9 +112,9 @@ export default function Conway() {
         for (let i = 0; i < numGridColumns.current; i++) {
           for (let j = 0; j < numGridRows.current; j++) {
             if (gridRef.current[i][j].isAlive) {
-              ctx.fillStyle = theme.secondary;
+              ctx.fillStyle = secondaryColorRef.current;
             } else {
-              ctx.fillStyle = theme.primary;
+              ctx.fillStyle = primaryColorRef.current;
             }
             ctx.beginPath();
             ctx.rect(rectWidth * j, rectHeight * i, rectWidth, rectHeight);
@@ -345,6 +349,21 @@ export default function Conway() {
       document.removeEventListener("contextmenu", handleContextMenu);
     };
   }, []);
+
+  // Update colorRefs and redraw grid on theme change
+  useEffect(() => {
+    primaryColorRef.current = theme.primary;
+    secondaryColorRef.current = theme.secondary;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    // Redraw grid with new colors
+    if (
+      gridManagerRef.current &&
+      typeof gridManagerRef.current.draw === "function"
+    ) {
+      gridManagerRef.current.draw();
+    }
+  }, [theme]);
 
   return (
     <>

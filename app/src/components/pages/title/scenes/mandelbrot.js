@@ -47,8 +47,7 @@ export default function Mandelbrot() {
 
   const themesList = [
     ["Default", theme.primary, theme.secondary, theme.primary],
-    ["Experimental", theme.primary, theme.tertiaryAccent, theme.primary],
-    ["Flashbang", theme.tertiaryAccent, theme.primary, theme.accent],
+    ["Pink Innit", theme.tertiaryAccent, theme.primary, theme.secondary],
     ["Adorned", theme.secondary, theme.accent, theme.primary],
     ["Custom", customColours[0], customColours[1], customColours[2]],
   ];
