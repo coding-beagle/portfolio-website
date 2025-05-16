@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
 import Title from "./components/pages/title/title";
 import { ThemeProvider, useTheme } from "./themes/ThemeProvider";
@@ -18,6 +18,20 @@ function AppWrapper() {
   const searchParams = new URLSearchParams(queryString);
   const scene = searchParams.get("scene");
 
+  // Animation state for theme icon
+  const [iconAnim, setIconAnim] = useState(false);
+  const [pendingTheme, setPendingTheme] = useState(themeName);
+
+  // Handler for animated theme toggle
+  const handleThemeToggle = () => {
+    setIconAnim(true);
+    setTimeout(() => {
+      toggleTheme();
+      setPendingTheme(themeName === "dark" ? "light" : "dark");
+      setIconAnim(false);
+    }, 250); // Animation duration before switching
+  };
+
   return (
     <div
       className="App"
@@ -32,7 +46,7 @@ function AppWrapper() {
     >
       <Title text={path} initialScene={scene?.toUpperCase()} />
       <button
-        onClick={toggleTheme}
+        onClick={handleThemeToggle}
         style={{
           position: "fixed",
           left: "1em",
@@ -51,6 +65,7 @@ function AppWrapper() {
           cursor: "pointer",
           fontSize: "1.5em",
           transition: "background 0.3s, color 0.3s",
+          overflow: "hidden",
         }}
         aria-label={
           themeName === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"
@@ -59,10 +74,36 @@ function AppWrapper() {
           themeName === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"
         }
       >
-        {themeName === "dark" ? (
-          <FontAwesomeIcon icon={faSun} />
+        {pendingTheme === "dark" ? (
+          <span
+            style={{
+              display: "inline-block",
+              transition:
+                "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+              transform: iconAnim
+                ? "translateY(40px) scale(0.7) rotate(-20deg)"
+                : "translateY(0) scale(1) rotate(0deg)",
+              opacity: iconAnim ? 0 : 1,
+              position: "absolute",
+            }}
+          >
+            <FontAwesomeIcon icon={faSun} />
+          </span>
         ) : (
-          <FontAwesomeIcon icon={faMoon} />
+          <span
+            style={{
+              display: "inline-block",
+              transition:
+                "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+              transform: iconAnim
+                ? "translateY(40px) scale(0.7) rotate(20deg)"
+                : "translateY(0) scale(1) rotate(0deg)",
+              opacity: iconAnim ? 0 : 1,
+              position: "absolute",
+            }}
+          >
+            <FontAwesomeIcon icon={faMoon} />
+          </span>
         )}
       </button>
     </div>

@@ -584,7 +584,8 @@ export default function Conway() {
             <div
               style={{
                 marginBottom: "1em",
-                background: "#222",
+                background: theme.primary,
+                color: theme.text,
                 padding: "1em",
                 borderRadius: 8,
                 position: "absolute",
@@ -593,6 +594,7 @@ export default function Conway() {
                 zIndex: 30,
                 minWidth: 320,
                 boxShadow: "0 2px 16px #000a",
+                border: `1px solid ${theme.border || "#333"}`,
               }}
             >
               <div style={{ marginBottom: 4, fontWeight: 600 }}>
@@ -607,6 +609,11 @@ export default function Conway() {
                   width: "100%",
                   fontFamily: "monospace",
                   marginBottom: 8,
+                  background: theme.inputBackground || theme.background,
+                  color: theme.text,
+                  border: `1px solid ${theme.border || "#333"}`,
+                  borderRadius: 4,
+                  padding: 4,
                 }}
               />
               <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
@@ -636,8 +643,9 @@ export default function Conway() {
                   style={{
                     maxHeight: 300,
                     overflowY: "auto",
-                    background: "#181818",
-                    border: "1px solid #333",
+                    background:
+                      theme.modalBrowserBackground || theme.background,
+                    border: `1px solid ${theme.border || "#333"}`,
                     borderRadius: 4,
                     marginBottom: 8,
                     padding: 4,
@@ -650,7 +658,7 @@ export default function Conway() {
                       style={{
                         cursor: "pointer",
                         padding: "2px 0",
-                        color: "#8cf",
+                        color: theme.link || "#8cf",
                         textDecoration: "underline",
                         fontSize: 13,
                       }}
@@ -676,14 +684,29 @@ export default function Conway() {
                       }}
                     >
                       <b>{pattern.name}</b>{" "}
-                      <span style={{ color: "#aaa", fontSize: 11 }}>
+                      <span
+                        style={{
+                          color: theme.subtleText || "#aaa",
+                          fontSize: 11,
+                        }}
+                      >
                         ({pattern.filename})
                       </span>
-                      <div style={{ color: "#ccc", fontSize: 11 }}>
+                      <div
+                        style={{
+                          color: theme.subtleText || "#ccc",
+                          fontSize: 11,
+                        }}
+                      >
                         {pattern.description}
                       </div>
                       {pattern.author && (
-                        <div style={{ color: "#aaa", fontSize: 11 }}>
+                        <div
+                          style={{
+                            color: theme.subtleText || "#aaa",
+                            fontSize: 11,
+                          }}
+                        >
                           By: {pattern.author}
                         </div>
                       )}
@@ -695,7 +718,7 @@ export default function Conway() {
               <div
                 style={{
                   display: "inline-block",
-                  background: "#111",
+                  background: theme.previewBackground || theme.background,
                   padding: 8,
                   borderRadius: 4,
                 }}
