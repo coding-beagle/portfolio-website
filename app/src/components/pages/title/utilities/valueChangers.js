@@ -194,6 +194,33 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
   );
 }
 
+export function ChangerColor({ rerenderSetter, title, colorValue, onChange }) {
+  const { theme } = useTheme();
+  return (
+    <div
+      style={{ display: "flex", alignItems: "center", marginBottom: "0.3em" }}
+    >
+      <span style={{ minWidth: 120 }}>{title}</span>
+      <input
+        type="color"
+        value={colorValue}
+        onChange={(e) => {
+          onChange(e.target.value);
+          rerenderSetter((prev) => prev + 1);
+        }}
+        style={{
+          marginLeft: "0.5em",
+          width: 32,
+          height: 32,
+          border: `2px solid ${theme.secondaryAccent}`,
+          borderRadius: 6,
+          background: theme.background,
+        }}
+      />
+    </div>
+  );
+}
+
 export function ChangerGroup({ rerenderSetter, valueArrays }) {
   return (
     <div style={{ position: "absolute", top: "1em", left: "1em" }}>
@@ -227,6 +254,14 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                       rerenderSetter={rerenderSetter}
                     />
                   );
+                if (subElement.type === "color")
+                  return (
+                    <ChangerColor
+                      key={subIndex}
+                      {...subElement}
+                      rerenderSetter={rerenderSetter}
+                    />
+                  );
                 return null;
               })}
             </div>
@@ -239,6 +274,14 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
         if (element.type === "button")
           return (
             <ChangerButton
+              key={index}
+              {...element}
+              rerenderSetter={rerenderSetter}
+            />
+          );
+        if (element.type === "color")
+          return (
+            <ChangerColor
               key={index}
               {...element}
               rerenderSetter={rerenderSetter}
