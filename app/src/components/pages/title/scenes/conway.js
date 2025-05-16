@@ -253,6 +253,31 @@ export default function Conway() {
       }
 
       update(skipCheck = false) {
+        // --- Robust grid resizing logic ---
+        // Ensure gridRef.current has correct number of rows
+        while (gridRef.current.length < numGridColumns.current) {
+          let newRow = [];
+          for (let i = 0; i < numGridRows.current; i++) {
+            newRow.push(new Particle());
+          }
+          gridRef.current.push(newRow);
+        }
+        while (gridRef.current.length > numGridColumns.current) {
+          gridRef.current.pop();
+        }
+        // Ensure each row has correct number of columns
+        for (let i = 0; i < gridRef.current.length; i++) {
+          while (gridRef.current[i].length < numGridRows.current) {
+            gridRef.current[i].push(new Particle());
+          }
+          while (gridRef.current[i].length > numGridRows.current) {
+            gridRef.current[i].pop();
+          }
+        }
+        this.numColumns = numGridColumns.current;
+        this.numRows = numGridRows.current;
+        // --- End robust grid resizing logic ---
+
         // Only clear and draw once per frame
         this.draw();
         // Paste pattern on click
@@ -281,45 +306,6 @@ export default function Conway() {
           }
           mouseClickRef.current = false; // Prevent repeated pasting
         }
-        if (this.numColumns !== numGridColumns.current) {
-          this.updating = true;
-          let rowDiff = numGridColumns.current - this.numColumns;
-          if (rowDiff > 0) {
-            for (let diff = 0; diff < rowDiff; diff++) {
-              let newRow = [];
-              for (let i = 0; i < numGridRows.current; i++) {
-                newRow.push(new Particle());
-              }
-              gridRef.current.push(newRow);
-            }
-          } else {
-            for (let diff = 0; diff > rowDiff; diff--) {
-              gridRef.current.pop();
-            }
-          }
-
-          this.draw();
-          this.numColumns = numGridColumns.current;
-          return;
-        }
-
-        if (this.numRows !== numGridRows.current) {
-          let currentRow;
-          for (let i = 0; i < numGridColumns.current; i++) {
-            currentRow = gridRef.current[i];
-            let rowDiff = numGridRows.current - this.numRows;
-            if (rowDiff > 0) {
-              for (let diff = 0; diff < rowDiff; diff++) {
-                currentRow.push(new Particle());
-              }
-            }
-            gridRef.current[i] = currentRow;
-          }
-          this.draw();
-          this.numRows = numGridRows.current;
-          return;
-        }
-
         if (mouseClickRef.current || rightClickRef.current) {
           let mouseClickPos = getGridFromMousePos(
             numGridRows.current,
