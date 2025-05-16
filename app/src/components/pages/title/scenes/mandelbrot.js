@@ -29,6 +29,12 @@ export default function Mandelbrot() {
   const zoomLevelRef = useRef(1); // Zoom factor
   const startClickRef = useRef({ x: 0, y: 0 });
 
+  const [customColours, setCustomColours] = useState([
+    "#ff0000", // Custom max iteration colour
+    "#00ff00", // Custom max interp colour
+    "#0000ff", // Custom min interp colour
+  ]);
+
   useEffect(() => {
     workerInstanceRef.current = new WorkerFactory(Worker);
 
@@ -63,6 +69,7 @@ export default function Mandelbrot() {
       defaultColours.accent,
       defaultColours.primary,
     ],
+    ["Custom", customColours[0], customColours[1], customColours[2]],
   ];
 
   const maxIterCount = 2000;
@@ -533,6 +540,7 @@ export default function Mandelbrot() {
                 onClick={() => {
                   currentThemeRef.current = index;
                   calculateColourComponents(theme[1], theme[2], theme[3]);
+                  setRender((prev) => prev + 1); // Force re-render to update UI for custom theme
                   drawEverythingRef.current();
                 }}
               >
@@ -540,6 +548,84 @@ export default function Mandelbrot() {
               </button>
             ))}
           </div>
+          {/* Show color pickers if Custom theme is selected */}
+          {currentThemeRef.current === themesList.length - 1 && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.5em",
+                marginBottom: "0.5em",
+              }}
+            >
+              <label>
+                Max Iteration Colour:
+                <input
+                  type="color"
+                  value={customColours[0]}
+                  onChange={(e) => {
+                    const newColours = [
+                      e.target.value,
+                      customColours[1],
+                      customColours[2],
+                    ];
+                    setCustomColours(newColours);
+                    calculateColourComponents(
+                      newColours[0],
+                      newColours[1],
+                      newColours[2]
+                    );
+                    drawEverythingRef.current();
+                  }}
+                  style={{ marginLeft: "0.5em" }}
+                />
+              </label>
+              <label>
+                Max Interp Colour:
+                <input
+                  type="color"
+                  value={customColours[1]}
+                  onChange={(e) => {
+                    const newColours = [
+                      customColours[0],
+                      e.target.value,
+                      customColours[2],
+                    ];
+                    setCustomColours(newColours);
+                    calculateColourComponents(
+                      newColours[0],
+                      newColours[1],
+                      newColours[2]
+                    );
+                    drawEverythingRef.current();
+                  }}
+                  style={{ marginLeft: "0.5em" }}
+                />
+              </label>
+              <label>
+                Min Interp Colour:
+                <input
+                  type="color"
+                  value={customColours[2]}
+                  onChange={(e) => {
+                    const newColours = [
+                      customColours[0],
+                      customColours[1],
+                      e.target.value,
+                    ];
+                    setCustomColours(newColours);
+                    calculateColourComponents(
+                      newColours[0],
+                      newColours[1],
+                      newColours[2]
+                    );
+                    drawEverythingRef.current();
+                  }}
+                  style={{ marginLeft: "0.5em" }}
+                />
+              </label>
+            </div>
+          )}
         </div>
       </div>
       <div style={{ zIndex: 10 }}>
