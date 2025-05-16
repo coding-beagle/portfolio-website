@@ -7,6 +7,7 @@ export default function Snow() {
   const canvasRef = useRef(null);
   const particleCountRef = useRef(200);
   const simulationSpeedRef = useRef(100);
+  const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export default function Snow() {
         this.vx = Math.random() * 2 - 1;
         this.vy = Math.random() * 2 - 1;
         this.size = Math.random() * 2 + 1;
-        this.color = theme.accent;
+        this.color = colorRef.current;
       }
 
       reset() {
@@ -129,6 +130,9 @@ export default function Snow() {
     initParticles();
     animate();
 
+    // Attach particles array to canvas for theme effect access
+    canvas._particles = particles;
+
     return () => {
       // Cleanup function to cancel the animation frame
       cancelAnimationFrame(animationFrameId);
@@ -136,6 +140,19 @@ export default function Snow() {
       particles = [];
     };
   }, []);
+
+  // Update colorRef and all particles' colors on theme change
+  useEffect(() => {
+    colorRef.current = theme.accent;
+    // Update all existing particles' colors
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (canvas._particles) {
+      canvas._particles.forEach((particle) => {
+        particle.color = theme.accent;
+      });
+    }
+  }, [theme]);
 
   return (
     <>
