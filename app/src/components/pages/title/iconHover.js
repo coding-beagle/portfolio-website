@@ -1,9 +1,10 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import defaultColours from "../../../themes/themes";
+import { useTheme } from "../../../themes/ThemeProvider";
 import { useState } from "react";
 
 export default function IconHover({ icon, link, openNewTab = true }) {
   const [isHover, setIsHover] = useState(false);
+  const { theme } = useTheme();
 
   return (
     <a
@@ -11,7 +12,7 @@ export default function IconHover({ icon, link, openNewTab = true }) {
       target={openNewTab ? "_blank" : "_self"}
       rel="noopener noreferrer"
       style={{
-        color: isHover ? defaultColours.secondary : defaultColours.accent,
+        color: isHover ? theme.secondary : theme.accent,
         cursor: "pointer",
       }}
       onMouseEnter={() => setIsHover(true)}
