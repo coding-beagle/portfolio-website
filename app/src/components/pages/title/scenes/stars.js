@@ -51,6 +51,11 @@ export default function Stars() {
 
     let stars = [];
     let animationFrameId;
+    let blackHole = null;
+    const BLACK_HOLE_SIZE = 20;
+    const BLACK_HOLE_LIFETIME = 2000; // frames
+    const BLACK_HOLE_PULL_RADIUS = 200;
+    const BLACK_HOLE_PULL_STRENGTH = 0.7;
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -107,7 +112,7 @@ export default function Stars() {
         }
 
         if (this.isTwinkling) {
-          if (this.twinklingCounter == 0) {
+          if (this.twinklingCounter === 0) {
             this.oldSize = this.size;
           }
           this.twinklingCounter++;
@@ -133,6 +138,87 @@ export default function Stars() {
         ctx.fillStyle = getCloseColour(this.colour);
         ctx.fill();
         ctx.closePath();
+      }
+    }
+
+    class BlackHole {
+      constructor(x, y, size) {
+        this.x = x;
+        this.y = y;
+        this.size = size;
+        this.lifetime = BLACK_HOLE_LIFETIME;
+        this.twist = 0;
+        this.collapsing = false;
+        this.collapseFrame = 0;
+        this.collapseDuration = 400;
+      }
+      update() {
+        if (!this.collapsing) {
+          this.lifetime--;
+          this.twist += 0.2;
+          // Pull in nearby stars
+          stars = stars.filter((star) => {
+            const dx = this.x - star.x;
+            const dy = this.y - star.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < this.size * 0.7) {
+              // Consumed by black hole
+              return false;
+            }
+            if (dist < BLACK_HOLE_PULL_RADIUS) {
+              // Pull star towards black hole
+              const angle =
+                Math.atan2(dy, dx) + Math.sin(this.twist + dist / 30) * 0.2;
+              const pull =
+                BLACK_HOLE_PULL_STRENGTH * (1 - dist / BLACK_HOLE_PULL_RADIUS);
+              star.x += Math.cos(angle) * pull;
+              star.y += Math.sin(angle) * pull;
+            }
+            return true;
+          });
+          if (this.lifetime <= 0) {
+            this.collapsing = true;
+            this.collapseFrame = 0;
+          }
+        } else {
+          this.collapseFrame++;
+        }
+      }
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.twist);
+        let drawSize = this.size;
+        let alpha = 1;
+        if (this.collapsing) {
+          drawSize = Math.max(
+            0,
+            this.size * (1 - this.collapseFrame / this.collapseDuration)
+          );
+          alpha = 1 - this.collapseFrame / this.collapseDuration;
+        }
+        // Draw twisting black hole
+        const gradient = ctx.createRadialGradient(
+          0,
+          0,
+          drawSize * 0.2,
+          0,
+          0,
+          drawSize
+        );
+        gradient.addColorStop(0, `rgba(34,34,34,${alpha})`);
+        gradient.addColorStop(0.5, `rgba(0,0,0,${alpha})`);
+        gradient.addColorStop(1, `rgba(0,0,0,0)`);
+        ctx.beginPath();
+        ctx.arc(0, 0, drawSize, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.shadowColor = `rgba(0,0,0,${alpha})`;
+        ctx.shadowBlur = 30 * alpha;
+        ctx.globalAlpha = alpha;
+        ctx.fill();
+        ctx.closePath();
+        ctx.globalAlpha = 1;
+        ctx.restore();
       }
     }
 
@@ -261,6 +347,14 @@ export default function Stars() {
 
           this.trailSizes = this.trailSizes.map((size) => size - 0.1);
 
+          if (this.size >= BLACK_HOLE_SIZE && !blackHole) {
+            // Collapse into black hole
+            blackHole = new BlackHole(this.x, this.y, this.size * 1.2);
+            this.isActive = false;
+            this.size = 0;
+            return;
+          }
+
           // Ensure fade-out completes before resetting
           if (
             this.isActiveCounter > maxShootingStarCounter &&
@@ -311,6 +405,15 @@ export default function Stars() {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (blackHole) {
+        blackHole.update();
+        blackHole.draw();
+        if (
+          blackHole.collapsing &&
+          blackHole.collapseFrame > blackHole.collapseDuration
+        )
+          blackHole = null;
+      }
       stars.forEach((star) => {
         star.update();
         star.draw();
