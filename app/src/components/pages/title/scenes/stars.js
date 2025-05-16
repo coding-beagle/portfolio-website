@@ -51,11 +51,14 @@ export default function Stars() {
 
     let stars = [];
     let animationFrameId;
-    let blackHole = null;
+    let blackHoles = [];
     const BLACK_HOLE_SIZE = 20;
     const BLACK_HOLE_LIFETIME = 2000; // frames
     const BLACK_HOLE_PULL_RADIUS = 200;
     const BLACK_HOLE_PULL_STRENGTH = 0.7;
+
+    // Store explosion effects
+    let explosions = [];
 
     const handleMouseMove = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -176,6 +179,23 @@ export default function Stars() {
             }
             return true;
           });
+          // Pull on other black holes
+          blackHoles.forEach((other) => {
+            if (other === this || other.collapsing) return;
+            const dx = this.x - other.x;
+            const dy = this.y - other.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 1 && dist < BLACK_HOLE_PULL_RADIUS * 1.5) {
+              // Pull other black hole towards this one
+              const angle = Math.atan2(dy, dx);
+              const pull =
+                BLACK_HOLE_PULL_STRENGTH *
+                1.5 *
+                (1 - dist / (BLACK_HOLE_PULL_RADIUS * 1.5));
+              other.x += Math.cos(angle) * pull;
+              other.y += Math.sin(angle) * pull;
+            }
+          });
           if (this.lifetime <= 0) {
             this.collapsing = true;
             this.collapseFrame = 0;
@@ -219,6 +239,46 @@ export default function Stars() {
         ctx.closePath();
         ctx.globalAlpha = 1;
         ctx.restore();
+      }
+    }
+
+    // Explosion effect class
+    class BlackHoleExplosion {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 0;
+        this.maxRadius = 120;
+        this.alpha = 1;
+      }
+      update() {
+        this.radius += 8;
+        this.alpha -= 0.04;
+      }
+      draw() {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.alpha);
+        const gradient = ctx.createRadialGradient(
+          this.x,
+          this.y,
+          0,
+          this.x,
+          this.y,
+          this.radius
+        );
+        gradient.addColorStop(0, "rgba(255,255,255,0.8)");
+        gradient.addColorStop(0.3, "rgba(0,200,255,0.5)");
+        gradient.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.closePath();
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      isDone() {
+        return this.alpha <= 0 || this.radius > this.maxRadius;
       }
     }
 
@@ -347,9 +407,15 @@ export default function Stars() {
 
           this.trailSizes = this.trailSizes.map((size) => size - 0.1);
 
-          if (this.size >= BLACK_HOLE_SIZE && !blackHole) {
+          if (
+            this.size >= BLACK_HOLE_SIZE &&
+            blackHoles.every(
+              (bh) =>
+                Math.hypot(this.x - bh.x, this.y - bh.y) > BLACK_HOLE_SIZE * 2
+            )
+          ) {
             // Collapse into black hole
-            blackHole = new BlackHole(this.x, this.y, this.size * 1.2);
+            blackHoles.push(new BlackHole(this.x, this.y, this.size * 1.2));
             this.isActive = false;
             this.size = 0;
             return;
@@ -388,6 +454,64 @@ export default function Stars() {
       }
     }
 
+    function findStarClusters(minStars = 8, clusterRadius = 60) {
+      // Find clusters of stars within clusterRadius
+      const clusters = [];
+      const visited = new Set();
+      for (let i = 0; i < stars.length; i++) {
+        if (visited.has(i)) continue;
+        const cluster = [i];
+        visited.add(i);
+        for (let j = 0; j < stars.length; j++) {
+          if (i === j || visited.has(j)) continue;
+          const dx = stars[i].x - stars[j].x;
+          const dy = stars[i].y - stars[j].y;
+          if (Math.sqrt(dx * dx + dy * dy) < clusterRadius) {
+            cluster.push(j);
+            visited.add(j);
+          }
+        }
+        if (cluster.length >= minStars) {
+          clusters.push(cluster);
+        }
+      }
+      return clusters;
+    }
+
+    function getClusterCentroid(cluster) {
+      let sumX = 0,
+        sumY = 0;
+      cluster.forEach((idx) => {
+        sumX += stars[idx].x;
+        sumY += stars[idx].y;
+      });
+      return {
+        x: sumX / cluster.length,
+        y: sumY / cluster.length,
+      };
+    }
+
+    function handleBlackHoleCollisions() {
+      const toRemove = new Set();
+      for (let i = 0; i < blackHoles.length; i++) {
+        for (let j = i + 1; j < blackHoles.length; j++) {
+          const bh1 = blackHoles[i];
+          const bh2 = blackHoles[j];
+          const dist = Math.hypot(bh1.x - bh2.x, bh1.y - bh2.y);
+          if (dist < BLACK_HOLE_SIZE * 1.5) {
+            // Collision detected! Trigger explosion at midpoint
+            const midX = (bh1.x + bh2.x) / 2;
+            const midY = (bh1.y + bh2.y) / 2;
+            explosions.push(new BlackHoleExplosion(midX, midY));
+            toRemove.add(i);
+            toRemove.add(j);
+          }
+        }
+      }
+      // Remove collided black holes
+      blackHoles = blackHoles.filter((_, idx) => !toRemove.has(idx));
+    }
+
     function initBlocks() {
       for (let i = 0; i < particleCount; i++) {
         const size = Math.random() * 5 + 2.5;
@@ -405,15 +529,36 @@ export default function Stars() {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (blackHole) {
-        blackHole.update();
-        blackHole.draw();
+      // Black hole cluster detection
+      const clusters = findStarClusters();
+      clusters.forEach((cluster) => {
+        const centroid = getClusterCentroid(cluster);
         if (
-          blackHole.collapsing &&
-          blackHole.collapseFrame > blackHole.collapseDuration
-        )
-          blackHole = null;
-      }
+          blackHoles.every(
+            (bh) =>
+              Math.hypot(centroid.x - bh.x, centroid.y - bh.y) >
+              BLACK_HOLE_SIZE * 2
+          )
+        ) {
+          blackHoles.push(
+            new BlackHole(centroid.x, centroid.y, BLACK_HOLE_SIZE)
+          );
+        }
+      });
+      // Handle black hole collisions
+      handleBlackHoleCollisions();
+      // Update/draw all black holes, remove collapsed ones
+      blackHoles = blackHoles.filter((bh) => {
+        bh.update();
+        bh.draw();
+        return !(bh.collapsing && bh.collapseFrame > bh.collapseDuration);
+      });
+      // Draw and update explosions
+      explosions.forEach((exp) => {
+        exp.update();
+        exp.draw();
+      });
+      explosions = explosions.filter((exp) => !exp.isDone());
       stars.forEach((star) => {
         star.update();
         star.draw();
@@ -466,7 +611,7 @@ export default function Stars() {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
               minValue: "1",
-              maxValue: "200.0",
+              maxValue: "500.0",
             },
           ]}
           rerenderSetter={setRender}
