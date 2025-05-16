@@ -206,7 +206,6 @@ export default function Conway() {
           parsedPattern.length > 0
         ) {
           const patRows = parsedPattern.length;
-          // Defensive: handle ragged arrays
           for (let i = 0; i < patRows; i++) {
             for (
               let j = 0;
@@ -214,8 +213,8 @@ export default function Conway() {
               j++
             ) {
               if (parsedPattern[i][j]) {
-                const gridY = mouseGridPos.y + i;
-                const gridX = mouseGridPos.x + j;
+                const gridY = mouseGridPos.current.y + i;
+                const gridX = mouseGridPos.current.x + j;
                 if (
                   gridY >= 0 &&
                   gridY < numGridColumns.current &&
@@ -254,6 +253,34 @@ export default function Conway() {
       }
 
       update(skipCheck = false) {
+        // Only clear and draw once per frame
+        this.draw();
+        // Paste pattern on click
+        if (
+          mouseClickRef.current &&
+          parsedPatternRef.current &&
+          mouseGridPos.current
+        ) {
+          const pattern = parsedPatternRef.current;
+          const patRows = pattern.length;
+          for (let i = 0; i < patRows; i++) {
+            for (let j = 0; j < (pattern[i] ? pattern[i].length : 0); j++) {
+              if (pattern[i][j]) {
+                const gridY = mouseGridPos.current.y + i;
+                const gridX = mouseGridPos.current.x + j;
+                if (
+                  gridY >= 0 &&
+                  gridY < numGridColumns.current &&
+                  gridX >= 0 &&
+                  gridX < numGridRows.current
+                ) {
+                  gridRef.current[gridY][gridX].isAlive = true;
+                }
+              }
+            }
+          }
+          mouseClickRef.current = false; // Prevent repeated pasting
+        }
         if (this.numColumns !== numGridColumns.current) {
           this.updating = true;
           let rowDiff = numGridColumns.current - this.numColumns;
@@ -444,13 +471,12 @@ export default function Conway() {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       };
-
+      // Fix: getGridFromMousePos expects (gridRows, gridColumns)
+      // But we want (numGridRows.current, numGridColumns.current)
       mouseGridPos.current = getGridFromMousePos(
-        numGridColumns.current,
-        numGridRows.current
+        numGridRows.current,
+        numGridColumns.current
       );
-
-      console.log(mouseGridPos.current);
     };
 
     const handleMouseDown = (e) => {
