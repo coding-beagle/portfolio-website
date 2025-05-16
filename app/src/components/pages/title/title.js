@@ -172,6 +172,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             zIndex: 10,
             transition: "color 0.8s ease, transform 1.5s ease",
             position: "relative",
+            cursor: "pointer",
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none",
             KhtmlUserSelect: "none",

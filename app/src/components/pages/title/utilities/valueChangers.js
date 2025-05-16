@@ -179,13 +179,91 @@ export function Slider({
 }
 
 export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
+  const { theme } = useTheme();
+  const btnRef = useRef();
+  const timeouts = useRef([]);
+  const isPressed = useRef(false);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      timeouts.current.forEach((t) => clearTimeout(t));
+      timeouts.current = [];
+    };
+  }, []);
+
+  // Helper to reset scale and clear timeouts
+  const resetButton = () => {
+    if (btnRef.current) {
+      btnRef.current.style.transition =
+        "transform 0.12s cubic-bezier(.4,2,.6,1)";
+      btnRef.current.style.transform = "scale(1)";
+    }
+    timeouts.current.forEach((t) => clearTimeout(t));
+    timeouts.current = [];
+    isPressed.current = false;
+  };
+
   return (
-    <div>
-      {title}{" "}
+    <div
+      style={{ display: "flex", alignItems: "center", marginBottom: "0.3em" }}
+    >
+      {title && <span style={{ minWidth: 120, marginRight: 6 }}>{title}</span>}
       <button
-        onClick={() => {
+        ref={btnRef}
+        onClick={(e) => {
           rerenderSetter((prev) => prev + 1);
           callback();
+          if (!btnRef.current) return;
+          isPressed.current = true;
+          btnRef.current.style.transition =
+            "transform 0.08s cubic-bezier(.4,2,.6,1)";
+          btnRef.current.style.transform = "scale(0.93)";
+          // Animate up only if still pressed
+          const t1 = setTimeout(() => {
+            if (!btnRef.current || !isPressed.current) return;
+            btnRef.current.style.transition =
+              "transform 0.18s cubic-bezier(.4,2,.6,1)";
+            btnRef.current.style.transform = "scale(1.07)";
+            const t2 = setTimeout(() => {
+              if (!btnRef.current || !isPressed.current) return;
+              btnRef.current.style.transition =
+                "transform 0.12s cubic-bezier(.4,2,.6,1)";
+              btnRef.current.style.transform = "scale(1)";
+              isPressed.current = false;
+            }, 120);
+            timeouts.current.push(t2);
+          }, 80);
+          timeouts.current.push(t1);
+        }}
+        onMouseUp={resetButton}
+        onMouseLeave={resetButton}
+        style={{
+          padding: "0.35em 1.1em",
+          fontSize: 15,
+          borderRadius: 6,
+          border: `2px solid ${theme.accent}`,
+          background: `linear-gradient(90deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
+          color: theme.text,
+          fontWeight: 500,
+          cursor: "pointer",
+          transition:
+            "background 0.15s, border 0.15s, color 0.15s, transform 0.12s cubic-bezier(.4,2,.6,1)",
+          marginLeft: title ? 0 : 0,
+          boxShadow: `0 1px 6px ${theme.secondaryAccent}22`,
+          fontFamily: theme.font,
+        }}
+        onMouseOver={(e) => {
+          if (btnRef.current) {
+            btnRef.current.style.transform = "scale(1.07)";
+            btnRef.current.style.background = `linear-gradient(90deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
+          }
+        }}
+        onMouseOut={(e) => {
+          if (btnRef.current) {
+            btnRef.current.style.transform = "scale(1)";
+            btnRef.current.style.background = `linear-gradient(90deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`;
+          }
         }}
       >
         {buttonText}
