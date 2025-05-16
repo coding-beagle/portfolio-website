@@ -43,6 +43,21 @@ export default function Conway() {
   // Add state for pattern preview window visibility
   const showPatternPreviewRef = useRef(false);
 
+  // Add state for pattern browser and list
+  const [patternList, setPatternList] = useState([]);
+  const [showPatternBrowser, setShowPatternBrowser] = useState(false);
+
+  // Fetch the local manifest for .cells files
+  async function fetchPatternList() {
+    try {
+      const resp = await fetch("/cells/manifest.json");
+      const list = await resp.json();
+      setPatternList(list);
+    } catch (err) {
+      alert("Failed to fetch pattern list: " + err.message);
+    }
+  }
+
   // Function to parse .cells pattern text and generate a preview grid
   function parseCellsPattern(text) {
     // Remove comments and blank lines
@@ -539,6 +554,16 @@ export default function Conway() {
                 ? "Close Pattern Preview"
                 : "Open Pattern Preview"}
             </button>
+            <button
+              style={{ marginLeft: "0.5em", fontSize: 12 }}
+              onClick={() => {
+                setPatternText("");
+                setPatternPreview(null);
+              }}
+              title="Clear pattern text"
+            >
+              Clear Pattern
+            </button>
           </div>
           {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
           {showPatternPreviewRef.current && (
@@ -570,6 +595,88 @@ export default function Conway() {
                   marginBottom: 8,
                 }}
               />
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button
+                  onClick={() => {
+                    setPatternText("");
+                    setPatternPreview(null);
+                  }}
+                  style={{ fontSize: 12 }}
+                  title="Clear pattern text"
+                >
+                  Clear Pattern
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowPatternBrowser((v) => !v);
+                    if (patternList.length === 0) await fetchPatternList();
+                  }}
+                  style={{ fontSize: 12 }}
+                  title="Browse local patterns"
+                >
+                  {showPatternBrowser ? "Close Browser" : "Browse Patterns"}
+                </button>
+              </div>
+              {showPatternBrowser && (
+                <div
+                  style={{
+                    maxHeight: 300,
+                    overflowY: "auto",
+                    background: "#181818",
+                    border: "1px solid #333",
+                    borderRadius: 4,
+                    marginBottom: 8,
+                    padding: 4,
+                  }}
+                >
+                  {patternList.length === 0 && <div>Loading patterns...</div>}
+                  {patternList.map((pattern) => (
+                    <div
+                      key={pattern.filename}
+                      style={{
+                        cursor: "pointer",
+                        padding: "2px 0",
+                        color: "#8cf",
+                        textDecoration: "underline",
+                        fontSize: 13,
+                      }}
+                      title={
+                        pattern.description +
+                        (pattern.author ? `\nBy: ${pattern.author}` : "")
+                      }
+                      onClick={async () => {
+                        const url = `/cells/${pattern.filename}`;
+                        try {
+                          const resp = await fetch(url);
+                          if (!resp.ok) {
+                            alert("Pattern not found in local cells folder");
+                            return;
+                          }
+                          const text = await resp.text();
+                          setPatternText(text);
+                          setPatternPreview(parseCellsPattern(text));
+                          setShowPatternBrowser(false);
+                        } catch (err) {
+                          alert("Failed to fetch pattern: " + err.message);
+                        }
+                      }}
+                    >
+                      <b>{pattern.name}</b>{" "}
+                      <span style={{ color: "#aaa", fontSize: 11 }}>
+                        ({pattern.filename})
+                      </span>
+                      <div style={{ color: "#ccc", fontSize: 11 }}>
+                        {pattern.description}
+                      </div>
+                      {pattern.author && (
+                        <div style={{ color: "#aaa", fontSize: 11 }}>
+                          By: {pattern.author}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
               <div
                 style={{
