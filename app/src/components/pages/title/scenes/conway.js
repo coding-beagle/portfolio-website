@@ -126,6 +126,20 @@ export default function Conway() {
       gridManagerRef.current.draw();
   }, [patternText]);
 
+  // Escape key handler for pattern modal
+  useEffect(() => {
+    function handleEscape(e) {
+      if (e.key === "Escape") {
+        if (showPatternPreviewRef.current)
+          showPatternPreviewRef.current = false;
+        else setPatternText("");
+        setRender((r) => r + 1);
+      }
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
+
   const squarifyGrid = (columns = false) => {
     if (columns) {
       // yeah these are swapped unfortunately hahhaah
