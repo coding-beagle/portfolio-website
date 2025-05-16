@@ -252,21 +252,28 @@ export default function Stars() {
         for (let i = 0; i < waveCount; i++) {
           this.waves.push({
             radius: 0,
-            maxRadius: 220 + i * 80, // Each wave is bigger
-            alpha: 1 - i * 0.2, // Each wave is fainter
-            speed: 10 + i * 3, // Each wave moves faster
+            maxRadius: 350 + i * 120, // Each wave is much bigger
+            alpha: 0.7 - i * 0.18, // Each wave is fainter
+            speed: 3 + i * 1.2, // Each wave is slower and more dramatic
+            delay: i * 22, // Delay each wave for a staggered effect
+            started: false,
           });
         }
       }
       update() {
         this.waves.forEach((wave) => {
+          if (wave.delay > 0) {
+            wave.delay--;
+            return;
+          }
+          wave.started = true;
           wave.radius += wave.speed;
-          wave.alpha -= 0.018 + wave.speed * 0.0007;
+          wave.alpha -= 0.004 + wave.speed * 0.0007;
         });
       }
       draw() {
         this.waves.forEach((wave, idx) => {
-          if (wave.alpha <= 0) return;
+          if (!wave.started || wave.alpha <= 0) return;
           ctx.save();
           ctx.globalAlpha = Math.max(0, wave.alpha);
           const gradient = ctx.createRadialGradient(
@@ -279,10 +286,10 @@ export default function Stars() {
           );
           gradient.addColorStop(
             0,
-            idx === 0 ? "rgba(255,255,255,0.9)" : "rgba(0,200,255,0.5)"
+            idx === 0 ? "rgba(255,255,255,0.8)" : "rgba(0,200,255,0.4)"
           );
-          gradient.addColorStop(0.2, "rgba(0,200,255,0.4)");
-          gradient.addColorStop(0.7, "rgba(0,0,0,0.1)");
+          gradient.addColorStop(0.2, "rgba(0,200,255,0.25)");
+          gradient.addColorStop(0.7, "rgba(0,0,0,0.08)");
           gradient.addColorStop(1, "rgba(0,0,0,0)");
           ctx.beginPath();
           ctx.arc(this.x, this.y, wave.radius, 0, Math.PI * 2);
@@ -296,7 +303,8 @@ export default function Stars() {
       isDone() {
         // Done if all waves are faded or too big
         return this.waves.every(
-          (wave) => wave.alpha <= 0 || wave.radius > wave.maxRadius
+          (wave) =>
+            wave.started && (wave.alpha <= 0 || wave.radius > wave.maxRadius)
         );
       }
     }
