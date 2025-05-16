@@ -14,25 +14,25 @@ export default function Stars() {
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
-  const getCloseColour = (colourHex) => {
-    const colour = {
-      r: parseInt(colourHex.slice(1, 3), 16),
-      g: parseInt(colourHex.slice(3, 5), 16),
-      b: parseInt(colourHex.slice(5, 7), 16),
+  useEffect(() => {
+    const getCloseColour = (colourHex) => {
+      const colour = {
+        r: parseInt(colourHex.slice(1, 3), 16),
+        g: parseInt(colourHex.slice(3, 5), 16),
+        b: parseInt(colourHex.slice(5, 7), 16),
+      };
+
+      const r = Math.floor(clamp(colour.r + Math.random() * 20 - 10, 0, 255));
+      const g = Math.floor(clamp(colour.g + Math.random() * 10 - 5, 0, 255));
+      const b = Math.floor(clamp(colour.b + Math.random() * 10 - 5, 0, 255));
+
+      const rHex = r.toString(16).padStart(2, "0");
+      const gHex = g.toString(16).padStart(2, "0");
+      const bHex = b.toString(16).padStart(2, "0");
+
+      return `#${rHex}${gHex}${bHex}`;
     };
 
-    const r = Math.floor(clamp(colour.r + Math.random() * 20 - 10, 0, 255));
-    const g = Math.floor(clamp(colour.g + Math.random() * 10 - 5, 0, 255));
-    const b = Math.floor(clamp(colour.b + Math.random() * 10 - 5, 0, 255));
-
-    const rHex = r.toString(16).padStart(2, "0");
-    const gHex = g.toString(16).padStart(2, "0");
-    const bHex = b.toString(16).padStart(2, "0");
-
-    return `#${rHex}${gHex}${bHex}`;
-  };
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
@@ -336,7 +336,7 @@ export default function Stars() {
       canvas.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [particleCount]);
+  }, [particleCount, theme]);
 
   return (
     <>
