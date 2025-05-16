@@ -1,16 +1,17 @@
-import defaultColours from "../../../themes/themes";
+import { useTheme } from "../../themes/ThemeProvider";
 import React from "react";
 import Snow from "../title/scenes/snow";
 import IconHover from "../title/iconHover";
 import { faBackward } from "@fortawesome/free-solid-svg-icons";
 
 export default function Blog() {
+  const { theme } = useTheme();
   return (
     <div
       style={{
-        backgroundColor: defaultColours.primary,
-        color: defaultColours.accent,
-        fontFamily: defaultColours.font,
+        backgroundColor: theme.primary,
+        color: theme.accent,
+        fontFamily: theme.font,
         height: "100vh",
         margin: 0,
         display: "flex",

@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import { SliderGroup } from "../utilities/valueChangers";
 import MouseTooltip from "../utilities/popovers";
 
 export default function Fire() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const simulationSpeedRef = useRef(100);
@@ -25,8 +26,8 @@ export default function Fire() {
     let animationFrameId;
 
     function getColourBasedOnTemperature(temperature) {
-      const hottestColor = defaultColours.accent; // Hex color, e.g., "#FF0000"
-      const coldestColor = defaultColours.tertiaryAccent; // Hex color, e.g., "#0000FF"
+      const hottestColor = theme.accent; // Hex color, e.g., "#FF0000"
+      const coldestColor = theme.tertiaryAccent; // Hex color, e.g., "#0000FF"
 
       // Interpolate between the two colors based on temperature (0 to 10 scale)
       const ratio = Math.min(Math.max(temperature / 10, 0), 1); // Clamp ratio between 0 and 1
@@ -167,7 +168,7 @@ export default function Fire() {
       draw() {
         ctx.beginPath();
         ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = defaultColours.accent;
+        ctx.fillStyle = theme.accent;
         ctx.fill();
         ctx.closePath();
       }

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 
 export default function WindTunnel() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -94,7 +95,7 @@ export default function WindTunnel() {
         this.vx = vx;
         this.vy = 0;
         this.size = 1;
-        this.color = defaultColours.accent;
+        this.color = theme.accent;
       }
 
       update(densityMap) {

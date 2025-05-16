@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Hexapod() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -356,7 +357,7 @@ export default function Hexapod() {
 
         ctx.beginPath();
         // Use a distinct color for legs, maybe slightly transparent
-        ctx.strokeStyle = defaultColours.secondaryAccent; // Dark grey, slightly transparent
+        ctx.strokeStyle = theme.secondaryAccent; // Dark grey, slightly transparent
         ctx.lineWidth = 3; // Make legs reasonably thick
 
         // Project all points first
@@ -439,7 +440,7 @@ export default function Hexapod() {
           const screenPos = convert3DtoIsometric(point);
           ctx.lineTo(screenPos[0], screenPos[1]);
         });
-        ctx.strokeStyle = defaultColours.accent;
+        ctx.strokeStyle = theme.accent;
         ctx.stroke();
       }
 
@@ -848,7 +849,7 @@ export default function Hexapod() {
           )
         ).toString(16);
 
-        ctx.fillStyle = defaultColours.tertiaryAccent + hexOpacity;
+        ctx.fillStyle = theme.tertiaryAccent + hexOpacity;
         ctx.fill();
         ctx.restore();
       }

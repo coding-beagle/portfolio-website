@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
 
 export default function Mandelbrot() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const drawAreaRef = useRef(400);
   const drawResolutionRef = useRef(20);
@@ -45,30 +46,10 @@ export default function Mandelbrot() {
   }, []);
 
   const themesList = [
-    [
-      "Default",
-      defaultColours.primary,
-      defaultColours.secondary,
-      defaultColours.primary,
-    ],
-    [
-      "Experimental",
-      defaultColours.primary,
-      defaultColours.tertiaryAccent,
-      defaultColours.primary,
-    ],
-    [
-      "Flashbang",
-      defaultColours.tertiaryAccent,
-      defaultColours.primary,
-      defaultColours.accent,
-    ],
-    [
-      "Adorned",
-      defaultColours.secondary,
-      defaultColours.accent,
-      defaultColours.primary,
-    ],
+    ["Default", theme.primary, theme.secondary, theme.primary],
+    ["Experimental", theme.primary, theme.tertiaryAccent, theme.primary],
+    ["Flashbang", theme.tertiaryAccent, theme.primary, theme.accent],
+    ["Adorned", theme.secondary, theme.accent, theme.primary],
     ["Custom", customColours[0], customColours[1], customColours[2]],
   ];
 

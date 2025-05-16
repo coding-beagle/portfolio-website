@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Snow() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(200);
   const simulationSpeedRef = useRef(100);
@@ -33,7 +34,7 @@ export default function Snow() {
         this.vx = Math.random() * 2 - 1;
         this.vy = Math.random() * 2 - 1;
         this.size = Math.random() * 2 + 1;
-        this.color = defaultColours.accent;
+        this.color = theme.accent;
       }
 
       reset() {

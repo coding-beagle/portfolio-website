@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Boids() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -33,7 +34,7 @@ export default function Boids() {
         this.dx = Math.random() * 2 - 1;
         this.dy = Math.random() * 2 - 1;
         this.size = 10;
-        this.colour = defaultColours.accent;
+        this.colour = theme.accent;
       }
 
       draw() {
@@ -70,7 +71,7 @@ export default function Boids() {
         this.dx = Math.random();
         this.dy = Math.random();
         this.size = 10;
-        this.colour = defaultColours.secondaryAccent;
+        this.colour = theme.secondaryAccent;
       }
 
       draw() {

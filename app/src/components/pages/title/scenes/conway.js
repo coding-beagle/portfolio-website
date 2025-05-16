@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleXmark,
@@ -15,6 +15,7 @@ const names = {
 };
 
 export default function Conway() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -107,9 +108,9 @@ export default function Conway() {
         for (let i = 0; i < numGridColumns.current; i++) {
           for (let j = 0; j < numGridRows.current; j++) {
             if (gridRef.current[i][j].isAlive) {
-              ctx.fillStyle = defaultColours.secondary;
+              ctx.fillStyle = theme.secondary;
             } else {
-              ctx.fillStyle = defaultColours.primary;
+              ctx.fillStyle = theme.primary;
             }
             ctx.beginPath();
             ctx.rect(rectWidth * j, rectHeight * i, rectWidth, rectHeight);

@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Rain() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -83,7 +84,7 @@ export default function Rain() {
         this.vx = Math.random() * 2 - 1;
         this.vy = Math.random() * 10 + 5;
         this.size = Math.random() * 2 + 1;
-        this.color = defaultColours.secondary;
+        this.color = theme.secondary;
       }
 
       update() {

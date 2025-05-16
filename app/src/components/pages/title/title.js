@@ -1,5 +1,5 @@
 import { useEffect, useState, createElement, useRef } from "react";
-import defaultColours from "../../../themes/themes";
+import { useTheme } from "../../../themes/ThemeProvider";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
 import Stars from "./scenes/stars";
@@ -45,6 +45,7 @@ const sceneNameToIndex = {
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
+  const { theme } = useTheme();
   const [isHover, setIsHover] = useState(false);
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
@@ -138,6 +139,9 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
           height: "100vh",
           flexDirection: "column",
           position: "relative",
+          backgroundColor: theme.primary,
+          color: theme.accent,
+          fontFamily: theme.font,
         }}
       >
         {createElement(renderScene())}
@@ -163,7 +167,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
           style={{
             fontSize: "5em",
             textAlign: "center",
-            color: isHover ? defaultColours.secondary : defaultColours.accent,
+            color: isHover ? theme.secondary : theme.accent,
             fontWeight: "bold",
             zIndex: 10,
             transition: "color 0.8s ease, transform 1.5s ease",
@@ -174,9 +178,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             MozUserSelect: "none",
             userSelect: "none",
             msUserSelect: "none",
-            transform: clicked ? "scale(1.1)" : "scale(1)",
-            animation: clicked ? `${getRandomShake()} 0.5s ease` : "none", // Apply the shake animation
-            whiteSpace: "pre-wrap", // Allows handling of newlines
+            animation: clicked ? `${getRandomShake()} 0.5s ease` : "none",
+            whiteSpace: "pre-wrap",
           }}
           id="title"
         >

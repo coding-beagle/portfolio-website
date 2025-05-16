@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Plants() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [restart, setRestart] = useState(false);
@@ -56,7 +57,7 @@ export default function Plants() {
         this.x = x;
         this.y = y;
         this.growthPoints = [{ x: x, y: y }];
-        this.colours = [defaultColours.secondaryAccent];
+        this.colours = [theme.secondaryAccent];
         this.sizes = [size];
       }
 

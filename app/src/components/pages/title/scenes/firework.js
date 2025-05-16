@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import { SliderGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
 
 export default function Fireworks() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
@@ -73,7 +74,7 @@ export default function Fireworks() {
         this.vx = (Math.random() - 0.5) * maxFireworkSpeed;
         this.vy = -(Math.random() + 2 * maxFireworkRiseSpeed);
         this.size = Math.random() * 2 + 1;
-        this.color = defaultColours.accent;
+        this.color = theme.accent;
         this.points = [];
         const fireworkTypesKeys = Object.keys(fireWorkTypes);
         this.type =

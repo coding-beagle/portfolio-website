@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import defaultColours from "../../../../themes/themes";
+import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { SliderGroup } from "../utilities/valueChangers";
 
 export default function Stars() {
+  const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [particleCount, setParticleCount] = useState(120);
@@ -71,7 +72,7 @@ export default function Stars() {
       constructor(x, y, size) {
         this.x = x;
         this.y = y;
-        this.colour = defaultColours.accent;
+        this.colour = theme.accent;
         this.size = size;
         this.isTwinkling = false;
         this.twinklingCounter = 0;
@@ -110,7 +111,7 @@ export default function Stars() {
             this.oldSize = this.size;
           }
           this.twinklingCounter++;
-          this.colour = getCloseColour(defaultColours.accent);
+          this.colour = getCloseColour(theme.accent);
           if (this.twinklingCounter < maxTwinkleCounter / 2) {
             this.size = this.size + Math.random() * 0.05 + 0.01;
           } else {
@@ -121,7 +122,7 @@ export default function Stars() {
             this.isTwinkling = false;
             this.twinklingCounter = 0;
             this.size = this.oldSize;
-            this.colour = defaultColours.accent;
+            this.colour = theme.accent;
           }
         }
       }
@@ -173,14 +174,14 @@ export default function Stars() {
         this.dx = Math.random() * 2 - 1;
         this.dy = Math.random() * 2 - 1;
         this.startingMagnitude = Math.sqrt(this.dx ** 2 + this.dy ** 2);
-        this.colour = defaultColours.accent;
+        this.colour = theme.accent;
         this.isActive = false;
         this.isActiveCounter = 0;
         this.trailPositions = [{ x: this.x, y: this.y }];
         this.trailColours = [];
-        this.fullColour = getCloseColour(defaultColours.accent);
+        this.fullColour = getCloseColour(theme.accent);
         this.fadeColours = graduallyChangeColour(
-          defaultColours.primary,
+          theme.primary,
           this.fullColour,
           maxShootingStarCounter / 4
         );
@@ -255,7 +256,7 @@ export default function Stars() {
           this.y += this.dy * (simulationSpeedRef.current / 100);
 
           this.trailPositions.push({ x: this.x, y: this.y });
-          this.trailColours.push(getCloseColour(defaultColours.accent));
+          this.trailColours.push(getCloseColour(theme.accent));
           this.trailSizes.push(this.size);
 
           this.trailSizes = this.trailSizes.map((size) => size - 0.1);
@@ -269,7 +270,7 @@ export default function Stars() {
             this.isActiveCounter = 0;
             this.x = Math.random() * canvas.width;
             this.y = Math.random() * canvas.height;
-            this.colour = defaultColours.accent;
+            this.colour = theme.accent;
             this.trailColours = [];
             this.trailPositions = [];
             this.trailSizes = [];
