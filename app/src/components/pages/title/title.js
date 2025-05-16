@@ -52,6 +52,8 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   );
 
   const [clicked, setClicked] = useState(false);
+  const headerRef = useRef(null);
+  const animationNameRef = useRef("");
 
   useEffect(() => {
     if (initialScene === "") {
@@ -122,6 +124,12 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     return animationName; // Return the animation name
   };
 
+  const triggerShake = () => {
+    const name = getRandomShake();
+    animationNameRef.current = name;
+    setClicked(true);
+  };
+
   const getSceneName = (index) => {
     return (
       Object.entries(sceneNameToIndex).find(([, i]) => i === index)?.[0] ||
@@ -146,18 +154,19 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
       >
         {createElement(renderScene())}
         <header
+          ref={headerRef}
           onMouseEnter={() => setIsHover(true)}
           onMouseLeave={() => setIsHover(false)}
           onMouseDown={(event) => {
             if (intervalRef.current) clearInterval(intervalRef.current);
             if (event.button === 0) {
-              setClicked(true);
+              triggerShake();
               setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
             }
           }}
           onContextMenu={(event) => {
             event.preventDefault();
-            setClicked(true);
+            triggerShake();
             setCurrentScene(
               currentScene - 1 < 0
                 ? Object.keys(Scenes).length - 1
@@ -179,7 +188,10 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
             MozUserSelect: "none",
             userSelect: "none",
             msUserSelect: "none",
-            animation: clicked ? `${getRandomShake()} 0.5s ease` : "none",
+            animation:
+              clicked && animationNameRef.current
+                ? `${animationNameRef.current} 0.5s ease`
+                : "none",
             whiteSpace: "pre-wrap",
           }}
           id="title"
