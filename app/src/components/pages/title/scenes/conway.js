@@ -33,7 +33,83 @@ export default function Conway() {
   const primaryColorRef = useRef(theme.primary);
   const secondaryColorRef = useRef(theme.secondary);
 
-  let isDebouncing = true;
+  // Add state for pattern preview
+  const [patternText, setPatternText] = useState("");
+  const [patternPreview, setPatternPreview] = useState(null);
+
+  // Add ref for parsed pattern array and state for mouse grid position
+  const parsedPatternRef = useRef(null);
+  const mouseGridPos = useRef(null);
+  // Add state for pattern preview window visibility
+  const showPatternPreviewRef = useRef(false);
+
+  // Function to parse .cells pattern text and generate a preview grid
+  function parseCellsPattern(text) {
+    // Remove comments and blank lines
+    const lines = text
+      .split("\n")
+      .filter((line) => line.trim() && !line.startsWith("!"));
+    if (!lines.length) return null;
+    return lines.map((line, rowIdx) => (
+      <div key={rowIdx} style={{ display: "flex", height: "1em" }}>
+        {line.split("").map((cell, colIdx) => (
+          <div
+            key={colIdx}
+            style={{
+              width: "1em",
+              height: "1em",
+              background:
+                cell === "O"
+                  ? secondaryColorRef.current
+                  : primaryColorRef.current,
+              border: "1px solid #2222",
+              boxSizing: "border-box",
+            }}
+          />
+        ))}
+      </div>
+    ));
+  }
+
+  // Handler for textarea or file input
+  function handlePatternInput(e) {
+    const value = e.target.value;
+    setPatternText(value);
+    setPatternPreview(parseCellsPattern(value));
+  }
+
+  // Update parsedPatternRef whenever patternText changes
+  useEffect(() => {
+    if (!patternText) {
+      parsedPatternRef.current = null;
+      if (
+        gridManagerRef.current &&
+        typeof gridManagerRef.current.draw === "function"
+      )
+        gridManagerRef.current.draw();
+      return;
+    }
+    // Parse .cells pattern into 2D array of booleans (alive = true)
+    const lines = patternText
+      .split("\n")
+      .filter((line) => line.trim() && !line.startsWith("!"));
+    if (!lines.length) {
+      parsedPatternRef.current = null;
+      if (
+        gridManagerRef.current &&
+        typeof gridManagerRef.current.draw === "function"
+      )
+        gridManagerRef.current.draw();
+      return;
+    }
+    const arr = lines.map((line) => line.split("").map((cell) => cell === "O"));
+    parsedPatternRef.current = arr;
+    if (
+      gridManagerRef.current &&
+      typeof gridManagerRef.current.draw === "function"
+    )
+      gridManagerRef.current.draw();
+  }, [patternText]);
 
   const squarifyGrid = (columns = false) => {
     if (columns) {
@@ -99,16 +175,16 @@ export default function Conway() {
     // takes a constructor of an array of particles and renders them
     class Grid {
       constructor() {
-        this.draw();
+        this.draw = this.draw.bind(this); // Ensure 'this' context
         this.numColumns = numGridColumns.current;
         this.numRows = numGridRows.current;
+        this.draw();
       }
 
       draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const rectWidth = canvas.width / numGridRows.current;
         const rectHeight = canvas.height / numGridColumns.current;
-
         for (let i = 0; i < numGridColumns.current; i++) {
           for (let j = 0; j < numGridRows.current; j++) {
             if (gridRef.current[i][j].isAlive) {
@@ -119,6 +195,55 @@ export default function Conway() {
             ctx.beginPath();
             ctx.rect(rectWidth * j, rectHeight * i, rectWidth, rectHeight);
             ctx.fill();
+          }
+        }
+        // Overlay pattern preview if present and mouse is over grid
+        const parsedPattern = parsedPatternRef.current;
+        if (
+          parsedPattern &&
+          mouseGridPos.current &&
+          Array.isArray(parsedPattern) &&
+          parsedPattern.length > 0
+        ) {
+          const patRows = parsedPattern.length;
+          // Defensive: handle ragged arrays
+          for (let i = 0; i < patRows; i++) {
+            for (
+              let j = 0;
+              j < (parsedPattern[i] ? parsedPattern[i].length : 0);
+              j++
+            ) {
+              if (parsedPattern[i][j]) {
+                const gridY = mouseGridPos.y + i;
+                const gridX = mouseGridPos.x + j;
+                if (
+                  gridY >= 0 &&
+                  gridY < numGridColumns.current &&
+                  gridX >= 0 &&
+                  gridX < numGridRows.current
+                ) {
+                  ctx.save();
+                  ctx.globalAlpha = 0.7;
+                  ctx.strokeStyle = secondaryColorRef.current;
+                  ctx.lineWidth = 2;
+                  ctx.strokeRect(
+                    rectWidth * gridX + 1,
+                    rectHeight * gridY + 1,
+                    rectWidth - 2,
+                    rectHeight - 2
+                  );
+                  ctx.globalAlpha = 0.3;
+                  ctx.fillStyle = secondaryColorRef.current;
+                  ctx.fillRect(
+                    rectWidth * gridX + 1,
+                    rectHeight * gridY + 1,
+                    rectWidth - 2,
+                    rectHeight - 2
+                  );
+                  ctx.restore();
+                }
+              }
+            }
           }
         }
       }
@@ -200,39 +325,39 @@ export default function Conway() {
             // check surrounding neighbours to see if they are alive
             let aliveNeighbours = 0;
 
-            if (j != 0) {
+            if (j !== 0) {
               // check W neighbour
               if (gridRef.current[i][j - 1].isAlive) {
                 aliveNeighbours += 1;
               }
               // check NW neighbour
-              if (i != 0) {
+              if (i !== 0) {
                 if (gridRef.current[i - 1][j - 1].isAlive) {
                   aliveNeighbours += 1;
                 }
               }
               // check SW neighbour
-              if (i != numGridColumns.current - 1) {
+              if (i !== numGridColumns.current - 1) {
                 if (gridRef.current[i + 1][j - 1].isAlive) {
                   aliveNeighbours += 1;
                 }
               }
             }
 
-            if (j != numGridRows.current - 1) {
+            if (j !== numGridRows.current - 1) {
               // check E neighbour
               if (gridRef.current[i][j + 1].isAlive) {
                 aliveNeighbours += 1;
               }
 
               // check NE neighbour
-              if (i != 0) {
+              if (i !== 0) {
                 if (gridRef.current[i - 1][j + 1].isAlive) {
                   aliveNeighbours += 1;
                 }
               }
               // check SE neighbour
-              if (i != numGridColumns.current - 1) {
+              if (i !== numGridColumns.current - 1) {
                 if (gridRef.current[i + 1][j + 1].isAlive) {
                   aliveNeighbours += 1;
                 }
@@ -240,12 +365,12 @@ export default function Conway() {
             }
 
             // check N neighbour
-            if (i != 0) {
+            if (i !== 0) {
               if (gridRef.current[i - 1][j].isAlive) {
                 aliveNeighbours += 1;
               }
             }
-            if (i != numGridColumns.current - 1) {
+            if (i !== numGridColumns.current - 1) {
               if (gridRef.current[i + 1][j].isAlive) {
                 aliveNeighbours += 1;
               }
@@ -255,13 +380,13 @@ export default function Conway() {
               // overpopulation
               if (aliveNeighbours > 3) {
                 gridRef.current[i][j].nextState = false;
-              } else if (aliveNeighbours == 2 || aliveNeighbours == 3) {
+              } else if (aliveNeighbours === 2 || aliveNeighbours === 3) {
                 gridRef.current[i][j].nextState = true; // stay alive
               } else if (aliveNeighbours < 2) {
                 gridRef.current[i][j].nextState = false; // underpopulation
               }
             } else {
-              if (aliveNeighbours == 3) {
+              if (aliveNeighbours === 3) {
                 gridRef.current[i][j].nextState = true; // reproduction
               } else {
                 gridRef.current[i][j].nextState = false; // reproduction
@@ -319,6 +444,13 @@ export default function Conway() {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
       };
+
+      mouseGridPos.current = getGridFromMousePos(
+        numGridColumns.current,
+        numGridRows.current
+      );
+
+      console.log(mouseGridPos.current);
     };
 
     const handleMouseDown = (e) => {
@@ -377,6 +509,69 @@ export default function Conway() {
       />
       <div style={{ zIndex: 10 }}>
         <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+          {/* Pattern preview toggle button moved here */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginBottom: "0.5em",
+            }}
+          >
+            <button
+              onClick={() => {
+                showPatternPreviewRef.current = !showPatternPreviewRef.current;
+                setRender((r) => r + 1);
+              }}
+            >
+              {showPatternPreviewRef.current
+                ? "Close Pattern Preview"
+                : "Open Pattern Preview"}
+            </button>
+          </div>
+          {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
+          {showPatternPreviewRef.current && (
+            <div
+              style={{
+                marginBottom: "1em",
+                background: "#222",
+                padding: "1em",
+                borderRadius: 8,
+                position: "absolute",
+                top: "3.5em",
+                left: "1em",
+                zIndex: 30,
+                minWidth: 320,
+                boxShadow: "0 2px 16px #000a",
+              }}
+            >
+              <div style={{ marginBottom: 4, fontWeight: 600 }}>
+                Paste a <code>.cells</code> pattern here to preview:
+              </div>
+              <textarea
+                value={patternText}
+                onChange={handlePatternInput}
+                placeholder={"Paste .cells pattern here..."}
+                rows={6}
+                style={{
+                  width: "100%",
+                  fontFamily: "monospace",
+                  marginBottom: 8,
+                }}
+              />
+              <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
+              <div
+                style={{
+                  display: "inline-block",
+                  background: "#111",
+                  padding: 8,
+                  borderRadius: 4,
+                }}
+              >
+                {patternPreview}
+              </div>
+            </div>
+          )}
+          {/* Simulation settings sliders/buttons below */}
           <div
             style={{
               display: "flex",
