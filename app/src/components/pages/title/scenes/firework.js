@@ -7,6 +7,7 @@ export default function Fireworks() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
+  const bloomEffectRef = useRef(6);
   const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
 
@@ -31,7 +32,8 @@ export default function Fireworks() {
 
     const fireWorkTypes = {
       0: "Circle", // spawn a circle of particles that go out around
-      1: "Star", // new: star-shaped explosion
+      1: "Star", // star-shaped explosion
+      2: "Spiral", // new: spiral explosion
     };
 
     const maxFireworkSpeed = 10;
@@ -64,7 +66,7 @@ export default function Fireworks() {
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.shadowColor = this.colour;
-        ctx.shadowBlur = Math.max(8, this.size * 6); // Glow effect
+        ctx.shadowBlur = Math.min(24, this.size * bloomEffectRef.current); // Glow effect
         ctx.fillStyle = this.colour;
         ctx.fill();
         ctx.closePath();
@@ -132,8 +134,7 @@ export default function Fireworks() {
                 );
               }
             } else if (this.type === "Star") {
-              // Star shape: 5-pointed star, mostly regular but with a hint of randomness
-              const points = Math.floor(Math.random() * 10);
+              const points = 2 + Math.floor(Math.random() * 10);
               const chaffPerArm = 16;
               const outerRadius = Math.random() * 2 + 7;
               const innerRadius = outerRadius * 0.45;
@@ -172,6 +173,41 @@ export default function Fireworks() {
                     )
                   );
                 }
+              }
+            } else if (this.type === "Spiral") {
+              // Spiral shape: particles spiral out from the center
+              const spiralArms = 2 + Math.floor(Math.random() * 3); // 2-4 arms
+              const chaffCount = 60 + Math.floor(Math.random() * 40);
+              const spiralTurns = 2.5 + Math.random();
+              const spiralSpread = Math.random() * 2 + 7;
+              const colour = `#${Math.floor(
+                (Math.random() * 0.5 + 0.5) * 16777215
+              )
+                .toString(16)
+                .padStart(6, "0")}`;
+              for (let i = 0; i < chaffCount; i++) {
+                const arm = i % spiralArms;
+                const frac = i / chaffCount;
+                const angle =
+                  Math.PI * 2 * spiralTurns * frac +
+                  (arm * (Math.PI * 2)) / spiralArms;
+                const r = spiralSpread * frac * (0.95 + Math.random() * 0.1);
+                const speed = 1.2 + Math.random() * 0.7;
+                const vx = Math.cos(angle) * r * speed * 0.18;
+                const vy = Math.sin(angle) * r * speed * 0.18;
+                const initialSize = Math.random() * 2 + 1;
+                const sizeFallOff = Math.random() * 0.05 + 0.01;
+                this.points.push(
+                  new FireworkChaff(
+                    this.x,
+                    this.y,
+                    vx,
+                    vy,
+                    colour,
+                    initialSize,
+                    sizeFallOff
+                  )
+                );
               }
             }
           }
@@ -258,6 +294,13 @@ export default function Fireworks() {
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
+            },
+            {
+              title: "Glow Radius:",
+              valueRef: bloomEffectRef,
+              minValue: "1",
+              maxValue: "24.0",
               type: "slider",
             },
           ]}
