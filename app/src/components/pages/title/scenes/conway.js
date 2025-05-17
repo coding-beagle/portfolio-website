@@ -230,9 +230,18 @@ export default function Conway() {
         viewportRef.current.y + mouseY / zoomRef.current
       );
       zoomRef.current = newZoom;
+      // Calculate max allowed viewport values
+      const maxX = Math.max(
+        0,
+        numGridRows.current - Math.floor(canvas.width / newZoom)
+      );
+      const maxY = Math.max(
+        0,
+        numGridColumns.current - Math.floor(canvas.height / newZoom)
+      );
       viewportRef.current = {
-        x: Math.max(0, gridX - Math.floor(mouseX / newZoom)),
-        y: Math.max(0, gridY - Math.floor(mouseY / newZoom)),
+        x: Math.max(0, Math.min(maxX, gridX - Math.floor(mouseX / newZoom))),
+        y: Math.max(0, Math.min(maxY, gridY - Math.floor(mouseY / newZoom))),
       };
       setRender((r) => r + 1);
     };
@@ -252,14 +261,29 @@ export default function Conway() {
       if (isPanning.current) {
         const dx = e.clientX - panStart.current.x;
         const dy = e.clientY - panStart.current.y;
+        // Calculate max allowed viewport values
+        const maxX = Math.max(
+          0,
+          numGridRows.current - Math.floor(canvas.width / zoomRef.current)
+        );
+        const maxY = Math.max(
+          0,
+          numGridColumns.current - Math.floor(canvas.height / zoomRef.current)
+        );
         viewportRef.current = {
           x: Math.max(
             0,
-            panOrigin.current.x - Math.round(dx / zoomRef.current)
+            Math.min(
+              maxX,
+              panOrigin.current.x - Math.round(dx / zoomRef.current)
+            )
           ),
           y: Math.max(
             0,
-            panOrigin.current.y - Math.round(dy / zoomRef.current)
+            Math.min(
+              maxY,
+              panOrigin.current.y - Math.round(dy / zoomRef.current)
+            )
           ),
         };
         setRender((r) => r + 1);
