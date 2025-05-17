@@ -300,6 +300,7 @@ export function ChangerColor({ rerenderSetter, title, colorValue, onChange }) {
 }
 
 export function DisplayEntity({
+  rerenderSetter,
   title,
   valueRef,
   isState = false,
@@ -308,6 +309,15 @@ export function DisplayEntity({
   const { theme } = useTheme();
   let value = isState ? valueRef : valueRef.current;
   let displayValue;
+
+  // Periodically force rerender to update UI for ref changes
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      rerenderSetter((prev) => prev + 1);
+    }, 100); // 100ms is responsive but not too aggressive
+    return () => clearInterval(interval);
+  }, [rerenderSetter]);
+
   if (typeof value === "object" && value !== null) {
     const entries = Object.entries(value);
     const lines = [];

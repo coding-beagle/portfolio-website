@@ -17,6 +17,8 @@ export default function Mandelbrot() {
   const currentlyDrawingRef = useRef(false);
   const currentThemeRef = useRef(0);
 
+  const complexPosRef = useRef({ Re: 0, Im: 0 });
+
   const maxIterColourRef = useRef("");
   const maxColourRef = useRef("");
   const minColourRef = useRef("");
@@ -277,6 +279,17 @@ export default function Mandelbrot() {
   const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
   const valueChangers = [
     {
+      type: "display",
+      title: "Position:",
+      valueRef: complexPosRef,
+    },
+
+    {
+      type: "display",
+      title: "Zoom Intensity:",
+      valueRef: zoomLevelRef,
+    },
+    {
       type: "slider",
       title: "Max Draw Resolution:",
       valueRef: drawResolutionRef,
@@ -473,6 +486,14 @@ export default function Mandelbrot() {
         y: event.clientY - rect.top,
       };
 
+      const complexMousePos = mapToComplex(
+        mousePosRef.current.x,
+        mousePosRef.current.y
+      );
+
+      complexPosRef.current.Re = complexMousePos[0];
+      complexPosRef.current.Im = complexMousePos[1];
+
       if (!mouseClickRef.current) {
         return;
       }
@@ -574,9 +595,17 @@ export default function Mandelbrot() {
         const dx = touch.clientX - mousePosRef.current.x;
         const dy = touch.clientY - mousePosRef.current.y;
 
-        handlePan(dx, dy);
-
+        // Update mousePosRef and complexPosRef for display
         mousePosRef.current = { x: touch.clientX, y: touch.clientY };
+        const rect = canvas.getBoundingClientRect();
+        const complexMousePos = mapToComplex(
+          touch.clientX - rect.left,
+          touch.clientY - rect.top
+        );
+        complexPosRef.current.Re = complexMousePos[0];
+        complexPosRef.current.Im = complexMousePos[1];
+
+        handlePan(dx, dy);
       }
     };
 
@@ -591,7 +620,6 @@ export default function Mandelbrot() {
     };
 
     window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleMouseMove);
     canvas.addEventListener("pointerdown", handleMouseDown);
     canvas.addEventListener("pointerup", handleMouseUp);
     window.addEventListener("wheel", handleWheel);
