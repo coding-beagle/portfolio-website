@@ -30,9 +30,8 @@ export default function Fireworks() {
     let animationFrameId;
 
     const fireWorkTypes = {
-      //   Star: 0,
       0: "Circle", // spawn a circle of particles that go out around
-      //   Bloomer: 2,
+      1: "Star", // new: star-shaped explosion
     };
 
     const maxFireworkSpeed = 10;
@@ -56,7 +55,8 @@ export default function Fireworks() {
         this.y += (this.vy * simulationSpeedRef.current) / 100;
         this.initialSize -= this.sizeDecayRate;
 
-        this.colour = getCloseColour(this.colour, 0.1, 0.1, 0.1);
+        if (simulationSpeedRef.current < Math.random() * 400)
+          this.colour = getCloseColour(this.colour, 0.1, 0.1, 0.1);
       }
 
       draw() {
@@ -130,6 +130,48 @@ export default function Fireworks() {
                     sizeFallOff
                   )
                 );
+              }
+            } else if (this.type === "Star") {
+              // Star shape: 5-pointed star, mostly regular but with a hint of randomness
+              const points = Math.floor(Math.random() * 10);
+              const chaffPerArm = 16;
+              const outerRadius = Math.random() * 2 + 7;
+              const innerRadius = outerRadius * 0.45;
+              const colour = `#${Math.floor(
+                (Math.random() * 0.5 + 0.5) * 16777215
+              )
+                .toString(16)
+                .padStart(6, "0")}`;
+              for (let arm = 0; arm < points; arm++) {
+                const armAngle = (Math.PI * 2 * arm) / points;
+                for (let j = 0; j < chaffPerArm; j++) {
+                  const frac = j / chaffPerArm;
+                  const isOuter = j % 2 === 0;
+                  // Add a small random offset to radius and angle for a natural look
+                  const r =
+                    (isOuter ? outerRadius : innerRadius) *
+                    (0.97 + Math.random() * 0.06);
+                  const angle =
+                    armAngle +
+                    (frac * (Math.PI * 2)) / points / 2 +
+                    (Math.random() - 0.5) * 0.07;
+                  const speed = 1.7 * (0.97 + Math.random() * 0.06);
+                  const vx = Math.cos(angle) * r * speed * 0.18;
+                  const vy = Math.sin(angle) * r * speed * 0.18;
+                  const initialSize = Math.random() * 2 + 1;
+                  const sizeFallOff = Math.random() * 0.05 + 0.01;
+                  this.points.push(
+                    new FireworkChaff(
+                      this.x,
+                      this.y,
+                      vx,
+                      vy,
+                      colour,
+                      initialSize,
+                      sizeFallOff
+                    )
+                  );
+                }
               }
             }
           }
