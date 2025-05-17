@@ -60,11 +60,15 @@ export default function Fireworks() {
       }
 
       draw() {
+        ctx.save();
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.shadowColor = this.colour;
+        ctx.shadowBlur = Math.max(8, this.size * 6); // Glow effect
         ctx.fillStyle = this.colour;
         ctx.fill();
         ctx.closePath();
+        ctx.restore();
       }
     }
 

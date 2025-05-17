@@ -52,7 +52,7 @@ export function Slider({
         type="range"
         min={minValue}
         max={maxValue}
-        value={valueRef.current}
+        value={isState ? valueRef : valueRef.current}
         onChange={handleChange}
         style={{
           marginLeft: "0.5em",
@@ -79,7 +79,7 @@ export function Slider({
           fontWeight: 500,
         }}
       >
-        {valueRef.current}
+        {isState ? valueRef : valueRef.current}
       </span>
       <style>{`
         .modern-slider::-webkit-slider-runnable-track {
@@ -242,8 +242,8 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
           padding: "0.35em 1.1em",
           fontSize: 15,
           borderRadius: 6,
-          border: `2px solid ${theme.accent}`,
-          background: `linear-gradient(90deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
+          border: `0px solid ${theme.accent}`,
+          background: `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
           color: theme.text,
           fontWeight: 500,
           cursor: "pointer",
@@ -256,7 +256,7 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
         onMouseOver={(e) => {
           if (btnRef.current) {
             btnRef.current.style.transform = "scale(1.07)";
-            btnRef.current.style.background = `linear-gradient(90deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
+            btnRef.current.style.background = `linear-gradient(45deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
           }
         }}
         onMouseOut={(e) => {
