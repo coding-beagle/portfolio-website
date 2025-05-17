@@ -21,8 +21,8 @@ export default function Conway() {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const simulationSpeedRef = useRef(175);
-  const numGridColumns = useRef(30);
-  const numGridRows = useRef(70);
+  const numGridColumns = useRef(300);
+  const numGridRows = useRef(700);
   const gridRef = useRef(null);
   const [, setRender] = useState(0); // Dummy state to force re-render
   const isPlaying = useRef(true);
@@ -47,6 +47,13 @@ export default function Conway() {
   // Add state for pattern browser and list
   const [patternList, setPatternList] = useState([]);
   const [showPatternBrowser, setShowPatternBrowser] = useState(false);
+
+  // Viewport and zoom state
+  const zoomRef = useRef(20); // cell size in px
+  const viewportRef = useRef({ x: 100, y: 100 }); // top-left cell
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const panOrigin = useRef({ x: 0, y: 0 });
 
   // Fetch the local manifest for .cells files
   async function fetchPatternList() {
@@ -184,23 +191,100 @@ export default function Conway() {
     window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
 
-    const getGridFromMousePos = (gridRows, gridColumns) => {
-      const rectWidth = canvas.width / gridRows;
-      let gridX = mousePosRef.current.x / rectWidth;
-
-      const rectHeight = canvas.height / gridColumns;
-      let gridY = mousePosRef.current.y / rectHeight;
-
-      return { x: Math.floor(gridX), y: Math.floor(gridY) };
+    // Update getGridFromMousePos to use viewport and zoom
+    const getGridFromMousePos = () => {
+      return {
+        x: Math.floor(
+          viewportRef.current.x + mousePosRef.current.x / zoomRef.current
+        ),
+        y: Math.floor(
+          viewportRef.current.y + mousePosRef.current.y / zoomRef.current
+        ),
+      };
     };
 
     if (checkMobile()) {
-      numGridColumns.current = 70;
-      numGridRows.current = 40;
+      numGridColumns.current = 700;
+      numGridRows.current = 300;
       squarifyGrid(true);
     } else {
       squarifyGrid(false);
     }
+
+    const MAX_ZOOM = 8;
+    const MIN_ZOOM = 60;
+
+    // --- Mouse pan/zoom handlers ---
+    const handleWheel = (e) => {
+      e.preventDefault();
+      let newZoom = zoomRef.current + (e.deltaY < 0 ? 2 : -2);
+      newZoom = Math.max(MAX_ZOOM, Math.min(MIN_ZOOM, newZoom));
+      // Zoom to mouse position
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const gridX = Math.floor(
+        viewportRef.current.x + mouseX / zoomRef.current
+      );
+      const gridY = Math.floor(
+        viewportRef.current.y + mouseY / zoomRef.current
+      );
+      zoomRef.current = newZoom;
+      viewportRef.current = {
+        x: Math.max(0, gridX - Math.floor(mouseX / newZoom)),
+        y: Math.max(0, gridY - Math.floor(mouseY / newZoom)),
+      };
+      setRender((r) => r + 1);
+    };
+    const handlePointerDown = (e) => {
+      if (e.button === 1) {
+        isPanning.current = true;
+        panStart.current = { x: e.clientX, y: e.clientY };
+        panOrigin.current = { ...viewportRef.current };
+        e.preventDefault();
+      } else if (e.buttons === 2) {
+        rightClickRef.current = true;
+      } else {
+        mouseClickRef.current = true;
+      }
+    };
+    const handlePointerMove = (e) => {
+      if (isPanning.current) {
+        const dx = e.clientX - panStart.current.x;
+        const dy = e.clientY - panStart.current.y;
+        viewportRef.current = {
+          x: Math.max(
+            0,
+            panOrigin.current.x - Math.round(dx / zoomRef.current)
+          ),
+          y: Math.max(
+            0,
+            panOrigin.current.y - Math.round(dy / zoomRef.current)
+          ),
+        };
+        setRender((r) => r + 1);
+      }
+      const rect = canvas.getBoundingClientRect();
+      mousePosRef.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+      mouseGridPos.current = {
+        x: Math.floor(
+          viewportRef.current.x + mousePosRef.current.x / zoomRef.current
+        ),
+        y: Math.floor(
+          viewportRef.current.y + mousePosRef.current.y / zoomRef.current
+        ),
+      };
+    };
+    const handlePointerUp = (e) => {
+      if (e.button === 1) {
+        isPanning.current = false;
+      }
+      mouseClickRef.current = false;
+      rightClickRef.current = false;
+    };
 
     // takes a constructor of an array of particles and renders them
     class Grid {
@@ -213,18 +297,32 @@ export default function Conway() {
 
       draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const rectWidth = canvas.width / numGridRows.current;
-        const rectHeight = canvas.height / numGridColumns.current;
-        for (let i = 0; i < numGridColumns.current; i++) {
-          for (let j = 0; j < numGridRows.current; j++) {
-            if (gridRef.current[i][j].isAlive) {
-              ctx.fillStyle = secondaryColorRef.current;
-            } else {
-              ctx.fillStyle = primaryColorRef.current;
+        const cols = Math.ceil(canvas.width / zoomRef.current);
+        const rows = Math.ceil(canvas.height / zoomRef.current);
+        for (let i = 0; i < rows; i++) {
+          for (let j = 0; j < cols; j++) {
+            const gridY = viewportRef.current.y + i;
+            const gridX = viewportRef.current.x + j;
+            if (
+              gridY < numGridColumns.current &&
+              gridX < numGridRows.current &&
+              gridY >= 0 &&
+              gridX >= 0
+            ) {
+              if (gridRef.current[gridY][gridX].isAlive) {
+                ctx.fillStyle = secondaryColorRef.current;
+              } else {
+                ctx.fillStyle = primaryColorRef.current;
+              }
+              ctx.beginPath();
+              ctx.rect(
+                j * zoomRef.current,
+                i * zoomRef.current,
+                zoomRef.current,
+                zoomRef.current
+              );
+              ctx.fill();
             }
-            ctx.beginPath();
-            ctx.rect(rectWidth * j, rectHeight * i, rectWidth, rectHeight);
-            ctx.fill();
           }
         }
         // Overlay pattern preview if present and mouse is over grid
@@ -256,18 +354,18 @@ export default function Conway() {
                   ctx.strokeStyle = secondaryColorRef.current;
                   ctx.lineWidth = 2;
                   ctx.strokeRect(
-                    rectWidth * gridX + 1,
-                    rectHeight * gridY + 1,
-                    rectWidth - 2,
-                    rectHeight - 2
+                    (gridX - viewportRef.current.x) * zoomRef.current + 1,
+                    (gridY - viewportRef.current.y) * zoomRef.current + 1,
+                    zoomRef.current - 2,
+                    zoomRef.current - 2
                   );
                   ctx.globalAlpha = 0.3;
                   ctx.fillStyle = secondaryColorRef.current;
                   ctx.fillRect(
-                    rectWidth * gridX + 1,
-                    rectHeight * gridY + 1,
-                    rectWidth - 2,
-                    rectHeight - 2
+                    (gridX - viewportRef.current.x) * zoomRef.current + 1,
+                    (gridY - viewportRef.current.y) * zoomRef.current + 1,
+                    zoomRef.current - 2,
+                    zoomRef.current - 2
                   );
                   ctx.restore();
                 }
@@ -337,10 +435,7 @@ export default function Conway() {
           mouseClickRef.current = false; // Prevent repeated pasting
         }
         if (mouseClickRef.current || rightClickRef.current) {
-          let mouseClickPos = getGridFromMousePos(
-            numGridRows.current,
-            numGridColumns.current
-          );
+          let mouseClickPos = getGridFromMousePos();
 
           if (rightClickRef.current) {
             this.changeAlivePosition(mouseClickPos.x, mouseClickPos.y, false);
@@ -481,44 +576,21 @@ export default function Conway() {
 
     animate();
 
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-      // Fix: getGridFromMousePos expects (gridRows, gridColumns)
-      // But we want (numGridRows.current, numGridColumns.current)
-      mouseGridPos.current = getGridFromMousePos(
-        numGridRows.current,
-        numGridColumns.current
-      );
-    };
-
-    const handleMouseDown = (e) => {
-      if (e.buttons === 2) {
-        rightClickRef.current = true;
-      } else {
-        mouseClickRef.current = true;
-      }
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-      rightClickRef.current = false;
-    };
-
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointerup", handlePointerUp);
     document.addEventListener("contextmenu", handleContextMenu);
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
+      canvas.removeEventListener("pointermove", handlePointerDown);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("resize", resizeCanvas);
       document.removeEventListener("contextmenu", handleContextMenu);
     };
@@ -544,6 +616,19 @@ export default function Conway() {
   const valueChangers = [
     [
       {
+        type: "display",
+        title: "Position:",
+        valueRef: viewportRef,
+      },
+      {
+        type: "display",
+        title: "Zoom level:",
+        valueRef: zoomRef,
+      },
+    ],
+
+    [
+      {
         type: "button",
         title: "",
         buttonText: showPatternPreviewRef.current
@@ -564,23 +649,6 @@ export default function Conway() {
         },
       },
     ],
-
-    {
-      type: "slider",
-      title: "Row Count:",
-      valueRef: numGridColumns,
-      minValue: 6,
-      maxValue: 300,
-      callback: () => {},
-    },
-    {
-      type: "slider",
-      title: "Column Count:",
-      valueRef: numGridRows,
-      minValue: 6,
-      maxValue: 300,
-      callback: () => {},
-    },
     [
       {
         type: "button",

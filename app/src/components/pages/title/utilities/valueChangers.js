@@ -299,6 +299,70 @@ export function ChangerColor({ rerenderSetter, title, colorValue, onChange }) {
   );
 }
 
+export function DisplayEntity({
+  title,
+  valueRef,
+  isState = false,
+  maxPerLine = 3,
+}) {
+  const { theme } = useTheme();
+  let value = isState ? valueRef : valueRef.current;
+  let displayValue;
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value);
+    const lines = [];
+    for (let i = 0; i < entries.length; i += maxPerLine) {
+      const slice = entries.slice(i, i + maxPerLine);
+      lines.push(
+        slice
+          .map(
+            ([k, v]) =>
+              `${k}: ${
+                typeof v === "object" && v !== null ? "[object]" : String(v)
+              }`
+          )
+          .join("    ") // 4 spaces between pairs, no commas
+      );
+    }
+    displayValue = (
+      <div style={{ textAlign: "left", fontFamily: "monospace", fontSize: 13 }}>
+        {lines.map((line, idx) => (
+          <div key={idx}>{line}</div>
+        ))}
+      </div>
+    );
+  } else {
+    displayValue = value;
+  }
+  return (
+    <div
+      style={{ display: "flex", alignItems: "center", marginBottom: "0.3em" }}
+    >
+      {title && (
+        <span style={{ minWidth: 0, marginRight: "1em" }}>{title}</span>
+      )}
+      <span
+        style={{
+          padding: "0.35em 1.1em",
+          fontSize: 15,
+          borderRadius: 6,
+          border: `1px solid ${theme.secondaryAccent}`,
+          background: theme.background,
+          color: theme.text,
+          fontWeight: 500,
+          fontFamily: theme.font,
+          minWidth: 40,
+          textAlign: "center",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        {displayValue}
+      </span>
+    </div>
+  );
+}
+
 export function ChangerGroup({ rerenderSetter, valueArrays }) {
   return (
     <div style={{ position: "absolute", top: "1em", left: "1em" }}>
@@ -340,6 +404,14 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                       rerenderSetter={rerenderSetter}
                     />
                   );
+                if (subElement.type === "display")
+                  return (
+                    <DisplayEntity
+                      key={subIndex}
+                      {...subElement}
+                      rerenderSetter={rerenderSetter}
+                    />
+                  );
                 return null;
               })}
             </div>
@@ -360,6 +432,14 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
         if (element.type === "color")
           return (
             <ChangerColor
+              key={index}
+              {...element}
+              rerenderSetter={rerenderSetter}
+            />
+          );
+        if (element.type === "display")
+          return (
+            <DisplayEntity
               key={index}
               {...element}
               rerenderSetter={rerenderSetter}
