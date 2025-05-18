@@ -87,6 +87,7 @@ export function Slider({
           background: linear-gradient(90deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%);
           border-radius: 6px;
           box-shadow: 0 1px 4px ${theme.secondaryAccent}33;
+          transition: opacity 0.5s cubic-bezier(.4,0,.2,1);
         }
         .modern-slider.accent-fade::-webkit-slider-runnable-track {
           opacity: 1;
@@ -107,13 +108,14 @@ export function Slider({
           transition: background 0.2s, border 0.2s;
         }
         .modern-slider:focus::-webkit-slider-thumb {
-          border: 2px solid ${theme.tertiaryAccent};
+          border: 0px solid ${theme.tertiaryAccent};
         }
         .modern-slider::-moz-range-track {
           height: 6px;
           background: linear-gradient(90deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%);
           border-radius: 6px;
           box-shadow: 0 1px 4px ${theme.secondaryAccent}33;
+          transition: opacity 0.5s cubic-bezier(.4,0,.2,1);
         }
         .modern-slider.accent-fade::-moz-range-track {
           opacity: 1;
@@ -131,7 +133,7 @@ export function Slider({
           transition: background 0.2s, border 0.2s;
         }
         .modern-slider:focus::-moz-range-thumb {
-          border: 2px solid ${theme.tertiaryAccent};
+          border: 0px solid ${theme.tertiaryAccent};
         }
         .modern-slider::-ms-fill-lower {
           background: ${theme.secondaryAccent};
@@ -151,7 +153,7 @@ export function Slider({
           transition: background 0.2s, border 0.2s;
         }
         .modern-slider:focus::-ms-thumb {
-          border: 2px solid ${theme.tertiaryAccent};
+          border: 0px solid ${theme.tertiaryAccent};
         }
         .modern-slider:focus {
           outline: none;
