@@ -1,4 +1,11 @@
-import { useEffect, useState, createElement, useRef, useContext } from "react";
+import {
+  useEffect,
+  useState,
+  createElement,
+  useRef,
+  useContext,
+  useCallback,
+} from "react";
 import { useTheme } from "../../../themes/ThemeProvider";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
@@ -54,6 +61,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   );
 
   const [clicked, setClicked] = useState(false);
+  const [autoShake, setAutoShake] = useState(true);
   const headerRef = useRef(null);
   const animationNameRef = useRef("");
   const [showMenu, setShowMenu] = useState(false);
@@ -79,19 +87,23 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
 
   const intervalRef = useRef(null);
 
-  useEffect(() => {
-    intervalRef.current = setInterval(() => {
-      setClicked(true);
-      setTimeout(() => {
-        setClicked(false);
-      }, 500);
-    }, 1500);
+  const triggerShake = useCallback(() => {
+    const name = getRandomShake();
+    animationNameRef.current = name;
+    setClicked(true);
+  }, []);
 
+  useEffect(() => {
+    if (autoShake) {
+      intervalRef.current = setInterval(() => {
+        triggerShake();
+      }, 500);
+    }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       setIsHover(false);
     };
-  }, []);
+  }, [autoShake, triggerShake]);
 
   useEffect(() => {
     if (clicked) {
@@ -127,12 +139,6 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
     return animationName; // Return the animation name
   };
 
-  const triggerShake = () => {
-    const name = getRandomShake();
-    animationNameRef.current = name;
-    setClicked(true);
-  };
-
   const getSceneName = (index) => {
     return (
       Object.entries(sceneNameToIndex).find(([, i]) => i === index)?.[0] ||
@@ -161,7 +167,10 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
           onMouseEnter={() => setIsHover(true)}
           onMouseLeave={() => setIsHover(false)}
           onMouseDown={(event) => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              setAutoShake(false);
+            }
             if (event.button === 0) {
               triggerShake();
               setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
