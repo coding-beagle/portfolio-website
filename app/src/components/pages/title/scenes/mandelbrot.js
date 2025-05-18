@@ -654,12 +654,7 @@ export default function Mandelbrot() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          rerenderSetter={setRerender}
-          valueArrays={valueChangers}
-        />
-      </div>
+      <ChangerGroup rerenderSetter={setRerender} valueArrays={valueChangers} />
       <div style={{ zIndex: 3000 }}>
         <div style={{ position: "absolute", top: "1em", right: "1em" }}>
           <MouseTooltip />
