@@ -90,6 +90,113 @@ export default function Fireworks() {
         this.explodeCount = 0;
         this.postExplodeCount = 0;
         this.explodeDelay = Math.floor((Math.random() + 500) * 100);
+        this.hasExplodedParticles = false; // Track if particles have been generated
+        // Randomize explosion height in the top portion (10% to 33% of screen)
+        this.explodeY =
+          Math.random() *
+            (canvasRef.current.height / 3 - canvasRef.current.height * 0.1) +
+          canvasRef.current.height * 0.1;
+      }
+
+      explode() {
+        if (this.hasExplodedParticles) return;
+        this.hasExplodedParticles = true;
+        if (this.type === "Circle") {
+          const chaffCount = Math.floor(Math.random() * 100) + 20;
+          const angleStep = (Math.PI * 2) / chaffCount;
+          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
+            .toString(16)
+            .padStart(6, "0")}`;
+          for (let i = 0; i < chaffCount; i++) {
+            const angle = i * angleStep;
+            const speed = Math.random() * 2 + 1;
+            const vx = Math.cos(angle) * speed;
+            const vy = Math.sin(angle) * speed;
+            const initialSize = Math.random() * 2 + 1;
+            const sizeFallOff = Math.random() * 0.05 + 0.01;
+            this.points.push(
+              new FireworkChaff(
+                this.x,
+                this.y,
+                vx,
+                vy,
+                colour,
+                initialSize,
+                sizeFallOff
+              )
+            );
+          }
+        } else if (this.type === "Star") {
+          const points = 2 + Math.floor(Math.random() * 10);
+          const chaffPerArm = 16;
+          const outerRadius = Math.random() * 2 + 7;
+          const innerRadius = outerRadius * 0.45;
+          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
+            .toString(16)
+            .padStart(6, "0")}`;
+          for (let arm = 0; arm < points; arm++) {
+            const armAngle = (Math.PI * 2 * arm) / points;
+            for (let j = 0; j < chaffPerArm; j++) {
+              const frac = j / chaffPerArm;
+              const isOuter = j % 2 === 0;
+              const r =
+                (isOuter ? outerRadius : innerRadius) *
+                (0.97 + Math.random() * 0.06);
+              const angle =
+                armAngle +
+                (frac * (Math.PI * 2)) / points / 2 +
+                (Math.random() - 0.5) * 0.07;
+              const speed = 1.7 * (0.97 + Math.random() * 0.06);
+              const vx = Math.cos(angle) * r * speed * 0.18;
+              const vy = Math.sin(angle) * r * speed * 0.18;
+              const initialSize = Math.random() * 2 + 1;
+              const sizeFallOff = Math.random() * 0.05 + 0.01;
+              this.points.push(
+                new FireworkChaff(
+                  this.x,
+                  this.y,
+                  vx,
+                  vy,
+                  colour,
+                  initialSize,
+                  sizeFallOff
+                )
+              );
+            }
+          }
+        } else if (this.type === "Spiral") {
+          const spiralArms = 2 + Math.floor(Math.random() * 3); // 2-4 arms
+          const chaffCount = 60 + Math.floor(Math.random() * 40);
+          const spiralTurns = 2.5 + Math.random();
+          const spiralSpread = Math.random() * 2 + 7;
+          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
+            .toString(16)
+            .padStart(6, "0")}`;
+          for (let i = 0; i < chaffCount; i++) {
+            const arm = i % spiralArms;
+            const frac = i / chaffCount;
+            const angle =
+              Math.PI * 2 * spiralTurns * frac +
+              (arm * (Math.PI * 2)) / spiralArms;
+            const r = spiralSpread * frac * (0.95 + Math.random() * 0.1);
+            const speed = 1.2 + Math.random() * 0.7;
+            const vx = Math.cos(angle) * r * speed * 0.18;
+            const vy = Math.sin(angle) * r * speed * 0.18;
+            const initialSize = Math.random() * 2 + 1;
+            const sizeFallOff = Math.random() * 0.05 + 0.01;
+            this.points.push(
+              new FireworkChaff(
+                this.x,
+                this.y,
+                vx,
+                vy,
+                colour,
+                initialSize,
+                sizeFallOff
+              )
+            );
+          }
+        }
       }
 
       update() {
@@ -97,118 +204,17 @@ export default function Fireworks() {
           this.y += (this.vy * simulationSpeedRef.current) / 100;
           this.x += (this.vx * simulationSpeedRef.current) / 100;
 
+          // Explode when reaching the randomized explodeY
+
           if (
             this.y > 0 && // Top portion of the screen
-            this.y < canvasRef.current.height / 3 // Adjusted to top third
+            this.y < canvasRef.current.height / 3 &&
+            !this.exploded // Adjusted to top third
           ) {
             this.explodeCount += 1;
-            if (this.explodeCount > this.explodeDelay || !this.exploded) {
+            if (this.y <= this.explodeY) {
               this.exploded = true;
-            }
-
-            if (this.type === "Circle") {
-              const chaffCount = Math.floor(Math.random() * 100) + 20;
-              const angleStep = (Math.PI * 2) / chaffCount;
-              const colour = `#${Math.floor(
-                (Math.random() * 0.5 + 0.5) * 16777215
-              )
-                .toString(16)
-                .padStart(6, "0")}`;
-              for (let i = 0; i < chaffCount; i++) {
-                const angle = i * angleStep;
-                const speed = Math.random() * 2 + 1;
-                const vx = Math.cos(angle) * speed;
-                const vy = Math.sin(angle) * speed;
-                const initialSize = Math.random() * 2 + 1;
-                const sizeFallOff = Math.random() * 0.05 + 0.01;
-                this.points.push(
-                  new FireworkChaff(
-                    this.x,
-                    this.y,
-                    vx,
-                    vy,
-                    colour,
-                    initialSize,
-                    sizeFallOff
-                  )
-                );
-              }
-            } else if (this.type === "Star") {
-              const points = 2 + Math.floor(Math.random() * 10);
-              const chaffPerArm = 16;
-              const outerRadius = Math.random() * 2 + 7;
-              const innerRadius = outerRadius * 0.45;
-              const colour = `#${Math.floor(
-                (Math.random() * 0.5 + 0.5) * 16777215
-              )
-                .toString(16)
-                .padStart(6, "0")}`;
-              for (let arm = 0; arm < points; arm++) {
-                const armAngle = (Math.PI * 2 * arm) / points;
-                for (let j = 0; j < chaffPerArm; j++) {
-                  const frac = j / chaffPerArm;
-                  const isOuter = j % 2 === 0;
-                  // Add a small random offset to radius and angle for a natural look
-                  const r =
-                    (isOuter ? outerRadius : innerRadius) *
-                    (0.97 + Math.random() * 0.06);
-                  const angle =
-                    armAngle +
-                    (frac * (Math.PI * 2)) / points / 2 +
-                    (Math.random() - 0.5) * 0.07;
-                  const speed = 1.7 * (0.97 + Math.random() * 0.06);
-                  const vx = Math.cos(angle) * r * speed * 0.18;
-                  const vy = Math.sin(angle) * r * speed * 0.18;
-                  const initialSize = Math.random() * 2 + 1;
-                  const sizeFallOff = Math.random() * 0.05 + 0.01;
-                  this.points.push(
-                    new FireworkChaff(
-                      this.x,
-                      this.y,
-                      vx,
-                      vy,
-                      colour,
-                      initialSize,
-                      sizeFallOff
-                    )
-                  );
-                }
-              }
-            } else if (this.type === "Spiral") {
-              // Spiral shape: particles spiral out from the center
-              const spiralArms = 2 + Math.floor(Math.random() * 3); // 2-4 arms
-              const chaffCount = 60 + Math.floor(Math.random() * 40);
-              const spiralTurns = 2.5 + Math.random();
-              const spiralSpread = Math.random() * 2 + 7;
-              const colour = `#${Math.floor(
-                (Math.random() * 0.5 + 0.5) * 16777215
-              )
-                .toString(16)
-                .padStart(6, "0")}`;
-              for (let i = 0; i < chaffCount; i++) {
-                const arm = i % spiralArms;
-                const frac = i / chaffCount;
-                const angle =
-                  Math.PI * 2 * spiralTurns * frac +
-                  (arm * (Math.PI * 2)) / spiralArms;
-                const r = spiralSpread * frac * (0.95 + Math.random() * 0.1);
-                const speed = 1.2 + Math.random() * 0.7;
-                const vx = Math.cos(angle) * r * speed * 0.18;
-                const vy = Math.sin(angle) * r * speed * 0.18;
-                const initialSize = Math.random() * 2 + 1;
-                const sizeFallOff = Math.random() * 0.05 + 0.01;
-                this.points.push(
-                  new FireworkChaff(
-                    this.x,
-                    this.y,
-                    vx,
-                    vy,
-                    colour,
-                    initialSize,
-                    sizeFallOff
-                  )
-                );
-              }
+              this.explode(); // Only generate particles once
             }
           }
         } else {
