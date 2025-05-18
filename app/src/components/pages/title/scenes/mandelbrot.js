@@ -649,9 +649,14 @@ export default function Mandelbrot() {
       <canvas
         ref={canvasRef}
         style={{
-          position: "absolute",
+          position: "fixed", // changed from absolute to fixed
           top: 0,
           left: 0,
+          width: "100vw", // ensure canvas fills viewport
+          height: "100vh", // ensure canvas fills viewport
+          maxWidth: "100vw", // prevent overflow
+          maxHeight: "100vh", // prevent overflow
+          zIndex: 0,
         }}
       />
       <ChangerGroup rerenderSetter={setRerender} valueArrays={valueChangers} />
