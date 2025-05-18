@@ -183,6 +183,131 @@ export default function Conway() {
       } catch (e) {}
     };
 
+    // --- Touch gesture state ---
+    let lastTouch = null; // for single finger pan
+    let lastPinchDist = null; // for pinch zoom
+    let pinchOrigin = null; // for pinch zoom center
+    let pinchStartZoom = null;
+    let pinchStartViewport = null;
+
+    // --- Touch event handlers ---
+    function getTouchPos(touch) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top,
+      };
+    }
+
+    function getPinchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function handleTouchStart(e) {
+      if (e.touches.length === 1) {
+        lastTouch = getTouchPos(e.touches[0]);
+      } else if (e.touches.length === 2) {
+        lastPinchDist = getPinchDistance(e.touches);
+        pinchOrigin = {
+          x:
+            (e.touches[0].clientX + e.touches[1].clientX) / 2 -
+            canvas.getBoundingClientRect().left,
+          y:
+            (e.touches[0].clientY + e.touches[1].clientY) / 2 -
+            canvas.getBoundingClientRect().top,
+        };
+        pinchStartZoom = zoomRef.current;
+        pinchStartViewport = { ...viewportRef.current };
+      }
+      e.preventDefault();
+    }
+
+    function handleTouchMove(e) {
+      if (e.touches.length === 1 && lastTouch) {
+        // Pan
+        const touch = getTouchPos(e.touches[0]);
+        const dx = touch.x - lastTouch.x;
+        const dy = touch.y - lastTouch.y;
+        // Calculate max allowed viewport values
+        const maxX = Math.max(
+          0,
+          numGridRows.current - Math.floor(canvas.width / zoomRef.current)
+        );
+        const maxY = Math.max(
+          0,
+          numGridColumns.current - Math.floor(canvas.height / zoomRef.current)
+        );
+        viewportRef.current = {
+          x: Math.max(
+            0,
+            Math.min(
+              maxX,
+              viewportRef.current.x - Math.round(dx / zoomRef.current)
+            )
+          ),
+          y: Math.max(
+            0,
+            Math.min(
+              maxY,
+              viewportRef.current.y - Math.round(dy / zoomRef.current)
+            )
+          ),
+        };
+        lastTouch = touch;
+        setRender((r) => r + 1);
+      } else if (e.touches.length === 2 && lastPinchDist !== null) {
+        // Pinch zoom
+        const newDist = getPinchDistance(e.touches);
+        let scale = newDist / lastPinchDist;
+        let newZoom = Math.max(
+          8,
+          Math.min(60, Math.round(pinchStartZoom * scale))
+        );
+        // Zoom to pinch origin
+        const gridX = Math.floor(
+          pinchStartViewport.x + pinchOrigin.x / pinchStartZoom
+        );
+        const gridY = Math.floor(
+          pinchStartViewport.y + pinchOrigin.y / pinchStartZoom
+        );
+        // Calculate max allowed viewport values
+        const maxX = Math.max(
+          0,
+          numGridRows.current - Math.floor(canvas.width / newZoom)
+        );
+        const maxY = Math.max(
+          0,
+          numGridColumns.current - Math.floor(canvas.height / newZoom)
+        );
+        zoomRef.current = newZoom;
+        viewportRef.current = {
+          x: Math.max(
+            0,
+            Math.min(maxX, gridX - Math.floor(pinchOrigin.x / newZoom))
+          ),
+          y: Math.max(
+            0,
+            Math.min(maxY, gridY - Math.floor(pinchOrigin.y / newZoom))
+          ),
+        };
+        setRender((r) => r + 1);
+      }
+      e.preventDefault();
+    }
+
+    function handleTouchEnd(e) {
+      if (e.touches.length === 0) {
+        lastTouch = null;
+        lastPinchDist = null;
+        pinchOrigin = null;
+        pinchStartZoom = null;
+        pinchStartViewport = null;
+      }
+      e.preventDefault();
+    }
+
     const checkMobile = () => {
       return canvas.width < canvas.height;
     };
@@ -605,6 +730,10 @@ export default function Conway() {
     canvas.addEventListener("pointerup", handlePointerUp);
     document.addEventListener("contextmenu", handleContextMenu);
     canvas.addEventListener("wheel", handleWheel, { passive: false });
+    // --- Add touch listeners ---
+    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
@@ -617,6 +746,10 @@ export default function Conway() {
       canvas.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("resize", resizeCanvas);
       document.removeEventListener("contextmenu", handleContextMenu);
+      // --- Remove touch listeners ---
+      canvas.removeEventListener("touchstart", handleTouchStart);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      canvas.removeEventListener("touchend", handleTouchEnd);
     };
   }, []);
 

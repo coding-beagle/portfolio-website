@@ -69,6 +69,13 @@ export default function Rain() {
       mouseClickRef.current = false;
     };
 
+    // --- Touch event handler to prevent scroll on drag ---
+    function handleTouchDragPreventScroll(e) {
+      if (e.touches && e.touches.length > 0) {
+        e.preventDefault();
+      }
+    }
+
     const inElement = (rect, x, y) => {
       return (
         x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
@@ -186,6 +193,12 @@ export default function Rain() {
     window.addEventListener("touchmove", handleMouseMove);
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
+    // Prevent default scroll on touch drag over canvas
+    if (canvas) {
+      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
+        passive: false,
+      });
+    }
 
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
@@ -196,6 +209,9 @@ export default function Rain() {
       window.removeEventListener("pointerup", handleMouseUp);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("popstate", recalculateRect);
+      if (canvas) {
+        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
+      }
       particles = [];
     };
   }, []);

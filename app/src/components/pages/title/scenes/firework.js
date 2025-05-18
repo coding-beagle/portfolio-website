@@ -186,6 +186,10 @@ export default function Fireworks() {
           const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
             .toString(16)
             .padStart(6, "0")}`;
+          // Add a random spin direction and magnitude for this explosion
+          // Make spin direction match spiral direction and increase effect
+          const spiralDirection = spiralTurns >= 0 ? 1 : -1; // positive = CCW, negative = CW
+          const spin = spiralDirection * 0.25; // Stronger, always matches spiral
           for (let i = 0; i < chaffCount; i++) {
             const arm = i % spiralArms;
             const frac = i / chaffCount;
@@ -194,8 +198,13 @@ export default function Fireworks() {
               (arm * (Math.PI * 2)) / spiralArms;
             const r = spiralSpread * frac * (0.95 + Math.random() * 0.1);
             const speed = 1.2 + Math.random() * 0.7;
-            const vx = Math.cos(angle) * r * speed * 0.18;
-            const vy = Math.sin(angle) * r * speed * 0.18;
+            // Base velocity (radial)
+            let vx = Math.cos(angle) * r * speed * 0.18;
+            let vy = Math.sin(angle) * r * speed * 0.18;
+            // Add tangential (rotational) velocity for inertia
+            const tangentialAngle = angle + Math.PI / 2;
+            vx += Math.cos(tangentialAngle) * r * spin;
+            vy += Math.sin(tangentialAngle) * r * spin;
             const initialSize = Math.random() * 2 + 1;
             const sizeFallOff = Math.random() * 0.05 + 0.01;
             this.points.push(
