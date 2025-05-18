@@ -57,6 +57,8 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                   padding: "2em 1.5em 1.5em 1.5em",
                   minWidth: "70vw",
                   maxWidth: "90vw",
+                  maxHeight: "80vh", // limit height
+                  overflowY: "auto", // make scrollable
                   boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
                   position: "relative",
                   zIndex: 12001, // ensure modal content is above overlay
@@ -73,8 +75,10 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                     border: "none",
                     color: theme.accent,
                     cursor: "pointer",
+                    zIndex: 1,
                   }}
                   onClick={() => setShowMenu(false)}
+                  tabIndex={0}
                 >
                   ×
                 </button>
@@ -550,6 +554,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                 padding: "2em 1.5em 1.5em 1.5em",
                 minWidth: "70vw",
                 maxWidth: "90vw",
+                maxHeight: "80vh", // limit height
+                overflowY: "auto", // make scrollable
                 boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
                 position: "relative",
                 zIndex: 12001, // ensure modal content is above overlay
@@ -566,8 +572,10 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                   border: "none",
                   color: theme.accent,
                   cursor: "pointer",
+                  zIndex: 1,
                 }}
                 onClick={() => setShowMenu(false)}
+                tabIndex={0}
               >
                 ×
               </button>
@@ -591,6 +599,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                           display: "flex",
                           gap: "0.5em",
                           alignItems: "center",
+                          flexWrap: "wrap", // allow wrapping to next line
+                          justifyContent: "center", // center items when wrapped
                         }}
                       >
                         {element.map((subElement, subIndex) => {
