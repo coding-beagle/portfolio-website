@@ -1,9 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
 import Title from "./components/pages/title/title";
 import { ThemeProvider, useTheme } from "./themes/ThemeProvider";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faMoon, faSun } from "@fortawesome/free-solid-svg-icons";
+import { MobileContext } from "./contexts/MobileContext";
+
+// Helper to detect mobile devices
+const isMobile = () =>
+  typeof window !== "undefined" &&
+  /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
 
 // Wrapper component to handle location and pass path
 function AppWrapper() {
@@ -111,14 +119,24 @@ function AppWrapper() {
 }
 
 function App() {
+  const [mobile, setMobile] = useState(isMobile());
+
+  useEffect(() => {
+    const handleResize = () => setMobile(isMobile());
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   return (
-    <ThemeProvider>
-      <HashRouter>
-        <Routes>
-          <Route path="*" element={<AppWrapper />} />
-        </Routes>
-      </HashRouter>
-    </ThemeProvider>
+    <MobileContext.Provider value={mobile}>
+      <ThemeProvider>
+        <HashRouter>
+          <Routes>
+            <Route path="*" element={<AppWrapper />} />
+          </Routes>
+        </HashRouter>
+      </ThemeProvider>
+    </MobileContext.Provider>
   );
 }
 

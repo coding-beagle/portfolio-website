@@ -1,24 +1,11 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-
-// Helper to detect mobile devices
-const isMobile = () =>
-  typeof window !== "undefined" &&
-  /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent
-  );
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function ValueChangers({ rerenderSetter, valueArrays }) {
   const { theme } = useTheme();
+  const mobile = useContext(MobileContext);
   const [showMenu, setShowMenu] = useState(false);
-  const [mobile, setMobile] = useState(false);
-
-  useEffect(() => {
-    setMobile(isMobile());
-    const handleResize = () => setMobile(isMobile());
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   return (
     <>
@@ -511,15 +498,8 @@ export function DisplayEntity({
 
 export function ChangerGroup({ rerenderSetter, valueArrays }) {
   const { theme } = useTheme();
+  const mobile = useContext(MobileContext);
   const [showMenu, setShowMenu] = useState(false);
-  const [mobile, setMobile] = useState(false);
-
-  useEffect(() => {
-    setMobile(isMobile());
-    const handleResize = () => setMobile(isMobile());
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   if (mobile) {
     return (

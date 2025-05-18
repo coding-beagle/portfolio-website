@@ -1,4 +1,4 @@
-import { useEffect, useState, createElement, useRef } from "react";
+import { useEffect, useState, createElement, useRef, useContext } from "react";
 import { useTheme } from "../../../themes/ThemeProvider";
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
@@ -17,13 +17,7 @@ import Mandelbrot from "./scenes/mandelbrot";
 import Plants from "./scenes/plants";
 import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
-
-// Helper to detect mobile devices
-const isMobile = () =>
-  typeof window !== "undefined" &&
-  /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent
-  );
+import { MobileContext } from "../../../contexts/MobileContext";
 
 const Scenes = {
   0: { component: Snow },
@@ -53,6 +47,7 @@ const sceneNameToIndex = {
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   const { theme } = useTheme();
+  const mobile = useContext(MobileContext);
   const [isHover, setIsHover] = useState(false);
   const [currentScene, setCurrentScene] = useState(
     Math.floor(Math.random() * Object.keys(Scenes).length)
@@ -62,15 +57,6 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
   const headerRef = useRef(null);
   const animationNameRef = useRef("");
   const [showMenu, setShowMenu] = useState(false);
-  const [mobile, setMobile] = useState(false);
-
-  useEffect(() => {
-    setMobile(isMobile());
-    // Optionally, listen for resize events to update mobile state
-    const handleResize = () => setMobile(isMobile());
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   useEffect(() => {
     if (initialScene === "") {
