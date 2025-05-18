@@ -741,7 +741,7 @@ export default function Conway() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 10 }}>
+      <div style={{ zIndex: 3000 }}>
         <ChangerGroup
           rerenderSetter={setRerender}
           valueArrays={valueChangers}

@@ -258,7 +258,7 @@ export default function WindTunnel() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 10 }}>
+      <div style={{ zIndex: 3000 }}>
         <div style={{ position: "absolute", top: "1em", left: "1em" }}>
           <div
             style={{

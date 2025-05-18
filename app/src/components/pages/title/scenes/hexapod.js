@@ -1021,7 +1021,7 @@ export default function Hexapod() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 10 }}>
+      <div style={{ zIndex: 3000 }}>
         <ChangerGroup
           valueArrays={[
             {
@@ -1042,7 +1042,7 @@ export default function Hexapod() {
           rerenderSetter={setRender}
         />
 
-        <div style={{ zIndex: 10 }}>
+        <div style={{ zIndex: 3000 }}>
           <div style={{ position: "absolute", top: "1em", right: "1em" }}>
             <MouseTooltip />
           </div>

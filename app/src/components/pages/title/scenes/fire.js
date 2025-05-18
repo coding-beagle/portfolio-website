@@ -247,7 +247,7 @@ export default function Fire() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 10 }}>
+      <div style={{ zIndex: 3000 }}>
         <ChangerGroup
           valueArrays={[
             {

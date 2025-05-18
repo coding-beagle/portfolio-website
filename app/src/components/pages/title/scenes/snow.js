@@ -165,7 +165,7 @@ export default function Snow() {
         }}
       />
 
-      <div style={{ zIndex: 10 }}>
+      <div style={{ zIndex: 3000 }}>
         <ChangerGroup
           valueArrays={[
             {

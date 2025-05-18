@@ -1,6 +1,127 @@
 import React, { useRef, useEffect, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 
+// Helper to detect mobile devices
+const isMobile = () =>
+  typeof window !== "undefined" &&
+  /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+
+export default function ValueChangers({ rerenderSetter, valueArrays }) {
+  const { theme } = useTheme();
+  const [showMenu, setShowMenu] = useState(false);
+  const [mobile, setMobile] = useState(false);
+
+  useEffect(() => {
+    setMobile(isMobile());
+    const handleResize = () => setMobile(isMobile());
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return (
+    <>
+      {mobile ? (
+        <>
+          <button
+            style={{
+              position: "fixed",
+              top: 12,
+              left: 12,
+              margin: 0,
+              fontSize: "1em",
+              padding: "0.35em 1em",
+              borderRadius: "7px",
+              border: "none",
+              background: theme.accent,
+              color: theme.primary,
+              fontWeight: "bold",
+              cursor: "pointer",
+              zIndex: 11001, // ensure above title
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            }}
+            onClick={() => setShowMenu(true)}
+          >
+            Show Simulation Options
+          </button>
+          {showMenu && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "rgba(0,0,0,0.7)",
+                zIndex: 12000, // ensure above everything else
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              onClick={() => setShowMenu(false)}
+            >
+              <div
+                style={{
+                  background: theme.primary,
+                  color: theme.accent,
+                  borderRadius: "16px",
+                  padding: "2em 1.5em 1.5em 1.5em",
+                  minWidth: "70vw",
+                  maxWidth: "90vw",
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+                  position: "relative",
+                  zIndex: 12001, // ensure modal content is above overlay
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    right: 16,
+                    fontSize: "1.5em",
+                    background: "none",
+                    border: "none",
+                    color: theme.accent,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setShowMenu(false)}
+                >
+                  ×
+                </button>
+                <div
+                  style={{
+                    paddingBottom: "0.5em",
+                    fontWeight: 600,
+                    fontSize: "1.1em",
+                  }}
+                >
+                  Simulation Options
+                </div>
+                <div>
+                  <ChangerGroup
+                    rerenderSetter={rerenderSetter}
+                    valueArrays={valueArrays}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div>
+          <ChangerGroup
+            rerenderSetter={rerenderSetter}
+            valueArrays={valueArrays}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Slider({
   rerenderSetter,
   title,
@@ -389,11 +510,193 @@ export function DisplayEntity({
 }
 
 export function ChangerGroup({ rerenderSetter, valueArrays }) {
+  const { theme } = useTheme();
+  const [showMenu, setShowMenu] = useState(false);
+  const [mobile, setMobile] = useState(false);
+
+  useEffect(() => {
+    setMobile(isMobile());
+    const handleResize = () => setMobile(isMobile());
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  if (mobile) {
+    return (
+      <>
+        <button
+          style={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            margin: 0,
+            fontSize: "1em",
+            padding: "0.35em 1em",
+            borderRadius: "7px",
+            border: "none",
+            background: theme.accent,
+            color: theme.primary,
+            fontWeight: "bold",
+            cursor: "pointer",
+            zIndex: 11001, // ensure above title
+            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          }}
+          onClick={() => setShowMenu(true)}
+        >
+          Show Simulation Options
+        </button>
+        {showMenu && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: theme.primary,
+              zIndex: 12000, // ensure above everything else
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            onClick={() => setShowMenu(false)}
+          >
+            <div
+              style={{
+                background: theme.primary,
+                color: theme.accent,
+                borderRadius: "16px",
+                padding: "2em 1.5em 1.5em 1.5em",
+                minWidth: "70vw",
+                maxWidth: "90vw",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+                position: "relative",
+                zIndex: 12001, // ensure modal content is above overlay
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                style={{
+                  position: "absolute",
+                  top: 10,
+                  right: 16,
+                  fontSize: "1.5em",
+                  background: "none",
+                  border: "none",
+                  color: theme.accent,
+                  cursor: "pointer",
+                }}
+                onClick={() => setShowMenu(false)}
+              >
+                ×
+              </button>
+              <div
+                style={{
+                  paddingBottom: "0.5em",
+                  fontWeight: 600,
+                  fontSize: "1.1em",
+                }}
+              >
+                Simulation Options
+              </div>
+              <div>
+                {/* Render the value changers UI here for mobile */}
+                {valueArrays.map((element, index) => {
+                  if (Array.isArray(element)) {
+                    return (
+                      <div
+                        key={index}
+                        style={{
+                          display: "flex",
+                          gap: "0.5em",
+                          alignItems: "center",
+                        }}
+                      >
+                        {element.map((subElement, subIndex) => {
+                          if (subElement.type === "slider")
+                            return (
+                              <Slider
+                                key={subIndex}
+                                {...subElement}
+                                rerenderSetter={rerenderSetter}
+                              />
+                            );
+                          if (subElement.type === "button")
+                            return (
+                              <ChangerButton
+                                key={subIndex}
+                                {...subElement}
+                                rerenderSetter={rerenderSetter}
+                              />
+                            );
+                          if (subElement.type === "color")
+                            return (
+                              <ChangerColor
+                                key={subIndex}
+                                {...subElement}
+                                rerenderSetter={rerenderSetter}
+                              />
+                            );
+                          if (subElement.type === "display")
+                            return (
+                              <DisplayEntity
+                                key={subIndex}
+                                {...subElement}
+                                rerenderSetter={rerenderSetter}
+                              />
+                            );
+                          return null;
+                        })}
+                      </div>
+                    );
+                  }
+                  if (element.type === "slider")
+                    return (
+                      <Slider
+                        key={index}
+                        {...element}
+                        rerenderSetter={rerenderSetter}
+                      />
+                    );
+                  if (element.type === "button")
+                    return (
+                      <ChangerButton
+                        key={index}
+                        {...element}
+                        rerenderSetter={rerenderSetter}
+                      />
+                    );
+                  if (element.type === "color")
+                    return (
+                      <ChangerColor
+                        key={index}
+                        {...element}
+                        rerenderSetter={rerenderSetter}
+                      />
+                    );
+                  if (element.type === "display")
+                    return (
+                      <DisplayEntity
+                        key={index}
+                        {...element}
+                        rerenderSetter={rerenderSetter}
+                      />
+                    );
+                  return null;
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+  // Desktop: render inline as before
   return (
     <div style={{ position: "absolute", top: "1em", left: "1em" }}>
       {valueArrays.map((element, index) => {
         if (Array.isArray(element)) {
-          // Render any number of value changers side by side
           return (
             <div
               key={index}
