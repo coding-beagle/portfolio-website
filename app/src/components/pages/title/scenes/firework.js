@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Fireworks() {
   const { theme } = useTheme();
@@ -10,6 +11,8 @@ export default function Fireworks() {
   const bloomEffectRef = useRef(6);
   const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
+
+  const mobile = useContext(MobileContext);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -76,9 +79,20 @@ export default function Fireworks() {
 
     class Firework {
       constructor() {
-        this.x = Math.random() * canvasRef.current.width;
+        // Detect if on mobile
+
+        let x = Math.random() * canvasRef.current.width;
+        if (mobile) {
+          // Reduce x range for mobile (e.g., center fireworks more)
+          x =
+            canvasRef.current.width * 0.25 +
+            Math.random() * canvasRef.current.width * 0.5;
+        }
+        this.x = x;
         this.y = canvasRef.current.height;
-        this.vx = (Math.random() - 0.5) * maxFireworkSpeed;
+        this.vx = mobile
+          ? Math.random() - 0.5
+          : (Math.random() - 0.5) * maxFireworkSpeed;
         this.vy = -(Math.random() + 2 * maxFireworkRiseSpeed);
         this.size = Math.random() * 2 + 1;
         this.color = colorRef.current;
