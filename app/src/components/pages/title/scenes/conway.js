@@ -895,7 +895,11 @@ export default function Conway() {
         )}
       </div>
       <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-        <MouseTooltip />
+        <MouseTooltip
+          text={
+            "Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell\nMiddle Mouse: Pan"
+          }
+        />
       </div>
     </>
   );
