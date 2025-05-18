@@ -48,6 +48,14 @@ export default function Mandelbrot() {
     };
   }, []);
 
+  // Restart Mandelbrot rendering when the global theme changes
+  useEffect(() => {
+    // Reset progressive rendering resolution and trigger full redraw
+    if (drawEverythingRef.current) {
+      drawEverythingRef.current();
+    }
+  }, [theme]);
+
   const themesList = [
     ["Default", theme.primary, theme.secondary, theme.primary],
     ["Pink Innit", theme.tertiaryAccent, theme.primary, theme.secondary],
@@ -310,6 +318,10 @@ export default function Mandelbrot() {
             themesList[0][3]
           );
           setRender((prev) => prev + 1);
+          // Restart Mandelbrot rerendering cycle
+          if (typeof window !== "undefined") {
+            window._mandelbrotCurrentRes = 10;
+          }
           drawEverythingRef.current();
         },
       },
@@ -325,6 +337,9 @@ export default function Mandelbrot() {
             themesList[1][3]
           );
           setRender((prev) => prev + 1);
+          if (typeof window !== "undefined") {
+            window._mandelbrotCurrentRes = 10;
+          }
           drawEverythingRef.current();
         },
       },
@@ -340,6 +355,9 @@ export default function Mandelbrot() {
             themesList[2][3]
           );
           setRender((prev) => prev + 1);
+          if (typeof window !== "undefined") {
+            window._mandelbrotCurrentRes = 10;
+          }
           drawEverythingRef.current();
         },
       },
@@ -355,6 +373,9 @@ export default function Mandelbrot() {
             themesList[3][3]
           );
           setRender((prev) => prev + 1);
+          if (typeof window !== "undefined") {
+            window._mandelbrotCurrentRes = 10;
+          }
           drawEverythingRef.current();
         },
       },
