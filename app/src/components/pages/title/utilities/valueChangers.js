@@ -40,12 +40,12 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                 left: 0,
                 width: "100vw",
                 height: "100vh",
-                background: "rgba(0,0,0,0.7)",
+                background: "rgba(0,0,0,0.5)",
                 zIndex: 12000, // ensure above everything else
                 display: "flex",
-                flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
+                transition: "background 0.3s cubic-bezier(.4,0,.2,1)",
               }}
               onClick={() => setShowMenu(false)}
             >
@@ -53,15 +53,19 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                 style={{
                   background: theme.primary,
                   color: theme.accent,
-                  borderRadius: "16px",
+                  borderRadius: "18px",
                   padding: "2em 1.5em 1.5em 1.5em",
                   minWidth: "70vw",
                   maxWidth: "90vw",
-                  maxHeight: "80vh", // limit height
-                  overflowY: "auto", // make scrollable
+                  maxHeight: "80vh",
+                  overflowY: "auto",
                   boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
                   position: "relative",
-                  zIndex: 12001, // ensure modal content is above overlay
+                  zIndex: 12001,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  animation: "fadeInModal 0.22s cubic-bezier(.4,0,.2,1)",
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -79,6 +83,7 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                   }}
                   onClick={() => setShowMenu(false)}
                   tabIndex={0}
+                  aria-label="Close simulation options"
                 >
                   ×
                 </button>
@@ -91,12 +96,100 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                 >
                   Simulation Options
                 </div>
-                <div>
-                  <ChangerGroup
-                    rerenderSetter={rerenderSetter}
-                    valueArrays={valueArrays}
-                  />
+                <div style={{ width: "100%" }}>
+                  {/* Render the value changers UI here for mobile */}
+                  {valueArrays.map((element, index) => {
+                    if (Array.isArray(element)) {
+                      return (
+                        <div
+                          key={index}
+                          style={{
+                            display: "flex",
+                            gap: "0.5em",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            justifyContent: "center",
+                          }}
+                        >
+                          {element.map((subElement, subIndex) => {
+                            if (subElement.type === "slider")
+                              return (
+                                <Slider
+                                  key={subIndex}
+                                  {...subElement}
+                                  rerenderSetter={rerenderSetter}
+                                />
+                              );
+                            if (subElement.type === "button")
+                              return (
+                                <ChangerButton
+                                  key={subIndex}
+                                  {...subElement}
+                                  rerenderSetter={rerenderSetter}
+                                />
+                              );
+                            if (subElement.type === "color")
+                              return (
+                                <ChangerColor
+                                  key={subIndex}
+                                  {...subElement}
+                                  rerenderSetter={rerenderSetter}
+                                />
+                              );
+                            if (subElement.type === "display")
+                              return (
+                                <DisplayEntity
+                                  key={subIndex}
+                                  {...subElement}
+                                  rerenderSetter={rerenderSetter}
+                                />
+                              );
+                            return null;
+                          })}
+                        </div>
+                      );
+                    }
+                    if (element.type === "slider")
+                      return (
+                        <Slider
+                          key={index}
+                          {...element}
+                          rerenderSetter={rerenderSetter}
+                        />
+                      );
+                    if (element.type === "button")
+                      return (
+                        <ChangerButton
+                          key={index}
+                          {...element}
+                          rerenderSetter={rerenderSetter}
+                        />
+                      );
+                    if (element.type === "color")
+                      return (
+                        <ChangerColor
+                          key={index}
+                          {...element}
+                          rerenderSetter={rerenderSetter}
+                        />
+                      );
+                    if (element.type === "display")
+                      return (
+                        <DisplayEntity
+                          key={index}
+                          {...element}
+                          rerenderSetter={rerenderSetter}
+                        />
+                      );
+                    return null;
+                  })}
                 </div>
+                <style>{`
+                  @keyframes fadeInModal {
+                    from { opacity: 0; transform: scale(0.97); }
+                    to { opacity: 1; transform: scale(1); }
+                  }
+                `}</style>
               </div>
             </div>
           )}
@@ -537,12 +630,12 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
               left: 0,
               width: "100vw",
               height: "100vh",
-              background: theme.primary,
+              background: "rgba(0,0,0,0.5)",
               zIndex: 12000, // ensure above everything else
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
+              transition: "background 0.3s cubic-bezier(.4,0,.2,1)",
             }}
             onClick={() => setShowMenu(false)}
           >
@@ -550,15 +643,19 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
               style={{
                 background: theme.primary,
                 color: theme.accent,
-                borderRadius: "16px",
+                borderRadius: "18px",
                 padding: "2em 1.5em 1.5em 1.5em",
                 minWidth: "70vw",
                 maxWidth: "90vw",
-                maxHeight: "80vh", // limit height
-                overflowY: "auto", // make scrollable
+                maxHeight: "80vh",
+                overflowY: "auto",
                 boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
                 position: "relative",
-                zIndex: 12001, // ensure modal content is above overlay
+                zIndex: 12001,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                animation: "fadeInModal 0.22s cubic-bezier(.4,0,.2,1)",
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -576,6 +673,7 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                 }}
                 onClick={() => setShowMenu(false)}
                 tabIndex={0}
+                aria-label="Close simulation options"
               >
                 ×
               </button>
@@ -588,7 +686,7 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
               >
                 Simulation Options
               </div>
-              <div>
+              <div style={{ width: "100%" }}>
                 {/* Render the value changers UI here for mobile */}
                 {valueArrays.map((element, index) => {
                   if (Array.isArray(element)) {
@@ -599,8 +697,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                           display: "flex",
                           gap: "0.5em",
                           alignItems: "center",
-                          flexWrap: "wrap", // allow wrapping to next line
-                          justifyContent: "center", // center items when wrapped
+                          flexWrap: "wrap",
+                          justifyContent: "center",
                         }}
                       >
                         {element.map((subElement, subIndex) => {
@@ -676,6 +774,12 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                   return null;
                 })}
               </div>
+              <style>{`
+                @keyframes fadeInModal {
+                  from { opacity: 0; transform: scale(0.97); }
+                  to { opacity: 1; transform: scale(1); }
+                }
+              `}</style>
             </div>
           </div>
         )}

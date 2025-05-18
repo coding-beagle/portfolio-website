@@ -260,6 +260,7 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
                     maxWidth: "90vw",
                     boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
                     position: "relative",
+                    animation: "fadeInModal 0.22s cubic-bezier(.4,0,.2,1)",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -317,6 +318,12 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
                     {/* If you use a ValueChangers component, render it here. Example: */}
                     {/* <ValueChangers ...props /> */}
                   </div>
+                  <style>{`
+                    @keyframes fadeInModal {
+                      from { opacity: 0; transform: scale(0.97); }
+                      to { opacity: 1; transform: scale(1); }
+                    }
+                  `}</style>
                 </div>
               </div>
             )}
