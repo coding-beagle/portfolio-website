@@ -673,26 +673,6 @@ export default function Conway() {
         },
       },
     ],
-    [
-      {
-        type: "button",
-        title: "Squarify Tiles Via:",
-        buttonText: "Columns",
-        callback: () => {
-          squarifyGrid(true);
-          setRender((prev) => prev + 1);
-        },
-      },
-      {
-        type: "button",
-        title: "",
-        buttonText: "Rows",
-        callback: () => {
-          squarifyGrid(false);
-          setRender((prev) => prev + 1);
-        },
-      },
-    ],
     {
       type: "slider",
       title: "Simulation Speed:",

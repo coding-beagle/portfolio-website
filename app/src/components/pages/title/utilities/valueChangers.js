@@ -290,9 +290,22 @@ export function ChangerColor({ rerenderSetter, title, colorValue, onChange }) {
           marginLeft: "0.5em",
           width: 32,
           height: 32,
-          border: `2px solid ${theme.secondaryAccent}`,
+          border: `0px solid ${theme.secondaryAccent}`,
           borderRadius: 6,
-          background: theme.background,
+          background: `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
+          boxShadow: `0 1px 6px ${theme.secondaryAccent}22`,
+          fontFamily: theme.font,
+          fontWeight: 500,
+          transition: "background 0.15s, border 0.15s, box-shadow 0.15s",
+          cursor: "pointer",
+        }}
+        onMouseOver={(e) => {
+          e.target.style.background = `linear-gradient(45deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
+          e.target.style.boxShadow = `0 2px 10px ${theme.secondaryAccent}44`;
+        }}
+        onMouseOut={(e) => {
+          e.target.style.background = `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`;
+          e.target.style.boxShadow = `0 1px 6px ${theme.secondaryAccent}22`;
         }}
       />
     </div>
@@ -386,7 +399,6 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                 display: "flex",
                 gap: "0.5em",
                 alignItems: "center",
-                marginBottom: "0.5em",
               }}
             >
               {element.map((subElement, subIndex) => {
