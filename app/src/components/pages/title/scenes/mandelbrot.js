@@ -676,7 +676,9 @@ export default function Mandelbrot() {
         const dy = event.touches[0].clientY - event.touches[1].clientY;
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
 
-        const zoomFactor = currentDistance / lastTouchDistance;
+        const zoomSense = 0.5;
+
+        const zoomFactor = (currentDistance * zoomSense) / lastTouchDistance;
         zoomLevelRef.current *= zoomFactor;
 
         const currentCenter = {
@@ -713,7 +715,9 @@ export default function Mandelbrot() {
         complexPosRef.current.Re = complexMousePos[0];
         complexPosRef.current.Im = complexMousePos[1];
 
-        handlePan(dx, dy);
+        const panSens = 0.5;
+
+        handlePan(dx * panSens, dy * panSens);
       }
     };
 
