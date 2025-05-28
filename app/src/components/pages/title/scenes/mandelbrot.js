@@ -676,7 +676,7 @@ export default function Mandelbrot() {
         const dy = event.touches[0].clientY - event.touches[1].clientY;
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
 
-        const zoomSense = 0.5;
+        const zoomSense = 1;
 
         const zoomFactor = (currentDistance * zoomSense) / lastTouchDistance;
         zoomLevelRef.current *= zoomFactor;
