@@ -25,6 +25,7 @@ import Plants from "./scenes/plants";
 import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
 import { MobileContext } from "../../../contexts/MobileContext";
+import Plinko from "./scenes/plinko";
 
 const Scenes = {
   0: { component: Snow },
@@ -37,6 +38,7 @@ const Scenes = {
   7: { component: Mandelbrot },
   8: { component: Fire },
   9: { component: Fireworks },
+  10: { component: Plinko },
 };
 
 const sceneNameToIndex = {
@@ -50,6 +52,7 @@ const sceneNameToIndex = {
   mandelbrot: 7,
   fire: 8,
   fireworks: 9,
+  plinko: 10,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
