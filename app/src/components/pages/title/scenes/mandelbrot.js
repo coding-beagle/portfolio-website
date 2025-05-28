@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, {
-  PannableToolTip,
-  ZoomableToolTip,
-} from "../utilities/popovers";
+import { PannableToolTip, ZoomableToolTip } from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
 import { ChangerGroup } from "../utilities/valueChangers";
@@ -28,8 +25,8 @@ export default function Mandelbrot() {
   const colourMaxComponentsRef = useRef("");
   const colourMinComponentsRef = useRef("");
   const colourStepsRef = useRef("");
-
-  const workerInstanceRef = useRef(null);
+  const workerPoolRef = useRef([]);
+  const workerPoolSize = 4; // Number of workers to use
   const drawGenerationRef = useRef(0); // Track current draw generation
   const centerXRef = useRef(0); // Center point X in the complex plane
   const centerYRef = useRef(0); // Center point Y in the complex plane
@@ -43,11 +40,17 @@ export default function Mandelbrot() {
   ]);
 
   useEffect(() => {
-    workerInstanceRef.current = new WorkerFactory(Worker);
+    // Initialize worker pool
+    for (let i = 0; i < workerPoolSize; i++) {
+      workerPoolRef.current.push(new WorkerFactory(Worker));
+    }
 
     return () => {
-      workerInstanceRef.current.terminate();
-      workerInstanceRef.current = null;
+      // Terminate all workers
+      workerPoolRef.current.forEach((worker) => {
+        worker.terminate();
+      });
+      workerPoolRef.current = [];
     };
   }, []);
 
@@ -188,103 +191,6 @@ export default function Mandelbrot() {
     const bHex = b.toString(16).padStart(2, "0");
 
     return `#${rHex}${gHex}${bHex}`;
-  }
-
-  async function drawMandelbrotArea(
-    position,
-    resolution = 21 - drawResolutionRef.current,
-    drawAll = false,
-    drawWithWebworker = false
-  ) {
-    currentlyDrawingRef.current = true;
-    drawGenerationRef.current += 1; // Increment generation for each new draw
-    const thisDrawGeneration = drawGenerationRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    let startX, startY, endX, endY;
-    if (drawAll) {
-      if (!drawWithWebworker) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-      startX = 0;
-      startY = 0;
-      endX = canvas.width;
-      endY = canvas.height;
-    } else {
-      startX = position.x - drawAreaRef.current / 2;
-      startY = position.y - drawAreaRef.current / 2;
-      endX = position.x + drawAreaRef.current / 2;
-      endY = position.y + drawAreaRef.current / 2;
-    }
-
-    if (drawWithWebworker) {
-      for (let y = startY; y < endY; y += resolution) {
-        const x_array = [];
-        for (let x = startX; x < endX; x += resolution) {
-          x_array.push(x);
-        }
-
-        const chunkSize = 160; // Adjust this based on observed limits
-        for (let i = 0; i < x_array.length; i += chunkSize) {
-          // Cancel if a new draw has started
-          if (drawGenerationRef.current !== thisDrawGeneration) {
-            currentlyDrawingRef.current = false;
-            return;
-          }
-          const chunk = x_array.slice(i, i + chunkSize);
-          const aspectRatio =
-            (canvasRef.current.width / canvasRef.current.height) * 2;
-          workerInstanceRef.current.postMessage({
-            rowPixels: chunk,
-            rowY: y,
-            zoomLevel: zoomLevelRef.current,
-            transformX: transformX,
-            transformY: transformY,
-            canvasWidth: canvasRef.current.width,
-            canvasHeight: canvasRef.current.height,
-            centerX: centerXRef.current,
-            centerY: centerYRef.current,
-            xAspectRatio: aspectRatio,
-            yAspectRatio: 2,
-            drawGeneration: thisDrawGeneration, // Pass generation to worker (optional)
-          });
-
-          let returned_data = [];
-          await new Promise((resolve) => {
-            workerInstanceRef.current.onmessage = (event) => {
-              // Only use the result if the drawGeneration matches
-              if (event.data.drawGeneration !== thisDrawGeneration) {
-                currentlyDrawingRef.current = false;
-                return;
-              }
-              returned_data = event.data.results;
-              resolve();
-            };
-          });
-
-          // Cancel if a new draw has started
-          if (drawGenerationRef.current !== thisDrawGeneration) {
-            currentlyDrawingRef.current = false;
-            return;
-          }
-
-          returned_data.forEach((x_data, index) => {
-            const x = chunk[index];
-            ctx.fillStyle = colourInterp(x_data);
-            ctx.fillRect(x, y, resolution, resolution);
-          });
-        }
-      }
-    } else {
-      for (let y = startY; y < endY; y += resolution) {
-        for (let x = startX; x < endX; x += resolution) {
-          ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
-          ctx.fillRect(x, y, resolution, resolution);
-        }
-      }
-    }
-
-    currentlyDrawingRef.current = false;
   }
 
   const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
@@ -455,6 +361,184 @@ export default function Mandelbrot() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
+
+    function mapToComplex(pixelX, pixelY) {
+      // Return early if canvasRef.current is null
+      if (!canvasRef.current) {
+        return [0, 0];
+      }
+
+      // Calculate the view dimensions in the complex plane
+      const viewWidth =
+        ((canvasRef.current.width / canvasRef.current.height) * 2) /
+        zoomLevelRef.current; // 4 units wide at zoom level 1
+      const viewHeight = 2 / zoomLevelRef.current; // 2.25 units high at zoom level 1
+
+      // Convert pixel coordinates to percentages of canvas
+      const percentX = (pixelX + transformX) / canvasRef.current.width;
+      const percentY = (pixelY + transformY) / canvasRef.current.height;
+
+      // Map to complex plane coordinates, centered on centerX,centerY
+      return [
+        centerXRef.current + (percentX - 0.5) * viewWidth,
+        centerYRef.current + (percentY - 0.5) * viewHeight,
+      ];
+    }
+
+    // Helper function to process a single work unit with a specific worker
+    async function processWorkUnit(workerIdx, workUnit, drawGeneration, ctx) {
+      const worker = workerPoolRef.current[workerIdx];
+      const { chunk, y } = workUnit;
+
+      return new Promise((resolve) => {
+        const aspectRatio =
+          (canvasRef.current.width / canvasRef.current.height) * 2;
+
+        worker.postMessage({
+          rowPixels: chunk,
+          rowY: y,
+          zoomLevel: zoomLevelRef.current,
+          transformX: transformX,
+          transformY: transformY,
+          canvasWidth: canvasRef.current.width,
+          canvasHeight: canvasRef.current.height,
+          centerX: centerXRef.current,
+          centerY: centerYRef.current,
+          xAspectRatio: aspectRatio,
+          yAspectRatio: 2,
+          drawGeneration: drawGeneration,
+        });
+
+        worker.onmessage = (event) => {
+          // Only use the result if the drawGeneration matches
+          if (event.data.drawGeneration !== drawGeneration) {
+            resolve();
+            return;
+          }
+
+          const returned_data = event.data.results;
+
+          // Cancel if a new draw has started
+          if (drawGenerationRef.current !== drawGeneration) {
+            resolve();
+            return;
+          }
+
+          returned_data.forEach((x_data, index) => {
+            const x = chunk[index];
+            ctx.fillStyle = colourInterp(x_data);
+            ctx.fillRect(
+              x,
+              y,
+              21 - drawResolutionRef.current,
+              21 - drawResolutionRef.current
+            );
+          });
+
+          resolve();
+        };
+      });
+    }
+
+    async function drawMandelbrotArea(
+      position,
+      resolution = 21 - drawResolutionRef.current,
+      drawAll = false,
+      drawWithWebworker = false
+    ) {
+      currentlyDrawingRef.current = true;
+      drawGenerationRef.current += 1; // Increment generation for each new draw
+      const thisDrawGeneration = drawGenerationRef.current;
+      const ctx = canvas.getContext("2d");
+      let startX, startY, endX, endY;
+      if (drawAll) {
+        if (!drawWithWebworker) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        startX = 0;
+        startY = 0;
+        endX = canvas.width;
+        endY = canvas.height;
+      } else {
+        startX = position.x - drawAreaRef.current / 2;
+        startY = position.y - drawAreaRef.current / 2;
+        endX = position.x + drawAreaRef.current / 2;
+        endY = position.y + drawAreaRef.current / 2;
+      }
+
+      if (drawWithWebworker) {
+        // Collect all work units first
+        const workUnits = [];
+        for (let y = startY; y < endY; y += resolution) {
+          const x_array = [];
+          for (let x = startX; x < endX; x += resolution) {
+            x_array.push(x);
+          }
+          const chunkSize = 800; // Increased chunk size for better performance
+          for (let i = 0; i < x_array.length; i += chunkSize) {
+            const chunk = x_array.slice(i, i + chunkSize);
+            workUnits.push({ chunk, y });
+          }
+        }
+
+        // Process work units with worker pool
+        let workIndex = 0;
+        const workerPromises = [];
+
+        // Start initial work on all available workers
+        for (
+          let workerIdx = 0;
+          workerIdx < Math.min(workerPoolRef.current.length, workUnits.length);
+          workerIdx++
+        ) {
+          if (workIndex < workUnits.length) {
+            workerPromises.push(
+              processWorkUnit(
+                workerIdx,
+                workUnits[workIndex],
+                thisDrawGeneration,
+                ctx
+              )
+            );
+            workIndex++;
+          }
+        }
+
+        // Process remaining work units as workers become available
+        while (
+          workIndex < workUnits.length &&
+          drawGenerationRef.current === thisDrawGeneration
+        ) {
+          // Wait for any worker to finish
+          const completedWorkerIdx = await Promise.race(
+            workerPromises.map((promise, idx) => promise.then(() => idx))
+          );
+
+          // Start new work on the completed worker
+          if (workIndex < workUnits.length) {
+            workerPromises[completedWorkerIdx] = processWorkUnit(
+              completedWorkerIdx,
+              workUnits[workIndex],
+              thisDrawGeneration,
+              ctx
+            );
+            workIndex++;
+          }
+        }
+
+        // Wait for all remaining work to complete
+        await Promise.all(workerPromises);
+      } else {
+        for (let y = startY; y < endY; y += resolution) {
+          for (let x = startX; x < endX; x += resolution) {
+            ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
+            ctx.fillRect(x, y, resolution, resolution);
+          }
+        }
+      }
+
+      currentlyDrawingRef.current = false;
+    }
 
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
@@ -654,13 +738,15 @@ export default function Mandelbrot() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      workerInstanceRef.current?.terminate();
+      // Terminate all workers in the pool
+      workerPoolRef.current.forEach((worker) => {
+        worker.terminate();
+      });
       window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("resize", drawEverythingRef.current);
+      window.removeEventListener("resize", handleResize);
       window.removeEventListener("touchmove", handleMouseMove);
       canvas.removeEventListener("pointerdown", handleMouseDown);
       canvas.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("resize", handleResize);
       window.removeEventListener("wheel", handleWheel);
       canvas.removeEventListener("touchstart", handleTouchStart);
       canvas.removeEventListener("touchmove", handleTouchMove);
