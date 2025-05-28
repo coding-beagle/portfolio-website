@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, {
+  PannableToolTip,
+  ZoomableToolTip,
+} from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
 import { ChangerGroup } from "../utilities/valueChangers";
@@ -682,8 +685,18 @@ export default function Mandelbrot() {
       />
       <ChangerGroup rerenderSetter={setRerender} valueArrays={valueChangers} />
       <div style={{ zIndex: 3000 }}>
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            position: "absolute",
+            top: "1em",
+            right: "1em",
+            gap: "0.5em",
+          }}
+        >
+          <ZoomableToolTip text={"Scroll wheel: Zoom in and out!"} />
+          <PannableToolTip text={"Left click: Pan around!"} />
         </div>
       </div>
     </>

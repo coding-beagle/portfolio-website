@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, {
+  PannableToolTip,
+  ZoomableToolTip,
+} from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -1027,11 +1030,20 @@ export default function Conway() {
           </div>
         )}
       </div>
-      <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          position: "absolute",
+          top: "1em",
+          right: "1em",
+          gap: "0.5em",
+        }}
+      >
+        <ZoomableToolTip text={"Scroll: Zoom in and out"} />
+        <PannableToolTip text={"Middle Mouse: Pan"} />
         <MouseTooltip
-          text={
-            "Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell\nMiddle Mouse: Pan"
-          }
+          text={"Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell"}
         />
       </div>
     </>
