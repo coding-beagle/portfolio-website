@@ -23,7 +23,6 @@ export default function ThreeBody() {
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
-
     let particles = [];
     let animationFrameId;
 
@@ -31,6 +30,10 @@ export default function ThreeBody() {
     let lastTime = Date.now();
 
     const gravConstantDivider = 5;
+
+    // Shared future prediction cache to avoid recalculating for each particle
+    let sharedFuturePredictions = null;
+    let lastPredictionFrame = -1;
 
     class Body {
       constructor(x, y) {
@@ -141,65 +144,150 @@ export default function ThreeBody() {
         particle.vx *= 0.98;
         particle.vy *= 0.98;
       }
-
       calculateFuturePositions() {
-        this.nextPositions = [{ x: this.x, y: this.y }]; // Start with current position
+        // Only calculate predictions if future prediction is enabled
+        if (futurePredictionRef.current <= 0) {
+          this.nextPositions = [{ x: this.x, y: this.y }];
+          return;
+        }
 
-        // Create temporary copies for simulation
-        let tempX = this.x;
-        let tempY = this.y;
-        let tempVx = this.vx;
-        let tempVy = this.vy;
+        // Use shared future prediction cache to avoid recalculating for each particle
+        const currentFrame = Date.now();
 
-        const predictionSteps = futurePredictionRef.current; // How many steps ahead to predict
-        const predictionTimeStep = TimeStep * 2; // Larger time steps for prediction
+        if (!sharedFuturePredictions || currentFrame !== lastPredictionFrame) {
+          sharedFuturePredictions = this.simulateAllParticlesFuture();
+          lastPredictionFrame = currentFrame;
+        }
 
+        // Extract this particle's predicted positions from shared cache
+        const thisParticleIndex = particles.indexOf(this);
+        this.nextPositions = sharedFuturePredictions[thisParticleIndex] || [
+          { x: this.x, y: this.y },
+        ];
+      }
+      simulateAllParticlesFuture() {
+        // Optimize prediction steps based on particle count to maintain performance
+        const baseSteps = futurePredictionRef.current;
+        const particleCount = particles.length;
+        const maxStepsForPerformance = Math.max(50, 500 / particleCount);
+        const predictionSteps = Math.min(baseSteps, maxStepsForPerformance);
+
+        const predictionTimeStep = TimeStep * 2;
+
+        // Create temporary copies of all particles
+        const tempParticles = particles.map((particle) => ({
+          x: particle.x,
+          y: particle.y,
+          vx: particle.vx,
+          vy: particle.vy,
+          mass: particle.mass,
+          size: particle.size,
+          predictions: [{ x: particle.x, y: particle.y }],
+        }));
+
+        // Simulate all particles together step by step
         for (let step = 0; step < predictionSteps; step++) {
-          let fx = 0;
-          let fy = 0;
+          // Calculate forces for all particles
+          const forces = tempParticles.map(() => ({ fx: 0, fy: 0 }));
 
-          // Calculate forces from all other particles at their CURRENT positions
-          particles.forEach((particle) => {
-            if (particle === this) return;
+          for (let i = 0; i < tempParticles.length; i++) {
+            for (let j = i + 1; j < tempParticles.length; j++) {
+              const p1 = tempParticles[i];
+              const p2 = tempParticles[j];
 
-            const dx = particle.x - tempX;
-            const dy = particle.y - tempY;
-            const r = Math.sqrt(dx ** 2 + dy ** 2);
+              const dx = p2.x - p1.x;
+              const dy = p2.y - p1.y;
+              const r = Math.sqrt(dx ** 2 + dy ** 2);
+              const minDistance = p1.size + p2.size;
 
-            const minDistance = this.size + particle.size;
-            const effectiveDistance = Math.max(r, minDistance);
+              // Handle collisions
+              if (r <= minDistance && r > 0) {
+                // Separate particles
+                const overlap = minDistance - r;
+                const separationX = (dx / r) * overlap * 0.5;
+                const separationY = (dy / r) * overlap * 0.5;
 
-            if (r > 0) {
-              const force =
-                ((gravConstantRef.current / gravConstantDivider) *
-                  this.mass *
-                  particle.mass) /
-                effectiveDistance ** 2;
-              fx += (force * dx) / r;
-              fy += (force * dy) / r;
+                p1.x -= separationX;
+                p1.y -= separationY;
+                p2.x += separationX;
+                p2.y += separationY;
+
+                // Calculate collision response
+                const relativeVx = p1.vx - p2.vx;
+                const relativeVy = p1.vy - p2.vy;
+                const normalVelocity =
+                  relativeVx * (dx / r) + relativeVy * (dy / r);
+
+                if (normalVelocity < 0) {
+                  const restitution = 0.8;
+                  const impulse = -(1 + restitution) * normalVelocity;
+                  const totalMass = p1.mass + p2.mass;
+                  const impulseScalar = impulse / totalMass;
+
+                  const impulseX = impulseScalar * (dx / r);
+                  const impulseY = impulseScalar * (dy / r);
+
+                  p1.vx += impulseX * p2.mass;
+                  p1.vy += impulseY * p2.mass;
+                  p2.vx -= impulseX * p1.mass;
+                  p2.vy -= impulseY * p1.mass;
+
+                  // Apply dampening
+                  p1.vx *= 0.98;
+                  p1.vy *= 0.98;
+                  p2.vx *= 0.98;
+                  p2.vy *= 0.98;
+                }
+              }
+
+              // Calculate gravitational forces
+              const effectiveDistance = Math.max(r, minDistance);
+              if (r > 0) {
+                const force =
+                  ((gravConstantRef.current / gravConstantDivider) *
+                    p1.mass *
+                    p2.mass) /
+                  effectiveDistance ** 2;
+                const forceX = (force * dx) / r;
+                const forceY = (force * dy) / r;
+
+                forces[i].fx += forceX;
+                forces[i].fy += forceY;
+                forces[j].fx -= forceX;
+                forces[j].fy -= forceY;
+              }
             }
-          });
+          }
 
-          // Update temporary velocity and position
-          const ax = fx / this.mass;
-          const ay = fy / this.mass;
+          // Update all particles
+          for (let i = 0; i < tempParticles.length; i++) {
+            const particle = tempParticles[i];
+            const force = forces[i];
 
-          tempVx += ax * predictionTimeStep;
-          tempVy += ay * predictionTimeStep;
+            // Update velocity with gravity
+            const ax = force.fx / particle.mass;
+            const ay = force.fy / particle.mass;
 
-          tempX += (tempVx * simulationSpeedRef.current) / 100;
-          tempY += (tempVy * simulationSpeedRef.current) / 100;
+            particle.vx += ax * predictionTimeStep;
+            particle.vy += ay * predictionTimeStep;
 
-          // Store every few steps to avoid too many points
-          if (step % 5 === 0) {
-            this.nextPositions.push({ x: tempX, y: tempY });
+            // Update position
+            particle.x += (particle.vx * simulationSpeedRef.current) / 100;
+            particle.y += (particle.vy * simulationSpeedRef.current) / 100;
+
+            // Store position every few steps
+            if (step % 5 === 0) {
+              particle.predictions.push({ x: particle.x, y: particle.y });
+            }
           }
         }
-      }
 
+        // Return all predictions
+        return tempParticles.map((p) => p.predictions);
+      }
       draw() {
-        // Draw the prediction trail
-        if (this.nextPositions.length > 1) {
+        // Draw the prediction trail only if future prediction is enabled and we have positions
+        if (futurePredictionRef.current > 0 && this.nextPositions.length > 1) {
           ctx.strokeStyle = theme.secondary;
           ctx.globalAlpha = 0.3; // Make trail semi-transparent
           ctx.lineWidth = 1;
@@ -233,9 +321,7 @@ export default function ThreeBody() {
 
       const currentTime = Date.now();
       TimeStep = (currentTime - lastTime) / 1000; // Convert to seconds
-      lastTime = currentTime;
-
-      // Adjust particle count
+      lastTime = currentTime; // Adjust particle count
       const currentParticleCount = particles.length;
       if (currentParticleCount < particleCountRef.current) {
         for (let i = currentParticleCount; i < particleCountRef.current; i++) {
@@ -243,8 +329,12 @@ export default function ThreeBody() {
           const y = Math.random() * canvas.height;
           particles.push(new Body(x, y));
         }
+        // Reset prediction cache when particles are added
+        sharedFuturePredictions = null;
       } else if (currentParticleCount > particleCountRef.current) {
         particles.splice(particleCountRef.current);
+        // Reset prediction cache when particles are removed
+        sharedFuturePredictions = null;
       }
       particles.forEach((particle) => {
         particle.update();
