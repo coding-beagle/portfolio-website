@@ -5,10 +5,13 @@ import { ChangerGroup } from "../utilities/valueChangers";
 export default function ThreeBody() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
-  const particleCountRef = useRef(3);
+  const particleCountRef = useRef(10);
+  const gravConstantRef = useRef(500);
+  const futurePredictionRef = useRef(100);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
+  const [rerenderSim, setRerenderSim] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -24,7 +27,6 @@ export default function ThreeBody() {
     let particles = [];
     let animationFrameId;
 
-    const GravitationalConstant = 500;
     const TimeStep = 0.001;
 
     class Body {
@@ -38,6 +40,7 @@ export default function ThreeBody() {
         this.color = colorRef.current;
         this.acceleration = 0;
         this.acceleration_angle = 0;
+        this.nextPositions = [{ x: this.x, y: this.y }];
       }
 
       update() {
@@ -56,11 +59,10 @@ export default function ThreeBody() {
           const effectiveDistance = Math.max(r, minDistance);
 
           if (r > 0) {
-            // Avoid division by zero
             const force =
-              (GravitationalConstant * this.mass * particle.mass) /
+              (gravConstantRef.current * this.mass * particle.mass) /
               effectiveDistance ** 2;
-            fx += (force * dx) / r; // Force components
+            fx += (force * dx) / r;
             fy += (force * dy) / r;
           }
         });
@@ -73,12 +75,85 @@ export default function ThreeBody() {
         this.vx += ax * TimeStep;
         this.vy += ay * TimeStep;
 
-        // vx + vy calculation here based on acceleration and acceleration_angle
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
+        // Update actual position
+        const nextX = (this.vx * simulationSpeedRef.current) / 100;
+        const nextY = (this.vy * simulationSpeedRef.current) / 100;
+        this.x += nextX;
+        this.y += nextY;
+
+        // Calculate future positions (prediction)
+        this.calculateFuturePositions();
+      }
+
+      calculateFuturePositions() {
+        this.nextPositions = [{ x: this.x, y: this.y }]; // Start with current position
+
+        // Create temporary copies for simulation
+        let tempX = this.x;
+        let tempY = this.y;
+        let tempVx = this.vx;
+        let tempVy = this.vy;
+
+        const predictionSteps = futurePredictionRef.current; // How many steps ahead to predict
+        const predictionTimeStep = TimeStep * 2; // Larger time steps for prediction
+
+        for (let step = 0; step < predictionSteps; step++) {
+          let fx = 0;
+          let fy = 0;
+
+          // Calculate forces from all other particles at their CURRENT positions
+          particles.forEach((particle) => {
+            if (particle === this) return;
+
+            const dx = particle.x - tempX;
+            const dy = particle.y - tempY;
+            const r = Math.sqrt(dx ** 2 + dy ** 2);
+
+            const minDistance = this.size + particle.size;
+            const effectiveDistance = Math.max(r, minDistance);
+
+            if (r > 0) {
+              const force =
+                (gravConstantRef.current * this.mass * particle.mass) /
+                effectiveDistance ** 2;
+              fx += (force * dx) / r;
+              fy += (force * dy) / r;
+            }
+          });
+
+          // Update temporary velocity and position
+          const ax = fx / this.mass;
+          const ay = fy / this.mass;
+
+          tempVx += ax * predictionTimeStep;
+          tempVy += ay * predictionTimeStep;
+
+          tempX += (tempVx * simulationSpeedRef.current) / 100;
+          tempY += (tempVy * simulationSpeedRef.current) / 100;
+
+          // Store every few steps to avoid too many points
+          if (step % 5 === 0) {
+            this.nextPositions.push({ x: tempX, y: tempY });
+          }
+        }
       }
 
       draw() {
+        // Draw the prediction trail
+        if (this.nextPositions.length > 1) {
+          ctx.strokeStyle = theme.secondary;
+          ctx.globalAlpha = 0.3; // Make trail semi-transparent
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(this.nextPositions[0].x, this.nextPositions[0].y);
+          for (let i = 1; i < this.nextPositions.length; i++) {
+            ctx.lineTo(this.nextPositions[i].x, this.nextPositions[i].y);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = 1.0; // Reset alpha
+        }
+
+        // Draw the current particle
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
@@ -129,7 +204,7 @@ export default function ThreeBody() {
       window.removeEventListener("resize", resizeCanvas);
       particles = [];
     };
-  }, []);
+  }, [rerenderSim]);
 
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
@@ -158,18 +233,33 @@ export default function ThreeBody() {
       <div style={{ zIndex: 3000 }}>
         <ChangerGroup
           valueArrays={[
-            // {
-            //   title: "Particle Count:",
-            //   valueRef: particleCountRef,
-            //   minValue: "100",
-            //   maxValue: "10000",
-            //   type: "slider",
-            // },
+            {
+              title: "Particle Count:",
+              valueRef: particleCountRef,
+              minValue: "1",
+              maxValue: "30.0",
+              type: "slider",
+            },
             {
               title: "Simulation Speed:",
               valueRef: simulationSpeedRef,
-              minValue: "1",
+              minValue: "0",
               maxValue: "200.0",
+              type: "slider",
+            },
+            {
+              title: "",
+              type: "button",
+              buttonText: "Rerender Simulation",
+              callback: () => {
+                setRerenderSim((prev) => !prev);
+              },
+            },
+            {
+              title: "Future Predictions:",
+              valueRef: futurePredictionRef,
+              minValue: "0.0",
+              maxValue: "500.0",
               type: "slider",
             },
           ]}
