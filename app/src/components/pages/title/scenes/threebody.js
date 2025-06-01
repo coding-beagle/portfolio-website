@@ -2,12 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function ThreeBody() {
+export default function GravitalOrbs() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(10);
-  const gravConstantRef = useRef(1);
-  const futurePredictionRef = useRef(100);
+  const gravConstantRef = useRef(5);
+  const futurePredictionRef = useRef(0);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
@@ -41,7 +41,7 @@ export default function ThreeBody() {
         this.y = y;
         this.vx = Math.random() * 2 - 1; // random initial velocities
         this.vy = Math.random() * 2 - 1; // random initial velocities
-        this.size = Math.random() * 20 + 5; // random size
+        this.size = Math.random() * 10 + 5; // random size
         this.mass = this.size ** 2 * 3.14 * 1.5; // mass proportional to size
         this.color = colorRef.current;
         this.acceleration = 0;
@@ -408,6 +408,21 @@ export default function ThreeBody() {
               maxValue: "200.0",
               type: "slider",
             },
+
+            // {
+            //   title: "Future Predictions:",
+            //   valueRef: futurePredictionRef,
+            //   minValue: "0.0",
+            //   maxValue: "500.0",
+            //   type: "slider",
+            // },
+            {
+              title: "Gravitational Constant:",
+              valueRef: gravConstantRef,
+              minValue: "0.0",
+              maxValue: "10.0",
+              type: "slider",
+            },
             {
               title: "",
               type: "button",
@@ -415,20 +430,6 @@ export default function ThreeBody() {
               callback: () => {
                 setRerenderSim((prev) => !prev);
               },
-            },
-            {
-              title: "Future Predictions:",
-              valueRef: futurePredictionRef,
-              minValue: "0.0",
-              maxValue: "500.0",
-              type: "slider",
-            },
-            {
-              title: "Gravitational Constant:",
-              valueRef: gravConstantRef,
-              minValue: "0.0",
-              maxValue: "10.0",
-              type: "slider",
             },
           ]}
           rerenderSetter={setRender}
