@@ -6,7 +6,7 @@ export default function ThreeBody() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(10);
-  const gravConstantRef = useRef(10);
+  const gravConstantRef = useRef(1);
   const futurePredictionRef = useRef(100);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
@@ -30,14 +30,16 @@ export default function ThreeBody() {
     let TimeStep = 0.001;
     let lastTime = Date.now();
 
+    const gravConstantDivider = 5;
+
     class Body {
       constructor(x, y) {
         this.x = x;
         this.y = y;
         this.vx = Math.random() * 2 - 1; // random initial velocities
         this.vy = Math.random() * 2 - 1; // random initial velocities
-        this.size = Math.random() * 10 + 5; // random size
-        this.mass = this.size * this.size * 3.14 * 1; // mass proportional to size
+        this.size = Math.random() * 20 + 5; // random size
+        this.mass = this.size ** 2 * 3.14 * 1.5; // mass proportional to size
         this.color = colorRef.current;
         this.acceleration = 0;
         this.acceleration_angle = 0;
@@ -55,8 +57,12 @@ export default function ThreeBody() {
           const r = Math.sqrt(dx ** 2 + dy ** 2);
           const minDistance = this.size + particle.size;
 
-          // Check for collision
-          if (r <= minDistance && r > 0) {
+          // Check for collision (only process if this particle has lower index to avoid double processing)
+          if (
+            r <= minDistance &&
+            r > 0 &&
+            particles.indexOf(this) < particles.indexOf(particle)
+          ) {
             this.handleCollision(particle, dx, dy, r, minDistance);
           }
 
@@ -65,7 +71,9 @@ export default function ThreeBody() {
 
           if (r > 0) {
             const force =
-              (gravConstantRef.current * this.mass * particle.mass) /
+              ((gravConstantRef.current / gravConstantDivider) *
+                this.mass *
+                particle.mass) /
               effectiveDistance ** 2;
             fx += (force * dx) / r;
             fy += (force * dy) / r;
@@ -84,12 +92,13 @@ export default function ThreeBody() {
         const nextX = (this.vx * simulationSpeedRef.current) / 100;
         const nextY = (this.vy * simulationSpeedRef.current) / 100;
         this.x += nextX;
-        this.y += nextY; // Calculate future positions (prediction)
+        this.y += nextY;
+
+        // Calculate future positions (prediction)
         this.calculateFuturePositions();
       }
-
       handleCollision(particle, dx, dy, r, minDistance) {
-        // Separate overlapping particles
+        // Separate overlapping particles first
         const overlap = minDistance - r;
         const separationX = (dx / r) * overlap * 0.5;
         const separationY = (dy / r) * overlap * 0.5;
@@ -112,12 +121,12 @@ export default function ThreeBody() {
         // Calculate restitution (bounciness)
         const restitution = 0.8; // 0 = perfectly inelastic, 1 = perfectly elastic
 
-        // Calculate impulse scalar
+        // Calculate impulse scalar with proper mass distribution
         const impulse = -(1 + restitution) * normalVelocity;
         const totalMass = this.mass + particle.mass;
         const impulseScalar = impulse / totalMass;
 
-        // Apply impulse to velocities
+        // Apply impulse to velocities with correct mass ratios
         const impulseX = impulseScalar * (dx / r);
         const impulseY = impulseScalar * (dy / r);
 
@@ -127,10 +136,10 @@ export default function ThreeBody() {
         particle.vy -= impulseY * this.mass;
 
         // Add some energy dampening to prevent infinite bouncing
-        this.vx *= 0.95;
-        this.vy *= 0.95;
-        particle.vx *= 0.95;
-        particle.vy *= 0.95;
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+        particle.vx *= 0.98;
+        particle.vy *= 0.98;
       }
 
       calculateFuturePositions() {
@@ -162,7 +171,9 @@ export default function ThreeBody() {
 
             if (r > 0) {
               const force =
-                (gravConstantRef.current * this.mass * particle.mass) /
+                ((gravConstantRef.current / gravConstantDivider) *
+                  this.mass *
+                  particle.mass) /
                 effectiveDistance ** 2;
               fx += (force * dx) / r;
               fy += (force * dy) / r;
@@ -264,7 +275,7 @@ export default function ThreeBody() {
       window.removeEventListener("resize", resizeCanvas);
       particles = [];
     };
-  }, [rerenderSim]);
+  }, [rerenderSim, theme.secondary]);
 
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
@@ -325,8 +336,8 @@ export default function ThreeBody() {
             {
               title: "Gravitational Constant:",
               valueRef: gravConstantRef,
-              minValue: "0.01",
-              maxValue: "500.0",
+              minValue: "0.0",
+              maxValue: "10.0",
               type: "slider",
             },
           ]}
