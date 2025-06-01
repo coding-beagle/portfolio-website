@@ -6,7 +6,7 @@ export default function ThreeBody() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(10);
-  const gravConstantRef = useRef(500);
+  const gravConstantRef = useRef(10);
   const futurePredictionRef = useRef(100);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
@@ -27,7 +27,8 @@ export default function ThreeBody() {
     let particles = [];
     let animationFrameId;
 
-    const TimeStep = 0.001;
+    let TimeStep = 0.001;
+    let lastTime = Date.now();
 
     class Body {
       constructor(x, y) {
@@ -42,7 +43,6 @@ export default function ThreeBody() {
         this.acceleration_angle = 0;
         this.nextPositions = [{ x: this.x, y: this.y }];
       }
-
       update() {
         let fx = 0; // Force components
         let fy = 0;
@@ -53,9 +53,14 @@ export default function ThreeBody() {
           const dx = particle.x - this.x;
           const dy = particle.y - this.y;
           const r = Math.sqrt(dx ** 2 + dy ** 2);
+          const minDistance = this.size + particle.size;
+
+          // Check for collision
+          if (r <= minDistance && r > 0) {
+            this.handleCollision(particle, dx, dy, r, minDistance);
+          }
 
           // Add minimum distance to prevent extreme forces
-          const minDistance = this.size + particle.size;
           const effectiveDistance = Math.max(r, minDistance);
 
           if (r > 0) {
@@ -79,10 +84,53 @@ export default function ThreeBody() {
         const nextX = (this.vx * simulationSpeedRef.current) / 100;
         const nextY = (this.vy * simulationSpeedRef.current) / 100;
         this.x += nextX;
-        this.y += nextY;
-
-        // Calculate future positions (prediction)
+        this.y += nextY; // Calculate future positions (prediction)
         this.calculateFuturePositions();
+      }
+
+      handleCollision(particle, dx, dy, r, minDistance) {
+        // Separate overlapping particles
+        const overlap = minDistance - r;
+        const separationX = (dx / r) * overlap * 0.5;
+        const separationY = (dy / r) * overlap * 0.5;
+
+        this.x -= separationX;
+        this.y -= separationY;
+        particle.x += separationX;
+        particle.y += separationY;
+
+        // Calculate relative velocity
+        const relativeVx = this.vx - particle.vx;
+        const relativeVy = this.vy - particle.vy;
+
+        // Calculate relative velocity along collision normal
+        const normalVelocity = relativeVx * (dx / r) + relativeVy * (dy / r);
+
+        // Do not resolve if velocities are separating
+        if (normalVelocity > 0) return;
+
+        // Calculate restitution (bounciness)
+        const restitution = 0.8; // 0 = perfectly inelastic, 1 = perfectly elastic
+
+        // Calculate impulse scalar
+        const impulse = -(1 + restitution) * normalVelocity;
+        const totalMass = this.mass + particle.mass;
+        const impulseScalar = impulse / totalMass;
+
+        // Apply impulse to velocities
+        const impulseX = impulseScalar * (dx / r);
+        const impulseY = impulseScalar * (dy / r);
+
+        this.vx += impulseX * particle.mass;
+        this.vy += impulseY * particle.mass;
+        particle.vx -= impulseX * this.mass;
+        particle.vy -= impulseY * this.mass;
+
+        // Add some energy dampening to prevent infinite bouncing
+        this.vx *= 0.95;
+        this.vy *= 0.95;
+        particle.vx *= 0.95;
+        particle.vy *= 0.95;
       }
 
       calculateFuturePositions() {
@@ -169,9 +217,12 @@ export default function ThreeBody() {
         particles.push(new Body(x, y));
       }
     }
-
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const currentTime = Date.now();
+      TimeStep = (currentTime - lastTime) / 1000; // Convert to seconds
+      lastTime = currentTime;
 
       // Adjust particle count
       const currentParticleCount = particles.length;
@@ -184,12 +235,21 @@ export default function ThreeBody() {
       } else if (currentParticleCount > particleCountRef.current) {
         particles.splice(particleCountRef.current);
       }
-
       particles.forEach((particle) => {
         particle.update();
         particle.draw();
       });
       animationFrameId = requestAnimationFrame(animate);
+
+      const allParticlesOffScreen = particles.every(
+        (particle) =>
+          particle.x > canvas.width ||
+          particle.x < 0 ||
+          particle.y > canvas.height ||
+          particle.y < 0
+      );
+
+      if (allParticlesOffScreen) setRerenderSim((prev) => !prev);
     }
 
     initParticles();
@@ -259,6 +319,13 @@ export default function ThreeBody() {
               title: "Future Predictions:",
               valueRef: futurePredictionRef,
               minValue: "0.0",
+              maxValue: "500.0",
+              type: "slider",
+            },
+            {
+              title: "Gravitational Constant:",
+              valueRef: gravConstantRef,
+              minValue: "0.01",
               maxValue: "500.0",
               type: "slider",
             },
