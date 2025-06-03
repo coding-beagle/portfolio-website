@@ -42,7 +42,7 @@ export default function GravitalOrbs() {
         this.vx = Math.random() * 2 - 1; // random initial velocities
         this.vy = Math.random() * 2 - 1; // random initial velocities
         this.size = Math.random() * 10 + 5; // random size
-        this.mass = this.size ** 2 * 3.14 * 1.5; // mass proportional to size
+        this.mass = this.size ** 2 * 3.14 * 20; // mass proportional to size
         this.color = colorRef.current;
         this.acceleration = 0;
         this.acceleration_angle = 0;
@@ -62,7 +62,8 @@ export default function GravitalOrbs() {
 
           // Check for collision (only process if this particle has lower index to avoid double processing)
           if (
-            r > minDistance &&
+            r < minDistance &&
+            r > 0 &&
             particles.indexOf(this) < particles.indexOf(particle)
           ) {
             this.handleCollision(particle, dx, dy, r, minDistance);
@@ -397,7 +398,7 @@ export default function GravitalOrbs() {
               title: "Particle Count:",
               valueRef: particleCountRef,
               minValue: "1",
-              maxValue: "30.0",
+              maxValue: "100.0",
               type: "slider",
             },
             {
