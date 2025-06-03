@@ -62,8 +62,7 @@ export default function GravitalOrbs() {
 
           // Check for collision (only process if this particle has lower index to avoid double processing)
           if (
-            r <= minDistance &&
-            r > 0 &&
+            r > minDistance &&
             particles.indexOf(this) < particles.indexOf(particle)
           ) {
             this.handleCollision(particle, dx, dy, r, minDistance);
