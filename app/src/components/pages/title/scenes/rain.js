@@ -26,7 +26,7 @@ export default function Rain() {
     const windSpeed = 0.2;
     let animationFrameId;
     const maxFallSpeed = 13;
-    const maxWindSpeed = Math.random() * 10;
+    const maxWindSpeed = (Math.random() - 0.5) * 10;
 
     const recalculateRect = () => {
       let rect = element.getBoundingClientRect();
@@ -114,13 +114,15 @@ export default function Rain() {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
-        } else {
-          if (this.vy < maxWindSpeed) {
-            this.vx += windSpeed;
-          }
-          if (this.vy < maxFallSpeed) {
-            this.vy += gravity;
-          }
+        }
+
+        if (this.vx < maxWindSpeed && maxWindSpeed > 0.0) {
+          this.vx += windSpeed;
+        } else if (this.vx > maxWindSpeed && maxWindSpeed < 0.0) {
+          this.vx -= windSpeed;
+        }
+        if (this.vy < maxFallSpeed) {
+          this.vy += gravity;
         }
 
         this.x += (this.vx * simulationSpeedRef.current) / 100;
