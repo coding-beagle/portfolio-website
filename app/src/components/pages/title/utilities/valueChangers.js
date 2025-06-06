@@ -97,7 +97,6 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                   Simulation Options
                 </div>
                 <div style={{ width: "100%" }}>
-                  {/* Render the value changers UI here for mobile */}
                   {valueArrays.map((element, index) => {
                     if (Array.isArray(element)) {
                       return (
@@ -252,7 +251,19 @@ export function Slider({
         color: theme.accent,
       }}
     >
-      <span style={{ minWidth: 90 }}>{title}</span>
+      <span
+        style={{
+          minWidth: 90,
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
+        }}
+      >
+        {title}
+      </span>
       <input
         type="range"
         min={minValue}
@@ -415,7 +426,22 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
     <div
       style={{ display: "flex", alignItems: "center", marginBottom: "0.3em" }}
     >
-      {title && <span style={{ minWidth: 120, marginRight: 6 }}>{title}</span>}
+      {title && (
+        <span
+          style={{
+            minWidth: 120,
+            marginRight: 6,
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
+            KhtmlUserSelect: "none",
+            MozUserSelect: "none",
+            userSelect: "none",
+            msUserSelect: "none",
+          }}
+        >
+          {title}
+        </span>
+      )}
       <button
         ref={btnRef}
         onClick={(e) => {
@@ -555,7 +581,19 @@ export function DisplayEntity({
       );
     }
     displayValue = (
-      <div style={{ textAlign: "left", fontFamily: "monospace", fontSize: 13 }}>
+      <div
+        style={{
+          textAlign: "left",
+          fontFamily: "monospace",
+          fontSize: 13,
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
+        }}
+      >
         {lines.map((line, idx) => (
           <div key={idx}>{line}</div>
         ))}
@@ -569,7 +607,20 @@ export function DisplayEntity({
       style={{ display: "flex", alignItems: "center", marginBottom: "0.3em" }}
     >
       {title && (
-        <span style={{ minWidth: 0, marginRight: "1em" }}>{title}</span>
+        <span
+          style={{
+            minWidth: 0,
+            marginRight: "1em",
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
+            KhtmlUserSelect: "none",
+            MozUserSelect: "none",
+            userSelect: "none",
+            msUserSelect: "none",
+          }}
+        >
+          {title}
+        </span>
       )}
       <span
         style={{
@@ -585,6 +636,12 @@ export function DisplayEntity({
           textAlign: "center",
           display: "flex",
           alignItems: "center",
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
         }}
       >
         {displayValue}
