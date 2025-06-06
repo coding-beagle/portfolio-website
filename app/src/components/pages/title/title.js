@@ -30,6 +30,7 @@ import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
 import Plinko from "./scenes/plinko";
 import GravitalOrbs from "./scenes/threebody";
+import Liquid from "./scenes/liquid";
 
 const Scenes = {
   0: { component: Snow },
@@ -44,6 +45,7 @@ const Scenes = {
   9: { component: Fireworks },
   10: { component: Plinko },
   11: { component: GravitalOrbs },
+  12: { component: Liquid },
 };
 
 const sceneNameToIndex = {
@@ -59,6 +61,7 @@ const sceneNameToIndex = {
   fireworks: 9,
   plinko: 10,
   gravitalorbs: 11,
+  liquid: 12,
 };
 
 export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
