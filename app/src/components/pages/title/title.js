@@ -29,7 +29,7 @@ import Plants from "./scenes/plants";
 import Fire from "./scenes/fire";
 import Fireworks from "./scenes/firework";
 import Plinko from "./scenes/plinko";
-import GravitalOrbs from "./scenes/threebody";
+import GravitalOrbs from "./scenes/gravitalorbs";
 import Liquid from "./scenes/liquid";
 
 const Scenes = {

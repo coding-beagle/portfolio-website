@@ -10,6 +10,8 @@ export default function Stars() {
   const [particleCount, setParticleCount] = useState(120);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
+  const [rerenderSim, setRerenderSim] = useState(false);
+
   const mouseClickRef = useRef(false);
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
@@ -389,7 +391,7 @@ export default function Stars() {
             });
           }
 
-          if (!(distance < mouseTriggerDistance && mouseClickRef.current)) {
+          if (!mouseClickRef.current) {
             this.isActiveCounter++;
           }
 
@@ -409,7 +411,7 @@ export default function Stars() {
             }
           }
 
-          if (distance < mouseTriggerDistance && mouseClickRef.current) {
+          if (mouseClickRef.current) {
             const angle = Math.atan2(mouseDy, mouseDx);
             this.dx =
               this.dx +
@@ -611,7 +613,7 @@ export default function Stars() {
       canvas.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("resize", resizeCanvas);
     };
-  }, [particleCount, theme]);
+  }, [particleCount, theme, rerenderSim]);
 
   return (
     <>
@@ -641,6 +643,13 @@ export default function Stars() {
               minValue: "1",
               maxValue: "500.0",
               type: "slider",
+            },
+            {
+              type: "button",
+              buttonText: "Rerender Simulation",
+              callback: () => {
+                setRerenderSim((prev) => !prev);
+              },
             },
           ]}
           rerenderSetter={setRender}

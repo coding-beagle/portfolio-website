@@ -100,7 +100,7 @@ export default function Liquid() {
         this.vx = 0;
         this.vy = Math.random() * 10 + 5;
         this.size = Math.random() * 10 + 5;
-        this.color = getCloseColour(theme.secondary, 10, 10, 10);
+        this.color = getCloseColour(theme.secondary, 10, 10, 60);
         this.grid = { x: 0, y: 0 };
       }
 
