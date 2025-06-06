@@ -5,9 +5,10 @@ import { ChangerGroup } from "../utilities/valueChangers";
 export default function Plinko() {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
-  const particleCountRef = useRef(200);
+  const particleCountRef = useRef(100);
   const gridSpacingX = useRef(100);
   const gridSpacingY = useRef(100);
+  const bouncynessRef = useRef(100);
   const colorRef = useRef(theme.accent);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
@@ -38,9 +39,12 @@ export default function Plinko() {
         this.gridPositions = [];
       }
 
-      inGrid(x, y) {
+      inGrid(x, y, size) {
         return this.gridPositions.find((val) => {
-          if (Math.abs(x - val[0]) < hitbox && Math.abs(y - val[1]) < hitbox) {
+          let dx, dy;
+          dx = (x - val[0]) ** 2;
+          dy = (y - val[1]) ** 2;
+          if (dx + dy < (hitbox + size) ** 2) {
             return val;
           }
         });
@@ -91,7 +95,7 @@ export default function Plinko() {
         this.y = y;
         this.vx = Math.random() * 2 - 4;
         this.vy = Math.random() * 10 + 5;
-        this.size = Math.random() * 5 + 2.5;
+        this.size = Math.random() * 10 + 5;
         this.color = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
           .toString(16)
           .padStart(6, "0")}`;
@@ -112,14 +116,14 @@ export default function Plinko() {
 
       update() {
         this.vy += gravity;
-        const inGridVal = grid.inGrid(this.x, this.y);
+        const inGridVal = grid.inGrid(this.x, this.y, this.size);
         if (inGridVal) {
           const dx = this.x - inGridVal[0];
           const dy = this.y - inGridVal[1];
           const angle2 = Math.atan2(dy, dx);
 
-          this.vx = Math.cos(angle2) * 2;
-          this.vy = Math.sin(angle2) * 2;
+          this.vx = (Math.cos(angle2) * bouncynessRef.current) / 100;
+          this.vy = (Math.sin(angle2) * bouncynessRef.current) / 100;
         }
 
         this.x += (this.vx * simulationSpeedRef.current) / 100;
@@ -216,7 +220,7 @@ export default function Plinko() {
             {
               title: "Particle Count:",
               valueRef: particleCountRef,
-              minValue: "100",
+              minValue: "10",
               maxValue: "3000",
               type: "slider",
             },
@@ -225,6 +229,13 @@ export default function Plinko() {
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
+            },
+            {
+              title: "Ball Bounce Factor:",
+              valueRef: bouncynessRef,
+              minValue: "100",
+              maxValue: "300",
               type: "slider",
             },
             {
