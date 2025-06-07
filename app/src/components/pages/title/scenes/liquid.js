@@ -92,6 +92,7 @@ export default function Liquid() {
 
     const num_particle_rows = 100;
     const num_particle_columns = 100;
+    const lifespan = 1500;
 
     class Particle {
       constructor(x, y) {
@@ -102,6 +103,7 @@ export default function Liquid() {
         this.size = Math.random() * 10 + 5;
         this.color = getCloseColour(theme.secondary, 10, 10, 60);
         this.grid = { x: 0, y: 0 };
+        this.timeAlive = 0;
       }
 
       colliding() {
@@ -121,6 +123,15 @@ export default function Liquid() {
       }
 
       update() {
+        this.timeAlive += 1;
+        if (this.timeAlive > lifespan) {
+          const me = particles.findIndex((particle) => {
+            return particle === this;
+          });
+          if (me !== -1) {
+            particles.splice(me, 1);
+          }
+        }
         if (element) {
           if (inElement(rect_padded, this.x, this.y)) {
             this.vy = 0;
