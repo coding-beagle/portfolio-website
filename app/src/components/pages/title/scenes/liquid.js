@@ -9,6 +9,8 @@ export default function Liquid() {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
+  const rightClickRef = useRef(false);
+  const mouseShieldRadiusRef = useRef(100);
   const particleCountRef = useRef(0);
   const clearParticles = useRef(null);
 
@@ -61,12 +63,21 @@ export default function Liquid() {
       };
     };
 
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
+    const handleMouseDown = (e) => {
+      if (e.buttons === 2) {
+        rightClickRef.current = true;
+      } else {
+        mouseClickRef.current = true;
+      }
+    };
+
+    const handleContextMenu = (e) => {
+      e.preventDefault();
     };
 
     const handleMouseUp = () => {
       mouseClickRef.current = false;
+      rightClickRef.current = false;
     };
 
     // --- Touch event handler to prevent scroll on drag ---
@@ -138,6 +149,16 @@ export default function Liquid() {
           }
         }
 
+        const dx = this.x - mousePosRef.current.x;
+        const dy = this.y - mousePosRef.current.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < mouseShieldRadiusRef.current && rightClickRef.current) {
+          const angle = Math.atan2(dy, dx);
+          this.vx = Math.cos(angle) * 5;
+          this.vy = Math.sin(angle) * 5;
+        }
+
         const colliding_particle = this.colliding();
         if (colliding_particle) {
           const dx = this.x - colliding_particle.x;
@@ -153,6 +174,8 @@ export default function Liquid() {
 
         if (this.y + this.size < canvasRef.current.height) {
           this.vy += gravity;
+        } else {
+          this.vy -= 1;
         }
 
         if (this.x < 0.0) {
@@ -198,6 +221,13 @@ export default function Liquid() {
 
       particleCountRef.current = particles.length;
 
+      if (element) {
+        if (Math.random() > 0.95) {
+          // throttle this
+          recalculateRect();
+        }
+      }
+
       if (mouseClickRef.current) {
         for (let i = 0; i < Math.floor(Math.random() * 10); i++) {
           const x =
@@ -224,6 +254,7 @@ export default function Liquid() {
     window.addEventListener("touchmove", handleMouseMove);
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("contextmenu", handleContextMenu);
     // Prevent default scroll on touch drag over canvas
     if (canvas) {
       canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
@@ -234,6 +265,7 @@ export default function Liquid() {
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("touchmove", handleMouseMove);
       window.removeEventListener("pointerdown", handleMouseDown);
@@ -272,6 +304,13 @@ export default function Liquid() {
               valueRef: simulationSpeedRef,
               minValue: "1",
               maxValue: "200.0",
+              type: "slider",
+            },
+            {
+              title: "Right Click Umbrella Radius:",
+              valueRef: mouseShieldRadiusRef,
+              minValue: "10.0",
+              maxValue: "300.0",
               type: "slider",
             },
             {
