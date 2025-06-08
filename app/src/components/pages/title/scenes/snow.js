@@ -76,7 +76,7 @@ export default function Snow() {
         }
 
         if (Math.abs(this.vy) > maxSpeed) {
-          this.vy -= Math.random(0.1, 0.5) * Math.sign(gravity);
+          this.vy *= 0.97;
         }
 
         if (Math.abs(this.vy) < maxSpeed) {
