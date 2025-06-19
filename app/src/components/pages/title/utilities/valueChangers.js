@@ -1,8 +1,6 @@
 import React, { useRef, useEffect, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../contexts/MobileContext";
-import { DatePicker } from "antd";
-import dayjs from "dayjs";
 
 export default function ValueChangers({ rerenderSetter, valueArrays }) {
   const { theme } = useTheme();
@@ -249,13 +247,12 @@ export function DateChanger({
         {title}
       </span>
       <div style={{ zIndex: 10 }}>
-        <DatePicker
+        <input
+          type="date"
+          defaultValue={defaultVal !== null ? defaultVal : null}
           onChange={(val) => {
-            callback(val);
+            callback({ $d: new Date(val.target.value) });
           }}
-          defaultValue={
-            defaultVal !== null ? dayjs(defaultVal, "YYYY-MM-DD") : null
-          }
         />
       </div>
     </div>
