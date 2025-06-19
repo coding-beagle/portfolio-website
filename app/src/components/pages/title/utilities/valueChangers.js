@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import { DatePicker } from "antd";
+import dayjs from "dayjs";
 
 export default function ValueChangers({ rerenderSetter, valueArrays }) {
   const { theme } = useTheme();
@@ -143,6 +145,10 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                                   rerenderSetter={rerenderSetter}
                                 />
                               );
+                            if (subElement.type === "date")
+                              return (
+                                <DateChanger key={subIndex} {...subElement} />
+                              );
                             return null;
                           })}
                         </div>
@@ -180,6 +186,8 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
                           rerenderSetter={rerenderSetter}
                         />
                       );
+                    if (element.type === "date")
+                      return <DateChanger key={index} {...element} />;
                     return null;
                   })}
                 </div>
@@ -202,6 +210,55 @@ export default function ValueChangers({ rerenderSetter, valueArrays }) {
         </div>
       )}
     </>
+  );
+}
+
+export function DateChanger({
+  rerenderSetter,
+  title,
+  valueRef,
+  minValue,
+  maxValue,
+  callback = null,
+  isState = false,
+  valueSetter = null,
+  defaultVal = null,
+}) {
+  const { theme } = useTheme();
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        marginBottom: "0.5em",
+        fontFamily: theme.font,
+        color: theme.accent,
+      }}
+    >
+      <span
+        style={{
+          minWidth: 90,
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
+        }}
+      >
+        {title}
+      </span>
+      <div style={{ zIndex: 10 }}>
+        <DatePicker
+          onChange={(val) => {
+            callback(val);
+          }}
+          defaultValue={
+            defaultVal !== null ? dayjs(defaultVal, "YYYY-MM-DD") : null
+          }
+        />
+      </div>
+    </div>
   );
 }
 
@@ -791,6 +848,10 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                                 rerenderSetter={rerenderSetter}
                               />
                             );
+                          if (subElement.type === "date")
+                            return (
+                              <DateChanger key={subIndex} {...subElement} />
+                            );
                           return null;
                         })}
                       </div>
@@ -828,6 +889,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                         rerenderSetter={rerenderSetter}
                       />
                     );
+                  if (element.type === "date")
+                    return <DateChanger key={index} {...element} />;
                   return null;
                 })}
               </div>
@@ -890,6 +953,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
                       rerenderSetter={rerenderSetter}
                     />
                   );
+                if (subElement.type === "date")
+                  return <DateChanger key={subIndex} {...subElement} />;
                 return null;
               })}
             </div>
@@ -923,6 +988,8 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
               rerenderSetter={rerenderSetter}
             />
           );
+        if (element.type === "date")
+          return <DateChanger key={index} {...element} />;
         return null;
       })}
     </div>
