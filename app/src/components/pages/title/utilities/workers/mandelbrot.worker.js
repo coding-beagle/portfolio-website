@@ -7,8 +7,6 @@ export default () => {
       data.rowPixels,
       data.rowY, // Correctly pass rowY as a separate parameter
       data.zoomLevel,
-      data.transformX,
-      data.transformY,
       data.canvasWidth,
       data.canvasHeight,
       data.centerX,
@@ -16,6 +14,7 @@ export default () => {
       data.xAspectRatio,
       data.yAspectRatio
     );
+
     // eslint-disable-next-line no-restricted-globals
     self.postMessage({
       results,
@@ -27,8 +26,6 @@ export default () => {
     rowPixels,
     rowY, // Correctly pass rowY as a separate parameter
     zoomLevel,
-    transformX,
-    transformY,
     canvasWidth,
     canvasHeight,
     centerX,
@@ -41,8 +38,6 @@ export default () => {
         pixelX,
         rowY, // Use rowY here
         zoomLevel,
-        transformX,
-        transformY,
         canvasWidth,
         canvasHeight,
         centerX,
@@ -57,8 +52,6 @@ export default () => {
     pixelX,
     pixelY,
     zoomLevel,
-    transformX,
-    transformY,
     canvasWidth,
     canvasHeight,
     centerX,
@@ -70,8 +63,6 @@ export default () => {
       pixelX,
       pixelY,
       zoomLevel,
-      transformX,
-      transformY,
       canvasWidth,
       canvasHeight,
       centerX,
@@ -102,8 +93,6 @@ export default () => {
     pixelX,
     pixelY,
     zoomLevel,
-    transformX,
-    transformY,
     canvasWidth,
     canvasHeight,
     centerX,
@@ -116,8 +105,8 @@ export default () => {
     const viewHeight = yAspectRatio / zoomLevel; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
-    const percentX = (pixelX + transformX) / canvasWidth;
-    const percentY = (pixelY + transformY) / canvasHeight;
+    const percentX = pixelX / canvasWidth;
+    const percentY = pixelY / canvasHeight;
 
     // Map to complex plane coordinates, centered on centerX,centerY
     return [

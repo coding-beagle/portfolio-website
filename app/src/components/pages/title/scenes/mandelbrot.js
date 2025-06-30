@@ -70,8 +70,6 @@ export default function Mandelbrot({ visibleUI }) {
   ];
 
   const maxIterCount = 2000;
-  let transformX = 0;
-  let transformY = 0;
 
   function mapToComplex(pixelX, pixelY) {
     // Return early if canvasRef.current is null
@@ -86,9 +84,8 @@ export default function Mandelbrot({ visibleUI }) {
     const viewHeight = 2 / zoomLevelRef.current; // 2.25 units high at zoom level 1
 
     // Convert pixel coordinates to percentages of canvas
-    const percentX = (pixelX + transformX) / canvasRef.current.width;
-    const percentY = (pixelY + transformY) / canvasRef.current.height;
-
+    const percentX = pixelX / canvasRef.current.width;
+    const percentY = pixelY / canvasRef.current.height;
     // Map to complex plane coordinates, centered on centerX,centerY
     return [
       centerXRef.current + (percentX - 0.5) * viewWidth,
@@ -362,29 +359,6 @@ export default function Mandelbrot({ visibleUI }) {
   useEffect(() => {
     const canvas = canvasRef.current;
 
-    function mapToComplex(pixelX, pixelY) {
-      // Return early if canvasRef.current is null
-      if (!canvasRef.current) {
-        return [0, 0];
-      }
-
-      // Calculate the view dimensions in the complex plane
-      const viewWidth =
-        ((canvasRef.current.width / canvasRef.current.height) * 2) /
-        zoomLevelRef.current; // 4 units wide at zoom level 1
-      const viewHeight = 2 / zoomLevelRef.current; // 2.25 units high at zoom level 1
-
-      // Convert pixel coordinates to percentages of canvas
-      const percentX = (pixelX + transformX) / canvasRef.current.width;
-      const percentY = (pixelY + transformY) / canvasRef.current.height;
-
-      // Map to complex plane coordinates, centered on centerX,centerY
-      return [
-        centerXRef.current + (percentX - 0.5) * viewWidth,
-        centerYRef.current + (percentY - 0.5) * viewHeight,
-      ];
-    }
-
     // Helper function to process a single work unit with a specific worker
     async function processWorkUnit(workerIdx, workUnit, drawGeneration, ctx) {
       const worker = workerPoolRef.current[workerIdx];
@@ -398,8 +372,6 @@ export default function Mandelbrot({ visibleUI }) {
           rowPixels: chunk,
           rowY: y,
           zoomLevel: zoomLevelRef.current,
-          transformX: transformX,
-          transformY: transformY,
           canvasWidth: canvasRef.current.width,
           canvasHeight: canvasRef.current.height,
           centerX: centerXRef.current,
