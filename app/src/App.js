@@ -3,7 +3,12 @@ import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
 import Title from "./components/pages/title/title";
 import { ThemeProvider, useTheme } from "./themes/ThemeProvider";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faMoon, faSun } from "@fortawesome/free-solid-svg-icons";
+import {
+  faEye,
+  faEyeSlash,
+  faMoon,
+  faSun,
+} from "@fortawesome/free-solid-svg-icons";
 import { MobileContext } from "./contexts/MobileContext";
 
 // Helper to detect mobile devices
@@ -30,6 +35,10 @@ function AppWrapper() {
   const [iconAnim, setIconAnim] = useState(false);
   const [pendingTheme, setPendingTheme] = useState(themeName);
 
+  const [UIShowiconAnim, setUIShowIconAnim] = useState(false);
+  const [pendingShowUI, setPendingShowUI] = useState("hidden");
+  const [visibleUI, setVisibleUI] = useState(true);
+
   // Handler for animated theme toggle
   const handleThemeToggle = () => {
     setIconAnim(true);
@@ -37,6 +46,16 @@ function AppWrapper() {
       toggleTheme();
       setPendingTheme(themeName === "dark" ? "light" : "dark");
       setIconAnim(false);
+    }, 250); // Animation duration before switching
+  };
+
+  // Handler for animated UI visibility toggle
+  const handleVisibleToggle = () => {
+    setUIShowIconAnim(true);
+    setTimeout(() => {
+      setVisibleUI((prev) => !prev);
+      setPendingShowUI(pendingShowUI === "hidden" ? "showing" : "hidden");
+      setUIShowIconAnim(false);
     }, 250); // Animation duration before switching
   };
 
@@ -52,12 +71,83 @@ function AppWrapper() {
         position: "relative",
       }}
     >
-      <Title text={path} initialScene={scene?.toUpperCase()} />
+      <Title
+        text={path}
+        initialScene={scene?.toUpperCase()}
+        visibleUI={visibleUI}
+      />
+      {visibleUI && (
+        <button
+          onClick={handleThemeToggle}
+          style={{
+            position: "fixed",
+            left: "1em",
+            bottom: "1em",
+            zIndex: 9999,
+            background: theme.accent,
+            color: theme.primary,
+            border: "none",
+            borderRadius: "50%",
+            width: "3em",
+            height: "3em",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            cursor: "pointer",
+            fontSize: "1.5em",
+            transition: "background 0.3s, color 0.3s",
+            overflow: "hidden",
+          }}
+          aria-label={
+            themeName === "dark"
+              ? "Switch to Light Mode"
+              : "Switch to Dark Mode"
+          }
+          title={
+            themeName === "dark"
+              ? "Switch to Light Mode"
+              : "Switch to Dark Mode"
+          }
+        >
+          {pendingTheme === "dark" ? (
+            <span
+              style={{
+                display: "inline-block",
+                transition:
+                  "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+                transform: iconAnim
+                  ? "translateY(40px) scale(0.7) rotate(-20deg)"
+                  : "translateY(0) scale(1) rotate(0deg)",
+                opacity: iconAnim ? 0 : 1,
+                position: "absolute",
+              }}
+            >
+              <FontAwesomeIcon icon={faSun} />
+            </span>
+          ) : (
+            <span
+              style={{
+                display: "inline-block",
+                transition:
+                  "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+                transform: iconAnim
+                  ? "translateY(40px) scale(0.7) rotate(20deg)"
+                  : "translateY(0) scale(1) rotate(0deg)",
+                opacity: iconAnim ? 0 : 1,
+                position: "absolute",
+              }}
+            >
+              <FontAwesomeIcon icon={faMoon} />
+            </span>
+          )}
+        </button>
+      )}
       <button
-        onClick={handleThemeToggle}
+        onClick={handleVisibleToggle}
         style={{
           position: "fixed",
-          left: "1em",
+          right: "1em",
           bottom: "1em",
           zIndex: 9999,
           background: theme.accent,
@@ -75,27 +165,23 @@ function AppWrapper() {
           transition: "background 0.3s, color 0.3s",
           overflow: "hidden",
         }}
-        aria-label={
-          themeName === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"
-        }
-        title={
-          themeName === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"
-        }
+        aria-label={visibleUI ? "Hide UI" : "Show UI"}
+        title={visibleUI ? "Hide UI" : "Show UI"}
       >
-        {pendingTheme === "dark" ? (
+        {pendingShowUI === "hidden" ? (
           <span
             style={{
               display: "inline-block",
               transition:
                 "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
-              transform: iconAnim
+              transform: UIShowiconAnim
                 ? "translateY(40px) scale(0.7) rotate(-20deg)"
                 : "translateY(0) scale(1) rotate(0deg)",
-              opacity: iconAnim ? 0 : 1,
+              opacity: UIShowiconAnim ? 0 : 1,
               position: "absolute",
             }}
           >
-            <FontAwesomeIcon icon={faSun} />
+            <FontAwesomeIcon icon={faEyeSlash} />
           </span>
         ) : (
           <span
@@ -103,14 +189,14 @@ function AppWrapper() {
               display: "inline-block",
               transition:
                 "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
-              transform: iconAnim
+              transform: UIShowiconAnim
                 ? "translateY(40px) scale(0.7) rotate(20deg)"
                 : "translateY(0) scale(1) rotate(0deg)",
-              opacity: iconAnim ? 0 : 1,
+              opacity: UIShowiconAnim ? 0 : 1,
               position: "absolute",
             }}
           >
-            <FontAwesomeIcon icon={faMoon} />
+            <FontAwesomeIcon icon={faEye} />
           </span>
         )}
       </button>

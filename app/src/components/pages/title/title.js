@@ -67,7 +67,11 @@ const sceneNameToIndex = {
   life: 13,
 };
 
-export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
+export default function Title({
+  text = "Nicholas Teague",
+  initialScene = "",
+  visibleUI = true,
+}) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
   const [isHover, setIsHover] = useState(false);
@@ -177,218 +181,227 @@ export default function Title({ text = "Nicholas Teague", initialScene = "" }) {
         }}
       >
         {createElement(renderScene())}
-        <header
-          ref={headerRef}
-          onMouseEnter={() => setIsHover(true)}
-          onMouseLeave={() => setIsHover(false)}
-          onMouseDown={(event) => {
-            if (intervalRef.current) {
-              clearInterval(intervalRef.current);
-              setAutoShake(false);
-            }
-            if (event.button === 0) {
+        {visibleUI && (
+          <header
+            ref={headerRef}
+            onMouseEnter={() => setIsHover(true)}
+            onMouseLeave={() => setIsHover(false)}
+            onMouseDown={(event) => {
+              if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                setAutoShake(false);
+              }
+              if (event.button === 0) {
+                triggerShake();
+                setCurrentScene(
+                  (currentScene + 1) % Object.keys(Scenes).length
+                );
+              }
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
               triggerShake();
-              setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
-            }
-          }}
-          onContextMenu={(event) => {
-            event.preventDefault();
-            triggerShake();
-            setCurrentScene(
-              currentScene - 1 < 0
-                ? Object.keys(Scenes).length - 1
-                : currentScene - 1
-            );
-          }}
-          style={{
-            fontSize: mobile ? "2.2em" : "5em", // Smaller on mobile
-            textAlign: "center",
-            color: isHover ? theme.secondary : theme.accent,
-            fontWeight: "bold",
-            zIndex: 10,
-            transition: "color 0.8s ease, transform 1.5s ease",
-            position: "relative",
-            cursor: "pointer",
-            WebkitUserSelect: "none",
-            WebkitTouchCallout: "none",
-            KhtmlUserSelect: "none",
-            MozUserSelect: "none",
-            userSelect: "none",
-            msUserSelect: "none",
-            animation:
-              clicked && animationNameRef.current
-                ? `${animationNameRef.current} 0.5s ease`
-                : "none",
-            whiteSpace: "pre-wrap",
-          }}
-          id="title"
-        >
-          {text === "" || text === undefined
-            ? "NTeague"
-            : decodeURIComponent(text).replace(/%0A/g, "\n")}
-        </header>
+              setCurrentScene(
+                currentScene - 1 < 0
+                  ? Object.keys(Scenes).length - 1
+                  : currentScene - 1
+              );
+            }}
+            style={{
+              fontSize: mobile ? "2.2em" : "5em", // Smaller on mobile
+              textAlign: "center",
+              color: isHover ? theme.secondary : theme.accent,
+              fontWeight: "bold",
+              zIndex: 10,
+              transition: "color 0.8s ease, transform 1.5s ease",
+              position: "relative",
+              cursor: "pointer",
+              WebkitUserSelect: "none",
+              WebkitTouchCallout: "none",
+              KhtmlUserSelect: "none",
+              MozUserSelect: "none",
+              userSelect: "none",
+              msUserSelect: "none",
+              animation:
+                clicked && animationNameRef.current
+                  ? `${animationNameRef.current} 0.5s ease`
+                  : "none",
+              whiteSpace: "pre-wrap",
+            }}
+            id="title"
+          >
+            {text === "" || text === undefined
+              ? "NTeague"
+              : decodeURIComponent(text).replace(/%0A/g, "\n")}
+          </header>
+        )}
         {/* Mobile: show menu button, else show scene and links inline */}
-        {mobile ? (
-          <>
-            <button
-              style={{
-                margin: "0.7em 0",
-                fontSize: "1em",
-                padding: "0.35em 1em",
-                borderRadius: "7px",
-                border: "none",
-                background: theme.accent, // Use accent color for button background
-                color: theme.primary, // Use primary color for text
-                fontWeight: "bold",
-                cursor: "pointer",
-                zIndex: 200,
-                boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-              }}
-              onClick={() => setShowMenu(true)}
-            >
-              Show More
-            </button>
-            {showMenu && (
-              <div
-                style={{
-                  position: "fixed",
-                  top: 0,
-                  left: 0,
-                  width: "100vw",
-                  height: "100vh",
-                  background: "rgba(0,0,0,0.7)",
-                  zIndex: 9999,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                onClick={() => setShowMenu(false)}
-              >
-                <div
+        {mobile
+          ? visibleUI && (
+              <>
+                <button
                   style={{
-                    background: theme.primary,
-                    color: theme.accent,
-                    borderRadius: "16px",
-                    padding: "2em 1.5em 1.5em 1.5em",
-                    minWidth: "70vw",
-                    maxWidth: "90vw",
-                    boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
-                    position: "relative",
-                    animation: "fadeInModal 0.22s cubic-bezier(.4,0,.2,1)",
+                    margin: "0.7em 0",
+                    fontSize: "1em",
+                    padding: "0.35em 1em",
+                    borderRadius: "7px",
+                    border: "none",
+                    background: theme.accent, // Use accent color for button background
+                    color: theme.primary, // Use primary color for text
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    zIndex: 200,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
                   }}
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={() => setShowMenu(true)}
                 >
-                  <button
+                  Show More
+                </button>
+                {showMenu && (
+                  <div
                     style={{
-                      position: "absolute",
-                      top: 10,
-                      right: 16,
-                      fontSize: "1.5em",
-                      background: "none",
-                      border: "none",
-                      color: theme.accent,
-                      cursor: "pointer",
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      width: "100vw",
+                      height: "100vh",
+                      background: "rgba(0,0,0,0.7)",
+                      zIndex: 9999,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                     onClick={() => setShowMenu(false)}
                   >
-                    ×
-                  </button>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      fontWeight: "bold",
-                      fontSize: "1.2em",
-                      marginBottom: "1em",
-                    }}
-                  >
-                    Current scene: {getSceneName(currentScene)}
-                  </div>
-                  <div
-                    id="linkIcons"
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      gap: "1em",
-                      fontSize: "2.2em",
-                      marginBottom: "0.5em",
-                    }}
-                  >
-                    <IconHover
-                      icon={faGithub}
-                      link="https://www.github.com/coding-beagle"
-                    />
-                    <IconHover
-                      icon={faLinkedin}
-                      link="https://www.linkedin.com/in/nicholasp-teague/"
-                    />
-                    <IconHover
-                      icon={faYoutube}
-                      link="https://www.youtube.com/@ntprod"
-                    />
-                  </div>
-                  {/* Hide value changers on mobile, show them in the popup */}
-                  <div id="valueChangersContainer" style={{ marginTop: "1em" }}>
-                    {/* If you use a ValueChangers component, render it here. Example: */}
-                    {/* <ValueChangers ...props /> */}
-                  </div>
-                  <style>{`
+                    <div
+                      style={{
+                        background: theme.primary,
+                        color: theme.accent,
+                        borderRadius: "16px",
+                        padding: "2em 1.5em 1.5em 1.5em",
+                        minWidth: "70vw",
+                        maxWidth: "90vw",
+                        boxShadow: "0 4px 24px rgba(0,0,0,0.2)",
+                        position: "relative",
+                        animation: "fadeInModal 0.22s cubic-bezier(.4,0,.2,1)",
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        style={{
+                          position: "absolute",
+                          top: 10,
+                          right: 16,
+                          fontSize: "1.5em",
+                          background: "none",
+                          border: "none",
+                          color: theme.accent,
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setShowMenu(false)}
+                      >
+                        ×
+                      </button>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "center",
+                          fontWeight: "bold",
+                          fontSize: "1.2em",
+                          marginBottom: "1em",
+                        }}
+                      >
+                        Current scene: {getSceneName(currentScene)}
+                      </div>
+                      <div
+                        id="linkIcons"
+                        style={{
+                          display: "flex",
+                          justifyContent: "center",
+                          gap: "1em",
+                          fontSize: "2.2em",
+                          marginBottom: "0.5em",
+                        }}
+                      >
+                        <IconHover
+                          icon={faGithub}
+                          link="https://www.github.com/coding-beagle"
+                        />
+                        <IconHover
+                          icon={faLinkedin}
+                          link="https://www.linkedin.com/in/nicholasp-teague/"
+                        />
+                        <IconHover
+                          icon={faYoutube}
+                          link="https://www.youtube.com/@ntprod"
+                        />
+                      </div>
+                      {/* Hide value changers on mobile, show them in the popup */}
+                      <div
+                        id="valueChangersContainer"
+                        style={{ marginTop: "1em" }}
+                      >
+                        {/* If you use a ValueChangers component, render it here. Example: */}
+                        {/* <ValueChangers ...props /> */}
+                      </div>
+                      <style>{`
                     @keyframes fadeInModal {
                       from { opacity: 0; transform: scale(0.97); }
                       to { opacity: 1; transform: scale(1); }
                     }
                   `}</style>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          : visibleUI && (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    fontWeight: "bold",
+                    fontSize: "1.5em",
+                    WebkitUserSelect: "none",
+                    WebkitTouchCallout: "none",
+                    KhtmlUserSelect: "none",
+                    MozUserSelect: "none",
+                    userSelect: "none",
+                    msUserSelect: "none",
+                    zIndex: 100,
+                    paddingBottom: "0.5em",
+                  }}
+                >
+                  Current scene: {getSceneName(currentScene)}
                 </div>
-              </div>
+                <div
+                  id="linkIcons"
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: "1em",
+                    fontSize: "3em",
+                    zIndex: 100,
+                    paddingBottom: "1em",
+                  }}
+                >
+                  <IconHover
+                    icon={faGithub}
+                    link="https://www.github.com/coding-beagle"
+                  />
+                  <IconHover
+                    icon={faLinkedin}
+                    link="https://www.linkedin.com/in/nicholasp-teague/"
+                  />
+                  <IconHover
+                    icon={faYoutube}
+                    link="https://www.youtube.com/@ntprod"
+                  />
+                </div>
+              </>
             )}
-          </>
-        ) : (
-          <>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                fontWeight: "bold",
-                fontSize: "1.5em",
-                WebkitUserSelect: "none",
-                WebkitTouchCallout: "none",
-                KhtmlUserSelect: "none",
-                MozUserSelect: "none",
-                userSelect: "none",
-                msUserSelect: "none",
-                zIndex: 100,
-                paddingBottom: "0.5em",
-              }}
-            >
-              Current scene: {getSceneName(currentScene)}
-            </div>
-            <div
-              id="linkIcons"
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: "1em",
-                fontSize: "3em",
-                zIndex: 100,
-                paddingBottom: "1em",
-              }}
-            >
-              <IconHover
-                icon={faGithub}
-                link="https://www.github.com/coding-beagle"
-              />
-              <IconHover
-                icon={faLinkedin}
-                link="https://www.linkedin.com/in/nicholasp-teague/"
-              />
-              <IconHover
-                icon={faYoutube}
-                link="https://www.youtube.com/@ntprod"
-              />
-            </div>
-          </>
-        )}
       </div>
     </>
   );
