@@ -32,6 +32,7 @@ export default function Liquid({ visibleUI }) {
     let animationFrameId;
 
     const recalculateRect = () => {
+      if (!element) return;
       let rect = element.getBoundingClientRect();
       rect_padded = {
         left: rect.left - titleShieldRadiusRef.current,
@@ -228,6 +229,10 @@ export default function Liquid({ visibleUI }) {
       //     recalculateRect();
       //   }
       // }
+
+      if (!element && document.getElementById("title")) {
+        var element = document.getElementById("title");
+      }
 
       if (mouseClickRef.current) {
         for (let i = 0; i < Math.floor(Math.random() * 10); i++) {

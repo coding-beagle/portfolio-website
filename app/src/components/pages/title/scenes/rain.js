@@ -30,6 +30,7 @@ export default function Rain({ visibleUI }) {
     const maxWindSpeed = (Math.random() - 0.5) * 10;
 
     const recalculateRect = () => {
+      if (!element) return;
       let rect = element.getBoundingClientRect();
       rect_padded = {
         left: rect.left - titleShieldRadiusRef.current,
@@ -169,7 +170,9 @@ export default function Rain({ visibleUI }) {
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+      if (!element && document.getElementById("title")) {
+        var element = document.getElementById("title");
+      }
       // Adjust particle count
       const currentParticleCount = particles.length;
       if (currentParticleCount < particleCountRef.current) {

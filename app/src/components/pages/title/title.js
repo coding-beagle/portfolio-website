@@ -165,6 +165,54 @@ export default function Title({
     );
   };
 
+  const handleLeftClickTitle = (event, overrideEvent = false) => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      setAutoShake(false);
+    }
+    if (event.button === 0 || overrideEvent) {
+      triggerShake();
+      setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
+    }
+  };
+
+  const handleRightClickTitle = (event) => {
+    if (event) event.preventDefault();
+    triggerShake();
+    setCurrentScene(
+      currentScene - 1 < 0 ? Object.keys(Scenes).length - 1 : currentScene - 1
+    );
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "ArrowLeft" || e.key === "a") {
+        if (visibleUI) {
+          setIsHover(true);
+          setTimeout(() => {
+            setIsHover(false);
+          }, 500);
+        }
+        handleRightClickTitle();
+      } else if (e.key === "ArrowRight" || e.key === "d") {
+        if (visibleUI) {
+          setIsHover(true);
+          setTimeout(() => {
+            setIsHover(false);
+          }, 500);
+        }
+
+        handleLeftClickTitle({ button: 0 }, true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleLeftClickTitle]);
+
   return (
     <>
       <div
@@ -186,27 +234,8 @@ export default function Title({
             ref={headerRef}
             onMouseEnter={() => setIsHover(true)}
             onMouseLeave={() => setIsHover(false)}
-            onMouseDown={(event) => {
-              if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                setAutoShake(false);
-              }
-              if (event.button === 0) {
-                triggerShake();
-                setCurrentScene(
-                  (currentScene + 1) % Object.keys(Scenes).length
-                );
-              }
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              triggerShake();
-              setCurrentScene(
-                currentScene - 1 < 0
-                  ? Object.keys(Scenes).length - 1
-                  : currentScene - 1
-              );
-            }}
+            onMouseDown={handleLeftClickTitle}
+            onContextMenu={handleRightClickTitle}
             style={{
               fontSize: mobile ? "2.2em" : "5em", // Smaller on mobile
               textAlign: "center",
