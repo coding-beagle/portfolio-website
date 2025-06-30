@@ -4,7 +4,7 @@ import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
 
-export default function Liquid() {
+export default function Liquid({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -13,6 +13,7 @@ export default function Liquid() {
   const mouseShieldRadiusRef = useRef(100);
   const particleCountRef = useRef(0);
   const clearParticles = useRef(null);
+  const visibleUIRef = useRef(visibleUI);
 
   const simulationSpeedRef = useRef(100);
   const brushRadiusRef = useRef(100);
@@ -143,7 +144,7 @@ export default function Liquid() {
             particles.splice(me, 1);
           }
         }
-        if (element) {
+        if (element && visibleUIRef.current) {
           if (inElement(rect_padded, this.x, this.y)) {
             this.vy = 0;
           }
@@ -221,12 +222,12 @@ export default function Liquid() {
 
       particleCountRef.current = particles.length;
 
-      if (element) {
-        if (Math.random() > 0.95) {
-          // throttle this
-          recalculateRect();
-        }
-      }
+      // if (element && visibleUIRef.current) {
+      //   if (Math.random() > 0.95) {
+      //     // throttle this
+      //     recalculateRect();
+      //   }
+      // }
 
       if (mouseClickRef.current) {
         for (let i = 0; i < Math.floor(Math.random() * 10); i++) {
@@ -279,6 +280,10 @@ export default function Liquid() {
     };
   }, []);
 
+  useEffect(() => {
+    visibleUIRef.current = visibleUI;
+  }, [visibleUI]);
+
   return (
     <>
       <canvas
@@ -289,53 +294,55 @@ export default function Liquid() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Particles:",
-              valueRef: particleCountRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "display",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-            {
-              title: "Right Click Umbrella Radius:",
-              valueRef: mouseShieldRadiusRef,
-              minValue: "10.0",
-              maxValue: "300.0",
-              type: "slider",
-            },
-            {
-              title: "Brush Radius:",
-              valueRef: brushRadiusRef,
-              minValue: "10.0",
-              maxValue: "300.0",
-              type: "slider",
-            },
-            {
-              title: "",
-              type: "button",
-              callback: () => {
-                clearParticles.current();
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particles:",
+                valueRef: particleCountRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "display",
               },
-              buttonText: "Clear Screen",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Right Click Umbrella Radius:",
+                valueRef: mouseShieldRadiusRef,
+                minValue: "10.0",
+                maxValue: "300.0",
+                type: "slider",
+              },
+              {
+                title: "Brush Radius:",
+                valueRef: brushRadiusRef,
+                minValue: "10.0",
+                maxValue: "300.0",
+                type: "slider",
+              },
+              {
+                title: "",
+                type: "button",
+                callback: () => {
+                  clearParticles.current();
+                },
+                buttonText: "Clear Screen",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
 
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
+          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+            <MouseTooltip />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

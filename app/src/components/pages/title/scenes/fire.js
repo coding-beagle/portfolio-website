@@ -3,7 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import MouseTooltip from "../utilities/popovers";
 
-export default function Fire() {
+export default function Fire({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -247,30 +247,34 @@ export default function Fire() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Fire Size:",
-              valueRef: fireSizeRef,
-              minValue: "1",
-              maxValue: "800",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
-      <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-        <MouseTooltip />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Fire Size:",
+                valueRef: fireSizeRef,
+                minValue: "1",
+                maxValue: "800",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
+      {visibleUI && (
+        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+          <MouseTooltip />
+        </div>
+      )}
     </>
   );
 }

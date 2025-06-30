@@ -180,7 +180,7 @@ export default function Title({
           fontFamily: theme.font,
         }}
       >
-        {createElement(renderScene())}
+        {createElement(renderScene(visibleUI), { visibleUI })}
         {visibleUI && (
           <header
             ref={headerRef}

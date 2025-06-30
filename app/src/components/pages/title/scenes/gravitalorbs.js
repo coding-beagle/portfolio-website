@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function GravitalOrbs() {
+export default function GravitalOrbs({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(10);
@@ -374,50 +374,52 @@ export default function GravitalOrbs() {
         }}
       />
 
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Particle Count:",
-              valueRef: particleCountRef,
-              minValue: "1",
-              maxValue: "100.0",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "0",
-              maxValue: "200.0",
-              type: "slider",
-            },
-
-            // {
-            //   title: "Future Predictions:",
-            //   valueRef: futurePredictionRef,
-            //   minValue: "0.0",
-            //   maxValue: "500.0",
-            //   type: "slider",
-            // },
-            {
-              title: "Gravitational Constant:",
-              valueRef: gravConstantRef,
-              minValue: "0.0",
-              maxValue: "10.0",
-              type: "slider",
-            },
-            {
-              title: "",
-              type: "button",
-              buttonText: "Rerender Simulation",
-              callback: () => {
-                setRerenderSim((prev) => !prev);
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "1",
+                maxValue: "100.0",
+                type: "slider",
               },
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "0",
+                maxValue: "200.0",
+                type: "slider",
+              },
+
+              // {
+              //   title: "Future Predictions:",
+              //   valueRef: futurePredictionRef,
+              //   minValue: "0.0",
+              //   maxValue: "500.0",
+              //   type: "slider",
+              // },
+              {
+                title: "Gravitational Constant:",
+                valueRef: gravConstantRef,
+                minValue: "0.0",
+                maxValue: "10.0",
+                type: "slider",
+              },
+              {
+                title: "",
+                type: "button",
+                buttonText: "Rerender Simulation",
+                callback: () => {
+                  setRerenderSim((prev) => !prev);
+                },
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }

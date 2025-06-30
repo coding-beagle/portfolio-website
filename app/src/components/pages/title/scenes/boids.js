@@ -3,7 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Boids() {
+export default function Boids({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -230,45 +230,47 @@ export default function Boids() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Bird Count:",
-              valueRef: particleCountRef,
-              minValue: "2",
-              maxValue: "300",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-            {
-              title: "Attraction to Mouse (Main Bird):",
-              valueRef: attractionStrengthRef,
-              minValue: "1",
-              maxValue: "200",
-              type: "slider",
-            },
-            {
-              title: "Attraction to Main Bird (Other Birds):",
-              valueRef: secondaryAttractionStrengthRef,
-              minValue: "1",
-              maxValue: "200",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Bird Count:",
+                valueRef: particleCountRef,
+                minValue: "2",
+                maxValue: "300",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Attraction to Mouse (Main Bird):",
+                valueRef: attractionStrengthRef,
+                minValue: "1",
+                maxValue: "200",
+                type: "slider",
+              },
+              {
+                title: "Attraction to Main Bird (Other Birds):",
+                valueRef: secondaryAttractionStrengthRef,
+                minValue: "1",
+                maxValue: "200",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
 
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
+          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+            <MouseTooltip />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

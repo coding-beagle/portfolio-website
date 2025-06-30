@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Snow() {
+export default function Snow({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(200);
@@ -165,27 +165,29 @@ export default function Snow() {
         }}
       />
 
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Particle Count:",
-              valueRef: particleCountRef,
-              minValue: "100",
-              maxValue: "10000",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "100",
+                maxValue: "10000",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }

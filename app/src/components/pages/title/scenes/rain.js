@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { use, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Rain() {
+export default function Rain({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -13,6 +13,7 @@ export default function Rain() {
   const mouseShieldRadiusRef = useRef(100);
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => {});
+  const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
@@ -99,7 +100,7 @@ export default function Rain() {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (element) {
+        if (element && visibleUIRef.current) {
           const dxFromElementCenter = this.x - elementCenterX;
           const dyFromElementCenter = this.y - elementCenterY;
 
@@ -218,6 +219,10 @@ export default function Rain() {
     };
   }, []);
 
+  useEffect(() => {
+    visibleUIRef.current = visibleUI;
+  }, [visibleUI]);
+
   return (
     <>
       <canvas
@@ -228,46 +233,48 @@ export default function Rain() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Particle Count:",
-              valueRef: particleCountRef,
-              minValue: "100",
-              maxValue: "10000",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-            {
-              title: "Click Umbrella Radius:",
-              valueRef: mouseShieldRadiusRef,
-              minValue: "10.0",
-              maxValue: "300.0",
-              type: "slider",
-            },
-            {
-              title: "Title Umbrella Radius:",
-              valueRef: titleShieldRadiusRef,
-              minValue: "1.0",
-              maxValue: "100.0",
-              callback: recalculateRectRef.current,
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "100",
+                maxValue: "10000",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Click Umbrella Radius:",
+                valueRef: mouseShieldRadiusRef,
+                minValue: "10.0",
+                maxValue: "300.0",
+                type: "slider",
+              },
+              {
+                title: "Title Umbrella Radius:",
+                valueRef: titleShieldRadiusRef,
+                minValue: "1.0",
+                maxValue: "100.0",
+                callback: recalculateRectRef.current,
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
 
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
+          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+            <MouseTooltip />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

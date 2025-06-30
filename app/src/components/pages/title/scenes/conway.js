@@ -18,7 +18,7 @@ const names = {
   SKIPCHECK: true,
 };
 
-export default function Conway() {
+export default function Conway({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -877,175 +877,180 @@ export default function Conway() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          rerenderSetter={setRerender}
-          valueArrays={valueChangers}
-        />
-        {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
-        {showPatternPreviewRef.current && (
-          <div
-            style={{
-              marginBottom: "1em",
-              background: theme.primary,
-              color: theme.text,
-              padding: "1em",
-              borderRadius: 8,
-              position: "absolute",
-              top: "3.5em",
-              left: "1em",
-              zIndex: 30,
-              minWidth: 320,
-              boxShadow: "0 2px 16px #000a",
-              border: `1px solid ${theme.border || "#333"}`,
-            }}
-          >
-            <div style={{ marginBottom: 4, fontWeight: 600 }}>
-              Paste a <code>.cells</code> pattern here to preview:
-            </div>
-            <textarea
-              value={patternText}
-              onChange={handlePatternInput}
-              placeholder={"Paste .cells pattern here..."}
-              rows={6}
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            rerenderSetter={setRerender}
+            valueArrays={valueChangers}
+          />
+          {/* Pattern preview window, only visible if showPatternPreviewRef.current is true */}
+          {showPatternPreviewRef.current && (
+            <div
               style={{
-                width: "100%",
-                fontFamily: "monospace",
-                marginBottom: 8,
-                background: theme.inputBackground || theme.background,
+                marginBottom: "1em",
+                background: theme.primary,
                 color: theme.text,
+                padding: "1em",
+                borderRadius: 8,
+                position: "absolute",
+                top: "3.5em",
+                left: "1em",
+                zIndex: 30,
+                minWidth: 320,
+                boxShadow: "0 2px 16px #000a",
                 border: `1px solid ${theme.border || "#333"}`,
-                borderRadius: 4,
-                padding: 4,
               }}
-            />
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <button
-                onClick={() => {
-                  setPatternText("");
-                  setPatternPreview(null);
-                }}
-                style={{ fontSize: 12 }}
-                title="Clear pattern text"
-              >
-                Clear Pattern
-              </button>
-              <button
-                onClick={async () => {
-                  setShowPatternBrowser((v) => !v);
-                  if (patternList.length === 0) await fetchPatternList();
-                }}
-                style={{ fontSize: 12 }}
-                title="Browse local patterns"
-              >
-                {showPatternBrowser ? "Close Browser" : "Browse Patterns"}
-              </button>
-            </div>
-            {showPatternBrowser && (
-              <div
+            >
+              <div style={{ marginBottom: 4, fontWeight: 600 }}>
+                Paste a <code>.cells</code> pattern here to preview:
+              </div>
+              <textarea
+                value={patternText}
+                onChange={handlePatternInput}
+                placeholder={"Paste .cells pattern here..."}
+                rows={6}
                 style={{
-                  maxHeight: 300,
-                  overflowY: "auto",
-                  background: theme.modalBrowserBackground || theme.background,
+                  width: "100%",
+                  fontFamily: "monospace",
+                  marginBottom: 8,
+                  background: theme.inputBackground || theme.background,
+                  color: theme.text,
                   border: `1px solid ${theme.border || "#333"}`,
                   borderRadius: 4,
-                  marginBottom: 8,
                   padding: 4,
                 }}
-              >
-                {patternList.length === 0 && <div>Loading patterns...</div>}
-                {patternList.map((pattern) => (
-                  <div
-                    key={pattern.filename}
-                    style={{
-                      cursor: "pointer",
-                      padding: "2px 0",
-                      color: theme.link || "#8cf",
-                      textDecoration: "underline",
-                      fontSize: 13,
-                    }}
-                    title={
-                      pattern.description +
-                      (pattern.author ? `\nBy: ${pattern.author}` : "")
-                    }
-                    onClick={async () => {
-                      const url = `/cells/${pattern.filename}`;
-                      try {
-                        const resp = await fetch(url);
-                        if (!resp.ok) {
-                          alert("Pattern not found in local cells folder");
-                          return;
-                        }
-                        const text = await resp.text();
-                        setPatternText(text);
-                        setPatternPreview(parseCellsPattern(text));
-                        setShowPatternBrowser(false);
-                      } catch (err) {
-                        alert("Failed to fetch pattern: " + err.message);
-                      }
-                    }}
-                  >
-                    <b>{pattern.name}</b>{" "}
-                    <span
-                      style={{
-                        color: theme.subtleText || "#aaa",
-                        fontSize: 11,
-                      }}
-                    >
-                      ({pattern.filename})
-                    </span>
+              />
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button
+                  onClick={() => {
+                    setPatternText("");
+                    setPatternPreview(null);
+                  }}
+                  style={{ fontSize: 12 }}
+                  title="Clear pattern text"
+                >
+                  Clear Pattern
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowPatternBrowser((v) => !v);
+                    if (patternList.length === 0) await fetchPatternList();
+                  }}
+                  style={{ fontSize: 12 }}
+                  title="Browse local patterns"
+                >
+                  {showPatternBrowser ? "Close Browser" : "Browse Patterns"}
+                </button>
+              </div>
+              {showPatternBrowser && (
+                <div
+                  style={{
+                    maxHeight: 300,
+                    overflowY: "auto",
+                    background:
+                      theme.modalBrowserBackground || theme.background,
+                    border: `1px solid ${theme.border || "#333"}`,
+                    borderRadius: 4,
+                    marginBottom: 8,
+                    padding: 4,
+                  }}
+                >
+                  {patternList.length === 0 && <div>Loading patterns...</div>}
+                  {patternList.map((pattern) => (
                     <div
+                      key={pattern.filename}
                       style={{
-                        color: theme.subtleText || "#ccc",
-                        fontSize: 11,
+                        cursor: "pointer",
+                        padding: "2px 0",
+                        color: theme.link || "#8cf",
+                        textDecoration: "underline",
+                        fontSize: 13,
+                      }}
+                      title={
+                        pattern.description +
+                        (pattern.author ? `\nBy: ${pattern.author}` : "")
+                      }
+                      onClick={async () => {
+                        const url = `/cells/${pattern.filename}`;
+                        try {
+                          const resp = await fetch(url);
+                          if (!resp.ok) {
+                            alert("Pattern not found in local cells folder");
+                            return;
+                          }
+                          const text = await resp.text();
+                          setPatternText(text);
+                          setPatternPreview(parseCellsPattern(text));
+                          setShowPatternBrowser(false);
+                        } catch (err) {
+                          alert("Failed to fetch pattern: " + err.message);
+                        }
                       }}
                     >
-                      {pattern.description}
-                    </div>
-                    {pattern.author && (
-                      <div
+                      <b>{pattern.name}</b>{" "}
+                      <span
                         style={{
                           color: theme.subtleText || "#aaa",
                           fontSize: 11,
                         }}
                       >
-                        By: {pattern.author}
+                        ({pattern.filename})
+                      </span>
+                      <div
+                        style={{
+                          color: theme.subtleText || "#ccc",
+                          fontSize: 11,
+                        }}
+                      >
+                        {pattern.description}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {pattern.author && (
+                        <div
+                          style={{
+                            color: theme.subtleText || "#aaa",
+                            fontSize: 11,
+                          }}
+                        >
+                          By: {pattern.author}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
+              <div
+                style={{
+                  display: "inline-block",
+                  background: theme.previewBackground || theme.background,
+                  padding: 8,
+                  borderRadius: 4,
+                }}
+              >
+                {patternPreview}
               </div>
-            )}
-            <div style={{ margin: "0.5em 0", fontWeight: 500 }}>Preview:</div>
-            <div
-              style={{
-                display: "inline-block",
-                background: theme.previewBackground || theme.background,
-                padding: 8,
-                borderRadius: 4,
-              }}
-            >
-              {patternPreview}
             </div>
-          </div>
-        )}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "row",
-          position: "absolute",
-          top: "1em",
-          right: "1em",
-          gap: "0.5em",
-        }}
-      >
-        <ZoomableToolTip text={"Scroll: Zoom in and out"} />
-        <PannableToolTip text={"Middle Mouse: Pan"} />
-        <MouseTooltip
-          text={"Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell"}
-        />
-      </div>
+          )}
+        </div>
+      )}
+      {visibleUI && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            position: "absolute",
+            top: "1em",
+            right: "1em",
+            gap: "0.5em",
+          }}
+        >
+          <ZoomableToolTip text={"Scroll: Zoom in and out"} />
+          <PannableToolTip text={"Middle Mouse: Pan"} />
+          <MouseTooltip
+            text={"Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell"}
+          />
+        </div>
+      )}
     </>
   );
 }

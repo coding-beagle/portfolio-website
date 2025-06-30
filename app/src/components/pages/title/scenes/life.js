@@ -3,7 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
-export default function Life() {
+export default function Life({ visibleUI }) {
   const myBirthday = new Date("July 12, 2004");
   const mobile = useContext(MobileContext);
   const { theme } = useTheme();
@@ -101,33 +101,35 @@ export default function Life() {
         }}
       />
 
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Life expectancy:",
-              type: "slider",
-              valueRef: lifeExpectancy,
-              valueSetter: setLifeExpectancy,
-              minValue: 1,
-              maxValue: 100,
-              isState: true,
-            },
-            {
-              title: "Birthday:",
-              type: "date",
-              callback: setBirthdate,
-              defaultVal: "2004-07-12",
-            },
-            {
-              title: "Percent of life lived:",
-              valueRef: lifeRef,
-              type: "display",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Life expectancy:",
+                type: "slider",
+                valueRef: lifeExpectancy,
+                valueSetter: setLifeExpectancy,
+                minValue: 1,
+                maxValue: 100,
+                isState: true,
+              },
+              {
+                title: "Birthday:",
+                type: "date",
+                callback: setBirthdate,
+                defaultVal: "2004-07-12",
+              },
+              {
+                title: "Percent of life lived:",
+                valueRef: lifeRef,
+                type: "display",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }

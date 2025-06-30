@@ -5,7 +5,7 @@ import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Mandelbrot() {
+export default function Mandelbrot({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const drawAreaRef = useRef(400);
@@ -773,22 +773,29 @@ export default function Mandelbrot() {
           zIndex: 0,
         }}
       />
-      <ChangerGroup rerenderSetter={setRerender} valueArrays={valueChangers} />
-      <div style={{ zIndex: 3000 }}>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            position: "absolute",
-            top: "1em",
-            right: "1em",
-            gap: "0.5em",
-          }}
-        >
-          <ZoomableToolTip text={"Scroll wheel: Zoom in and out!"} />
-          <PannableToolTip text={"Left click: Pan around!"} />
+      {visibleUI && (
+        <ChangerGroup
+          rerenderSetter={setRerender}
+          valueArrays={valueChangers}
+        />
+      )}
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "row",
+              position: "absolute",
+              top: "1em",
+              right: "1em",
+              gap: "0.5em",
+            }}
+          >
+            <ZoomableToolTip text={"Scroll wheel: Zoom in and out!"} />
+            <PannableToolTip text={"Left click: Pan around!"} />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

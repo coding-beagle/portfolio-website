@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Plinko() {
+export default function Plinko({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const particleCountRef = useRef(100);
@@ -214,48 +214,50 @@ export default function Plinko() {
         }}
       />
 
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Particle Count:",
-              valueRef: particleCountRef,
-              minValue: "10",
-              maxValue: "3000",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-            {
-              title: "Ball Bounce Factor:",
-              valueRef: bouncynessRef,
-              minValue: "100",
-              maxValue: "300",
-              type: "slider",
-            },
-            {
-              title: "Grid Spacing X:",
-              valueRef: gridSpacingX,
-              minValue: "20",
-              maxValue: "200",
-              type: "slider",
-            },
-            {
-              title: "Grid Spacing Y:",
-              valueRef: gridSpacingY,
-              minValue: "20",
-              maxValue: "200",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "10",
+                maxValue: "3000",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Ball Bounce Factor:",
+                valueRef: bouncynessRef,
+                minValue: "100",
+                maxValue: "300",
+                type: "slider",
+              },
+              {
+                title: "Grid Spacing X:",
+                valueRef: gridSpacingX,
+                minValue: "20",
+                maxValue: "200",
+                type: "slider",
+              },
+              {
+                title: "Grid Spacing Y:",
+                valueRef: gridSpacingY,
+                minValue: "20",
+                maxValue: "200",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }

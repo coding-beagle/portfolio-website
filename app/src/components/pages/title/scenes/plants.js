@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Plants() {
+export default function Plants({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -159,34 +159,36 @@ export default function Plants() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Plant Count:",
-              valueRef: particleCountRef,
-              minValue: "1",
-              maxValue: "50",
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "1000.0",
-              type: "slider",
-            },
-            {
-              title: "Simulation Length:",
-              valueRef: simulationLengthRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Plant Count:",
+                valueRef: particleCountRef,
+                minValue: "1",
+                maxValue: "50",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "1000.0",
+                type: "slider",
+              },
+              {
+                title: "Simulation Length:",
+                valueRef: simulationLengthRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }

@@ -3,7 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Stars() {
+export default function Stars({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -625,39 +625,41 @@ export default function Stars() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Star Count:",
-              valueRef: particleCount,
-              minValue: "1",
-              maxValue: "1000",
-              isState: true,
-              valueSetter: setParticleCount,
-              type: "slider",
-            },
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "500.0",
-              type: "slider",
-            },
-            {
-              type: "button",
-              buttonText: "Rerender Simulation",
-              callback: () => {
-                setRerenderSim((prev) => !prev);
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Star Count:",
+                valueRef: particleCount,
+                minValue: "1",
+                maxValue: "1000",
+                isState: true,
+                valueSetter: setParticleCount,
+                type: "slider",
               },
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "500.0",
+                type: "slider",
+              },
+              {
+                type: "button",
+                buttonText: "Rerender Simulation",
+                callback: () => {
+                  setRerenderSim((prev) => !prev);
+                },
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+            <MouseTooltip />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

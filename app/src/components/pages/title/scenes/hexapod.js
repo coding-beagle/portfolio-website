@@ -3,7 +3,7 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 
-export default function Hexapod() {
+export default function Hexapod({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -1021,33 +1021,35 @@ export default function Hexapod() {
           left: 0,
         }}
       />
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Hexapod Count:",
-              valueRef: bodyCountRef,
-              minValue: "1",
-              maxValue: "15",
-              type: "slider",
-            },
-            {
-              title: "Walking Speed:",
-              valueRef: gaitCountRef,
-              minValue: "45",
-              maxValue: "330",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-
+      {visibleUI && (
         <div style={{ zIndex: 3000 }}>
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Hexapod Count:",
+                valueRef: bodyCountRef,
+                minValue: "1",
+                maxValue: "15",
+                type: "slider",
+              },
+              {
+                title: "Walking Speed:",
+                valueRef: gaitCountRef,
+                minValue: "45",
+                maxValue: "330",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+
+          <div style={{ zIndex: 3000 }}>
+            <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+              <MouseTooltip />
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

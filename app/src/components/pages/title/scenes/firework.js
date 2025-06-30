@@ -4,7 +4,7 @@ import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
-export default function Fireworks() {
+export default function Fireworks({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
@@ -315,27 +315,29 @@ export default function Fireworks() {
         }}
       />
 
-      <div style={{ zIndex: 3000 }}>
-        <ChangerGroup
-          valueArrays={[
-            {
-              title: "Simulation Speed:",
-              valueRef: simulationSpeedRef,
-              minValue: "1",
-              maxValue: "200.0",
-              type: "slider",
-            },
-            {
-              title: "Glow Radius:",
-              valueRef: bloomEffectRef,
-              minValue: "1",
-              maxValue: "24.0",
-              type: "slider",
-            },
-          ]}
-          rerenderSetter={setRender}
-        />
-      </div>
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Glow Radius:",
+                valueRef: bloomEffectRef,
+                minValue: "1",
+                maxValue: "24.0",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
+        </div>
+      )}
     </>
   );
 }
