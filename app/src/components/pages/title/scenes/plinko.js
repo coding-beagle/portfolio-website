@@ -122,7 +122,8 @@ export default function Plinko({ visibleUI }) {
           const dy = this.y - inGridVal[1];
           const angle2 = Math.atan2(dy, dx);
 
-          this.vx = (Math.cos(angle2) * bouncynessRef.current) / 100;
+          this.vx =
+            (Math.cos(angle2) * bouncynessRef.current) / 100 + this.vx / 2;
           this.vy = (Math.sin(angle2) * bouncynessRef.current) / 100;
         }
 
