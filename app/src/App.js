@@ -75,6 +75,8 @@ function AppWrapper() {
         text={path}
         initialScene={scene?.toUpperCase()}
         visibleUI={visibleUI}
+        setVisibleUI={setVisibleUI}
+        handleVisibleToggle={handleVisibleToggle}
       />
       {visibleUI && (
         <button
@@ -165,8 +167,8 @@ function AppWrapper() {
           transition: "background 0.3s, color 0.3s",
           overflow: "hidden",
         }}
-        aria-label={visibleUI ? "Hide UI" : "Show UI"}
-        title={visibleUI ? "Hide UI" : "Show UI"}
+        aria-label={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
+        title={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
       >
         {pendingShowUI === "hidden" ? (
           <span

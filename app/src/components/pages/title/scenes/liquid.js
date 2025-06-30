@@ -22,7 +22,7 @@ export default function Liquid({ visibleUI }) {
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
-    const element = document.getElementById("title");
+    let element = document.getElementById("title") ?? null;
     let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
     let elementCenterX = 0;
     let elementCenterY = 0;
@@ -223,15 +223,9 @@ export default function Liquid({ visibleUI }) {
 
       particleCountRef.current = particles.length;
 
-      // if (element && visibleUIRef.current) {
-      //   if (Math.random() > 0.95) {
-      //     // throttle this
-      //     recalculateRect();
-      //   }
-      // }
-
       if (!element && document.getElementById("title")) {
-        var element = document.getElementById("title");
+        element = document.getElementById("title");
+        recalculateRect();
       }
 
       if (mouseClickRef.current) {

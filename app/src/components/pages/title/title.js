@@ -71,6 +71,8 @@ export default function Title({
   text = "Nicholas Teague",
   initialScene = "",
   visibleUI = true,
+  setVisibleUI = () => {},
+  handleVisibleToggle = () => {},
 }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
@@ -203,6 +205,8 @@ export default function Title({
         }
 
         handleLeftClickTitle({ button: 0 }, true);
+      } else if (e.key === "v") {
+        handleVisibleToggle();
       }
     };
 
