@@ -17,3 +17,9 @@ export const getCloseColour = (colourHex, varR = 10, varG = 5, varB = 5) => {
 
   return `#${rHex}${gHex}${bHex}`;
 };
+
+export const getRandomColour = () => {
+  return `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
+    .toString(16)
+    .padStart(6, "0")}`;
+};

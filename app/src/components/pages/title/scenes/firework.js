@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { getCloseColour } from "../utilities/usefulFunctions";
+import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Fireworks({ visibleUI }) {
@@ -37,6 +37,7 @@ export default function Fireworks({ visibleUI }) {
       0: "Circle", // spawn a circle of particles that go out around
       1: "Star", // star-shaped explosion
       2: "Spiral", // new: spiral explosion
+      2: "Trailer",
     };
 
     const maxFireworkSpeed = 10;
@@ -95,11 +96,16 @@ export default function Fireworks({ visibleUI }) {
           : (Math.random() - 0.5) * maxFireworkSpeed;
         this.vy = -(Math.random() + 2 * maxFireworkRiseSpeed);
         this.size = Math.random() * 2 + 1;
-        this.color = colorRef.current;
+
         this.points = [];
         const fireworkTypesKeys = Object.keys(fireWorkTypes);
         this.type =
           fireWorkTypes[Math.floor(Math.random() * fireworkTypesKeys.length)];
+
+        this.color =
+          this.type === "Trailer" ? getRandomColour() : colorRef.current;
+
+        this.sparklingIntensity = Math.random() * 0.5;
         this.exploded = false;
         this.explodeCount = 0;
         this.postExplodeCount = 0;
@@ -118,9 +124,7 @@ export default function Fireworks({ visibleUI }) {
         if (this.type === "Circle") {
           const chaffCount = Math.floor(Math.random() * 100) + 20;
           const angleStep = (Math.PI * 2) / chaffCount;
-          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
-            .toString(16)
-            .padStart(6, "0")}`;
+          const colour = getRandomColour();
           for (let i = 0; i < chaffCount; i++) {
             const angle = i * angleStep;
             const speed = Math.random() * 2 + 1;
@@ -145,9 +149,7 @@ export default function Fireworks({ visibleUI }) {
           const chaffPerArm = 16;
           const outerRadius = Math.random() * 2 + 7;
           const innerRadius = outerRadius * 0.45;
-          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
-            .toString(16)
-            .padStart(6, "0")}`;
+          const colour = getRandomColour();
           for (let arm = 0; arm < points; arm++) {
             const armAngle = (Math.PI * 2 * arm) / points;
             for (let j = 0; j < chaffPerArm; j++) {
@@ -183,9 +185,7 @@ export default function Fireworks({ visibleUI }) {
           const chaffCount = 60 + Math.floor(Math.random() * 40);
           const spiralTurns = 2.5 + Math.random();
           const spiralSpread = Math.random() * 2 + 7;
-          const colour = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
-            .toString(16)
-            .padStart(6, "0")}`;
+          const colour = getRandomColour();
           // Add a random spin direction and magnitude for this explosion
           // Make spin direction match spiral direction and increase effect
           const spiralDirection = spiralTurns >= 0 ? 1 : -1; // positive = CCW, negative = CW
@@ -226,6 +226,27 @@ export default function Fireworks({ visibleUI }) {
         if (!this.exploded) {
           this.y += (this.vy * simulationSpeedRef.current) / 100;
           this.x += (this.vx * simulationSpeedRef.current) / 100;
+
+          if (this.type === "Trailer") {
+            if (Math.random() > this.sparklingIntensity) {
+              const colour = getCloseColour(this.color);
+              const vx = Math.random() - 0.5;
+              const vy = Math.random() - 0.5;
+              const initialSize = Math.random() * 2 + 1;
+              const sizeFallOff = Math.random() * 0.05 + 0.01;
+              this.points.push(
+                new FireworkChaff(
+                  this.x,
+                  this.y,
+                  vx,
+                  vy,
+                  colour,
+                  initialSize,
+                  sizeFallOff
+                )
+              );
+            }
+          }
 
           // Explode when reaching the randomized explodeY
 
