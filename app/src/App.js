@@ -104,13 +104,13 @@ function AppWrapper() {
           }}
           aria-label={
             themeName === "dark"
-              ? "Switch to Light Mode"
-              : "Switch to Dark Mode"
+              ? "Switch to Light Mode (c)"
+              : "Switch to Dark Mode (c)"
           }
           title={
             themeName === "dark"
-              ? "Switch to Light Mode"
-              : "Switch to Dark Mode"
+              ? "Switch to Light Mode (c)"
+              : "Switch to Dark Mode (c)"
           }
         >
           {pendingTheme === "dark" ? (

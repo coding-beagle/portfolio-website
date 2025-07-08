@@ -180,6 +180,10 @@ export default function Title({
   };
 
   const handleRightClickTitle = (event) => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      setAutoShake(false);
+    }
     if (event) event.preventDefault();
     triggerShake();
     setCurrentScene(
