@@ -76,6 +76,7 @@ function AppWrapper() {
         initialScene={scene?.toUpperCase()}
         visibleUI={visibleUI}
         setVisibleUI={setVisibleUI}
+        handleThemeToggle={handleThemeToggle}
         handleVisibleToggle={handleVisibleToggle}
       />
       {visibleUI && (

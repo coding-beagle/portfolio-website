@@ -72,6 +72,7 @@ export default function Title({
   initialScene = "",
   visibleUI = true,
   setVisibleUI = () => {},
+  handleThemeToggle = () => {},
   handleVisibleToggle = () => {},
 }) {
   const { theme } = useTheme();
@@ -207,6 +208,8 @@ export default function Title({
         handleLeftClickTitle({ button: 0 }, true);
       } else if (e.key === "v") {
         handleVisibleToggle();
+      } else if (e.key === "c") {
+        handleThemeToggle();
       }
     };
 
