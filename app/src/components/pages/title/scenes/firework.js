@@ -37,7 +37,7 @@ export default function Fireworks({ visibleUI }) {
       0: "Circle", // spawn a circle of particles that go out around
       1: "Star", // star-shaped explosion
       2: "Spiral", // new: spiral explosion
-      2: "Trailer",
+      3: "Trailer",
     };
 
     const maxFireworkSpeed = 10;
@@ -225,7 +225,15 @@ export default function Fireworks({ visibleUI }) {
       update() {
         if (!this.exploded) {
           this.y += (this.vy * simulationSpeedRef.current) / 100;
+          this.vy += gravity * 0.2;
           this.x += (this.vx * simulationSpeedRef.current) / 100;
+
+          if (this.x >= canvas.width) {
+            this.vx *= -1;
+          }
+          if (this.x <= 0) {
+            this.vx *= -1;
+          }
 
           if (this.type === "Trailer") {
             if (Math.random() > this.sparklingIntensity) {
