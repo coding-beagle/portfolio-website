@@ -395,6 +395,10 @@ export default function Title({
                         <IconButton
                           icon={faFolder}
                           onClick={() => setShowCarousel(!showCarousel)}
+                          style={{
+                            transform: showCarousel ? 'scale(1.1)' : 'scale(1)',
+                            transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}
                         />
                         <IconHover
                           icon={faGithub}
@@ -472,6 +476,10 @@ export default function Title({
                     onClick={() => setShowCarousel(!showCarousel)}
                     openNewTab={false}
                     title="View projects"
+                    style={{
+                      transform: showCarousel ? 'scale(1.1)' : 'scale(1)',
+                      transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
                   />
                   <IconHover
                     icon={faGithub}

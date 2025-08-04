@@ -2,7 +2,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { useState } from "react";
 
-export default function IconButton({ icon, onClick, openNewTab = true, link = null, title = null }) {
+export default function IconButton({ icon, onClick, openNewTab = true, link = null, title = null, style = {} }) {
   const [isHover, setIsHover] = useState(false);
   const { theme } = useTheme();
 
@@ -29,6 +29,7 @@ export default function IconButton({ icon, onClick, openNewTab = true, link = nu
         color: isHover ? theme.secondary : theme.accent,
         cursor: "pointer",
         fontSize: "inherit",
+        ...style, // Apply custom styles
       }}
       onMouseEnter={() => setIsHover(true)}
       onMouseLeave={() => setIsHover(false)}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useTheme } from '../../../themes/ThemeProvider';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
@@ -7,6 +7,9 @@ const InlineCarousel = ({ images, isVisible }) => {
   const { theme } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isVisible_internal, setIsVisible_internal] = useState(false);
+  const [shouldRender, setShouldRender] = useState(false);
+  const carouselRef = useRef(null);
 
   // Sample images - you can replace these with your actual images
   const defaultImages = [
@@ -29,6 +32,19 @@ const InlineCarousel = ({ images, isVisible }) => {
 
   const imageList = images || defaultImages;
 
+  // Handle opening/closing animations
+  useEffect(() => {
+    if (isVisible) {
+      setShouldRender(true);
+      // Small delay to ensure the element is rendered before animating
+      setTimeout(() => setIsVisible_internal(true), 10);
+    } else {
+      setIsVisible_internal(false);
+      // Keep rendered until animation completes
+      setTimeout(() => setShouldRender(false), 400);
+    }
+  }, [isVisible]);
+
   const goToNext = useCallback(() => {
     if (isAnimating) return;
     setIsAnimating(true);
@@ -50,19 +66,24 @@ const InlineCarousel = ({ images, isVisible }) => {
     setTimeout(() => setIsAnimating(false), 400);
   };
 
-  if (!isVisible) return null;
+  if (!shouldRender) return null;
 
   return (
     <div
+      ref={carouselRef}
       style={{
         width: '100%',
         maxWidth: '70%',
         margin: '1.5em auto',
         padding: '0 1em',
         zIndex: 100,
-        opacity: isVisible ? 1 : 0,
-        transform: isVisible ? 'translateY(0)' : 'translateY(-20px)',
-        transition: 'opacity 0.5s ease, transform 0.5s ease',
+        opacity: isVisible_internal ? 1 : 0,
+        transform: isVisible_internal 
+          ? 'translateY(0) scale(1)' 
+          : 'translateY(-30px) scale(0.95)',
+        maxHeight: isVisible_internal ? '50em' : '0',
+        overflow: 'hidden',
+        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
       }}
     >
       {/* Main carousel container */}
@@ -74,6 +95,8 @@ const InlineCarousel = ({ images, isVisible }) => {
           boxShadow: `0 8px 32px ${theme.primary === '#ffffff' ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.3)'}`,
           backgroundColor: theme.primary,
           border: `2px solid ${theme.accent}20`,
+          transform: isVisible_internal ? 'scale(1)' : 'scale(0.9)',
+          transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
         {/* Navigation arrows */}
@@ -86,7 +109,7 @@ const InlineCarousel = ({ images, isVisible }) => {
                 position: 'absolute',
                 left: '10px',
                 top: '50%',
-                transform: 'translateY(-50%)',
+                transform: `translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(-100%)'}`,
                 background: `${theme.accent}15`,
                 backdropFilter: 'blur(10px)',
                 border: `1px solid ${theme.accent}30`,
@@ -95,7 +118,7 @@ const InlineCarousel = ({ images, isVisible }) => {
                 cursor: isAnimating ? 'not-allowed' : 'pointer',
                 padding: '8px 10px',
                 borderRadius: '50%',
-                transition: 'all 0.3s ease',
+                transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                 opacity: isAnimating ? 0.5 : 0.8,
                 zIndex: 101,
               }}
@@ -112,7 +135,7 @@ const InlineCarousel = ({ images, isVisible }) => {
                 position: 'absolute',
                 right: '10px',
                 top: '50%',
-                transform: 'translateY(-50%)',
+                transform: `translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(100%)'}`,
                 background: `${theme.accent}15`,
                 backdropFilter: 'blur(10px)',
                 border: `1px solid ${theme.accent}30`,
@@ -121,7 +144,7 @@ const InlineCarousel = ({ images, isVisible }) => {
                 cursor: isAnimating ? 'not-allowed' : 'pointer',
                 padding: '8px 10px',
                 borderRadius: '50%',
-                transition: 'all 0.3s ease',
+                transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
                 opacity: isAnimating ? 0.5 : 0.8,
                 zIndex: 101,
               }}
@@ -142,6 +165,8 @@ const InlineCarousel = ({ images, isVisible }) => {
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
+            transform: isVisible_internal ? 'scale(1)' : 'scale(1.1)',
+            transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
           }}
         >
           <img
@@ -169,6 +194,9 @@ const InlineCarousel = ({ images, isVisible }) => {
             backdropFilter: 'blur(10px)',
             padding: '20px 15px 15px',
             color: theme.accent,
+            transform: isVisible_internal ? 'translateY(0)' : 'translateY(100%)',
+            transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+            transitionDelay: isVisible_internal ? '0.2s' : '0s',
           }}
         >
           <h4
@@ -200,6 +228,10 @@ const InlineCarousel = ({ images, isVisible }) => {
             gap: '8px',
             justifyContent: 'center',
             marginTop: '15px',
+            opacity: isVisible_internal ? 1 : 0,
+            transform: isVisible_internal ? 'translateY(0)' : 'translateY(20px)',
+            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            transitionDelay: isVisible_internal ? '0.3s' : '0s',
           }}
         >
           {imageList.map((_, index) => (
@@ -216,6 +248,8 @@ const InlineCarousel = ({ images, isVisible }) => {
                 cursor: isAnimating ? 'not-allowed' : 'pointer',
                 transition: 'all 0.3s ease',
                 opacity: isAnimating ? 0.5 : 1,
+                transform: isVisible_internal ? 'scale(1)' : 'scale(0)',
+                transitionDelay: isVisible_internal ? `${0.4 + index * 0.05}s` : '0s',
               }}
             />
           ))}
@@ -230,7 +264,10 @@ const InlineCarousel = ({ images, isVisible }) => {
             marginTop: '10px',
             color: theme.accent,
             fontSize: '0.8em',
-            opacity: 0.7,
+            opacity: isVisible_internal ? 0.7 : 0,
+            transform: isVisible_internal ? 'translateY(0)' : 'translateY(20px)',
+            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            transitionDelay: isVisible_internal ? '0.4s' : '0s',
           }}
         >
           {currentIndex + 1} / {imageList.length}

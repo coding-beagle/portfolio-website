@@ -171,6 +171,19 @@ export default function Rain({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      if(element){
+        const rect = element.getBoundingClientRect();
+        const padded_hypothetical_rect = {
+        left: rect.left - titleShieldRadiusRef.current,
+        right: rect.right + titleShieldRadiusRef.current,
+        top: rect.top - titleShieldRadiusRef.current,
+        bottom: rect.bottom + titleShieldRadiusRef.current,
+      };
+        if(rect_padded.top != padded_hypothetical_rect.top){
+          recalculateRect()
+        }
+      }
+
       if (!element && document.getElementById("title")) {
         element = document.getElementById("title");
         recalculateRect();
