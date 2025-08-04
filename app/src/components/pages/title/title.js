@@ -14,6 +14,7 @@ import {
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
+import { faFolder } from "@fortawesome/free-solid-svg-icons";
 
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
@@ -21,6 +22,8 @@ import Stars from "./scenes/stars";
 import Boids from "./scenes/boids";
 
 import IconHover from "./iconHover";
+import IconButton from "./IconButton";
+import InlineCarousel from "./InlineCarousel";
 import Conway from "./scenes/conway";
 // import WindTunnel from "./scenes/windtunnel";
 import Hexapod from "./scenes/hexapod";
@@ -87,6 +90,26 @@ export default function Title({
   const headerRef = useRef(null);
   const animationNameRef = useRef("");
   const [showMenu, setShowMenu] = useState(false);
+  const [showCarousel, setShowCarousel] = useState(false);
+
+  // Portfolio images for the carousel
+  const portfolioImages = [
+    {
+      src: '/logo192.png',
+      title: 'Interactive Portfolio Website',
+      description: 'React-based portfolio with animated scenes and responsive design'
+    },
+    {
+      src: '/splash-screen.gif',
+      title: 'Dynamic Visual Effects',
+      description: 'Custom animations including Conway\'s Game of Life, particle systems, and interactive elements'
+    },
+    {
+      src: '/favicon.ico',
+      title: 'Professional Branding',
+      description: 'Consistent design language and user experience across all platforms'
+    }
+  ];
 
   useEffect(() => {
     if (initialScene === "") {
@@ -168,7 +191,7 @@ export default function Title({
     );
   };
 
-  const handleLeftClickTitle = (event, overrideEvent = false) => {
+  const handleLeftClickTitle = useCallback((event, overrideEvent = false) => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       setAutoShake(false);
@@ -177,9 +200,9 @@ export default function Title({
       triggerShake();
       setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
     }
-  };
+  }, [currentScene, triggerShake]);
 
-  const handleRightClickTitle = (event) => {
+  const handleRightClickTitle = useCallback((event) => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       setAutoShake(false);
@@ -189,7 +212,7 @@ export default function Title({
     setCurrentScene(
       currentScene - 1 < 0 ? Object.keys(Scenes).length - 1 : currentScene - 1
     );
-  };
+  }, [currentScene, triggerShake]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -222,7 +245,7 @@ export default function Title({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleLeftClickTitle]);
+  }, [handleLeftClickTitle, handleRightClickTitle, handleThemeToggle, handleVisibleToggle, visibleUI]);
 
   return (
     <>
@@ -276,6 +299,10 @@ export default function Title({
           </header>
         )}
         {/* Mobile: show menu button, else show scene and links inline */}
+        {visibleUI && <InlineCarousel
+                  images={portfolioImages}
+                  isVisible={showCarousel}
+                />}
         {mobile
           ? visibleUI && (
               <>
@@ -354,6 +381,7 @@ export default function Title({
                       >
                         Current scene: {getSceneName(currentScene)}
                       </div>
+                      
                       <div
                         id="linkIcons"
                         style={{
@@ -364,6 +392,10 @@ export default function Title({
                           marginBottom: "0.5em",
                         }}
                       >
+                        <IconButton
+                          icon={faFolder}
+                          onClick={() => setShowCarousel(!showCarousel)}
+                        />
                         <IconHover
                           icon={faGithub}
                           link="https://www.github.com/coding-beagle"
@@ -377,6 +409,13 @@ export default function Title({
                           link="https://www.youtube.com/@ntprod"
                         />
                       </div>
+                      
+                      {/* Inline Carousel */}
+                      <InlineCarousel
+                        images={portfolioImages}
+                        isVisible={showCarousel}
+                      />
+                      
                       {/* Hide value changers on mobile, show them in the popup */}
                       <div
                         id="valueChangersContainer"
@@ -416,6 +455,7 @@ export default function Title({
                 >
                   Current scene: {getSceneName(currentScene)}
                 </div>
+                
                 <div
                   id="linkIcons"
                   style={{
@@ -427,6 +467,12 @@ export default function Title({
                     paddingBottom: "1em",
                   }}
                 >
+                  <IconButton
+                    icon={faFolder}
+                    onClick={() => setShowCarousel(!showCarousel)}
+                    openNewTab={false}
+                    title="View projects"
+                  />
                   <IconHover
                     icon={faGithub}
                     link="https://www.github.com/coding-beagle"
@@ -443,6 +489,8 @@ export default function Title({
               </>
             )}
       </div>
+      
+      {/* Remove the old modal carousel */}
     </>
   );
 }
