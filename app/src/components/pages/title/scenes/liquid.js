@@ -24,8 +24,6 @@ export default function Liquid({ visibleUI }) {
   useEffect(() => {
     let element = document.getElementById("title") ?? null;
     let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
 
     let particles = [];
     const gravity = 0.2;
@@ -40,8 +38,6 @@ export default function Liquid({ visibleUI }) {
         top: rect.top - titleShieldRadiusRef.current,
         bottom: rect.bottom + titleShieldRadiusRef.current,
       };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
     };
 
     recalculateRectRef.current = recalculateRect;
@@ -223,9 +219,25 @@ export default function Liquid({ visibleUI }) {
 
       particleCountRef.current = particles.length;
 
+
+
       if (!element && document.getElementById("title")) {
         element = document.getElementById("title");
         recalculateRect();
+      }
+
+      if(element){
+        const rect_temp = element.getBoundingClientRect();
+        const padded_hypothetical_rect = {
+        left: rect_temp.left - titleShieldRadiusRef.current,
+        right: rect_temp.right + titleShieldRadiusRef.current,
+        top: rect_temp.top - titleShieldRadiusRef.current,
+        bottom: rect_temp.bottom + titleShieldRadiusRef.current,
+      };
+        if(rect_padded.top !== padded_hypothetical_rect.top){
+          console.log("Not the same!")
+          recalculateRect()
+        }
       }
 
       if (mouseClickRef.current) {
