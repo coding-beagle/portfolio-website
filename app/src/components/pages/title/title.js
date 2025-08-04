@@ -95,20 +95,25 @@ export default function Title({
   // Portfolio images for the carousel
   const portfolioImages = [
     {
-      src: '/logo192.png',
-      title: 'Interactive Portfolio Website',
-      description: 'React-based portfolio with animated scenes and responsive design'
-    },
-    {
       src: '/splash-screen.gif',
-      title: 'Dynamic Visual Effects',
-      description: 'Custom animations including Conway\'s Game of Life, particle systems, and interactive elements'
+      title: 'nteague.com',
+      description: 'React Portfolio Website.'
     },
     {
-      src: '/favicon.ico',
-      title: 'Professional Branding',
-      description: 'Consistent design language and user experience across all platforms'
-    }
+      src: '/carousel_imgs/betsygif.gif',
+      title: 'BET-C',
+      description: 'RC hexapod with custom PCB.'
+    },
+    {
+      src: '/carousel_imgs/mandelbrot.png',
+      title: 'FPGA Mandelbrot Accelerator', 
+      description: 'Multiple FPS rendering achieved with a Zynq 7020 board.'
+    },
+    {
+      src: '/carousel_imgs/TeagueProcessingUnit.jpeg',
+      title: 'TeagueProcessingUnit',
+      description: '16 Bit CPU designed in verilog, running a custom ISA.'
+    },
   ];
 
   useEffect(() => {

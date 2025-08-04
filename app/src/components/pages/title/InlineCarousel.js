@@ -21,14 +21,24 @@ const InlineCarousel = ({ images, isVisible }) => {
   const defaultImages = [
     {
       src: '/splash-screen.gif',
-      title: 'React Portfolio Website',
-      description: 'Interactive portfolio website built with React'
+      title: 'nteague.com',
+      description: 'React Portfolio Website.'
     },
     {
-      src: '/favicon.ico',
-      title: 'Brand Identity',
-      description: 'Custom branding and design elements'
-    }
+      src: '/carousel_imgs/betsygif.gif',
+      title: 'BET-C',
+      description: 'RC hexapod with custom PCB.'
+    },
+    {
+      src: '/carousel_imgs/mandelbrot.png',
+      title: 'FPGA Mandelbrot Accelerator', 
+      description: 'Multiple FPS rendering achieved with a Zynq 7020 board.'
+    },
+    {
+      src: '/carousel_imgs/TeagueProcessingUnit.jpeg',
+      title: 'TeagueProcessingUnit',
+      description: '16 Bit CPU designed in verilog, running a custom ISA.'
+    },
   ];
 
   const imageList = images || defaultImages;
