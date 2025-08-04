@@ -51,6 +51,7 @@ export default function Plinko({ visibleUI }) {
       }
 
       draw() {
+        if(!canvas){ return }
         this.gridPositions = [];
         let offsetRow = false;
 

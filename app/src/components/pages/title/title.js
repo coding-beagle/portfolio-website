@@ -114,6 +114,26 @@ export default function Title({
       title: 'TeagueProcessingUnit',
       description: '16 Bit CPU designed in verilog, running a custom ISA.'
     },
+    {
+      src: '/carousel_imgs/pocketwatch.gif',
+      title: 'Digital Pocket Watch',
+      description: '3D printed, battery powered, time piece.'
+    },
+    {
+      src: '/carousel_imgs/buggy.gif',
+      title: 'Line Following Robot',
+      description: "University of Manchester's embedded systems project. Won the most innovative buggy award. Custom PCB."
+    },
+    {
+      src: '/carousel_imgs/teagueamp.jpg',
+      title: 'Custom Guitar FX Unit',
+      description: "Connect an FPGA into the signal chain. Limitless possibilities. Hours of fun."
+    },
+    {
+      src: '/carousel_imgs/yeaguytele.jpg',
+      title: 'Custom Telecaster',
+      description: 'One of a kind instrument. Not for sale.'
+    },
   ];
 
   useEffect(() => {
