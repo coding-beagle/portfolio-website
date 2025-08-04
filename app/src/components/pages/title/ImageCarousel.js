@@ -9,20 +9,26 @@ const ImageCarousel = ({ isOpen, onClose, images }) => {
   // Sample images - you can replace these with your actual images
   const defaultImages = [
     {
-      src: '/logo192.png',
-      title: 'Project 1',
-      description: 'React Portfolio Website'
-    },
-    {
       src: '/splash-screen.gif',
-      title: 'Project 2', 
-      description: 'Animated Splash Screen'
+      title: 'nteague.com',
+      description: 'React Portfolio Website.'
     },
     {
-      src: '/favicon.ico',
-      title: 'Project 3',
-      description: 'Brand Identity'
-    }
+      src: '/carousel_imgs/betsygif.gif',
+      title: 'BET-C',
+      description: 'RC hexapod with custom PCB.'
+    },
+    {
+      src: '/carousel_imgs/mandelbrot.png',
+      title: 'FPGA Mandelbrot Accelerator', 
+      description: 'Multiple FPS rendering achieved with a Zynq 7020 board.'
+    },
+    {
+      src: '/carousel_imgs/TeagueProcessingUnit.jpeg',
+      title: 'TeagueProcessingUnit',
+      description: '16 Bit CPU designed in verilog, running a custom ISA.'
+    },
+
   ];
 
   const imageList = images || defaultImages;

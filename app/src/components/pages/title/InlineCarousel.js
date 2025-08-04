@@ -1,7 +1,9 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useContext } from 'react';
 import { useTheme } from '../../../themes/ThemeProvider';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { MobileContext } from "../../../contexts/MobileContext";
+
 
 const InlineCarousel = ({ images, isVisible }) => {
   const { theme } = useTheme();
@@ -10,18 +12,17 @@ const InlineCarousel = ({ images, isVisible }) => {
   const [isVisible_internal, setIsVisible_internal] = useState(false);
   const [shouldRender, setShouldRender] = useState(false);
   const carouselRef = useRef(null);
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
 
-  // Sample images - you can replace these with your actual images
+  const mobile = useContext(MobileContext);
+  
+
   const defaultImages = [
     {
-      src: '/logo192.png',
-      title: 'React Portfolio',
-      description: 'Interactive portfolio website built with React'
-    },
-    {
       src: '/splash-screen.gif',
-      title: 'Animated Elements',
-      description: 'Dynamic animations and visual effects'
+      title: 'React Portfolio Website',
+      description: 'Interactive portfolio website built with React'
     },
     {
       src: '/favicon.ico',
@@ -66,6 +67,30 @@ const InlineCarousel = ({ images, isVisible }) => {
     setTimeout(() => setIsAnimating(false), 400);
   };
 
+  // Minimum swipe distance (in px)
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null); // otherwise the swipe is fired even with usual touch events
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (isLeftSwipe && imageList.length > 1) {
+      goToNext();
+    }
+    if (isRightSwipe && imageList.length > 1) {
+      goToPrevious();
+    }
+  };
+
   if (!shouldRender) return null;
 
   return (
@@ -73,7 +98,7 @@ const InlineCarousel = ({ images, isVisible }) => {
       ref={carouselRef}
       style={{
         width: '100%',
-        maxWidth: '70%',
+        maxWidth: mobile ? '90%':'50%',
         margin: '1.5em auto',
         padding: '0 1em',
         zIndex: 100,
@@ -160,7 +185,7 @@ const InlineCarousel = ({ images, isVisible }) => {
         <div
           style={{
             width: '100%',
-            height: '30em',
+            height: mobile ? '30vh': '60vh',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -168,6 +193,9 @@ const InlineCarousel = ({ images, isVisible }) => {
             transform: isVisible_internal ? 'scale(1)' : 'scale(1.1)',
             transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
           }}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
         >
           <img
             src={imageList[currentIndex].src}
