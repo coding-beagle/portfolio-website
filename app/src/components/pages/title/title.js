@@ -327,6 +327,7 @@ export default function Title({
         {visibleUI && <InlineCarousel
                   images={portfolioImages}
                   isVisible={showCarousel}
+                  onClose={() => setShowCarousel(false)}
                 />}
         {visibleUI && (
               <>

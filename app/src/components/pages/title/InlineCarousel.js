@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef, useContext } from 'react';
 import { useTheme } from '../../../themes/ThemeProvider';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faTimes } from '@fortawesome/free-solid-svg-icons';
 import { MobileContext } from "../../../contexts/MobileContext";
 
 
-const InlineCarousel = ({ images, isVisible }) => {
+const InlineCarousel = ({ images, isVisible, onClose }) => {
   const { theme } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -207,6 +207,34 @@ const InlineCarousel = ({ images, isVisible }) => {
               <FontAwesomeIcon icon={faChevronRight} />
             </button>
           </>
+        )}
+
+        {/* Close button */}
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              background: `${theme.accent}15`,
+              backdropFilter: 'blur(10px)',
+              border: `1px solid ${theme.accent}30`,
+              color: theme.accent,
+              fontSize: '1.1em',
+              cursor: 'pointer',
+              padding: '8px 9px',
+              borderRadius: '50%',
+              transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+              opacity: 0.8,
+              zIndex: 101,
+              transform: isVisible_internal ? 'scale(1)' : 'scale(0)',
+            }}
+            onMouseEnter={(e) => (e.target.style.opacity = '1')}
+            onMouseLeave={(e) => (e.target.style.opacity = '0.8')}
+          >
+            <FontAwesomeIcon icon={faTimes} />
+          </button>
         )}
 
         {/* Image container */}
