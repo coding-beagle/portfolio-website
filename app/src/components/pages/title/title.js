@@ -340,7 +340,7 @@ export default function Title({
         />}
         {visibleUI && (
           <>
-            <div
+            {!mobile && <div
               style={{
                 display: "flex",
                 justifyContent: "center",
@@ -357,7 +357,7 @@ export default function Title({
               }}
             >
               Current scene: {getSceneName(currentScene)}
-            </div>
+            </div>}
 
             <div
               id="linkIcons"

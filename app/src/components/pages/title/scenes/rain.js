@@ -1,4 +1,4 @@
-import React, { use, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
@@ -8,11 +8,12 @@ export default function Rain({ visibleUI }) {
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
+  const touchActiveRef = useRef(false);
   const particleCountRef = useRef(2000);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
   const titleShieldRadiusRef = useRef(30);
-  const recalculateRectRef = useRef(() => {});
+  const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
@@ -71,6 +72,25 @@ export default function Rain({ visibleUI }) {
       mouseClickRef.current = false;
     };
 
+    const handleTouchMove = (event) => {
+      if (event.touches && event.touches.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const touch = event.touches[0];
+        mousePosRef.current = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top,
+        };
+      }
+    };
+
+    const handleTouchStart = () => {
+      touchActiveRef.current = true;
+    };
+
+    const handleTouchEnd = () => {
+      touchActiveRef.current = false;
+    };
+
     // --- Touch event handler to prevent scroll on drag ---
     function handleTouchDragPreventScroll(e) {
       if (e.touches && e.touches.length > 0) {
@@ -112,7 +132,7 @@ export default function Rain({ visibleUI }) {
           }
         }
 
-        if (distance < mouseShieldRadiusRef.current && mouseClickRef.current) {
+        if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current)) {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
@@ -171,15 +191,15 @@ export default function Rain({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if(element){
+      if (element) {
         const rect = element.getBoundingClientRect();
         const padded_hypothetical_rect = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-        if(rect_padded.top != padded_hypothetical_rect.top){
+          left: rect.left - titleShieldRadiusRef.current,
+          right: rect.right + titleShieldRadiusRef.current,
+          top: rect.top - titleShieldRadiusRef.current,
+          bottom: rect.bottom + titleShieldRadiusRef.current,
+        };
+        if (rect_padded.top !== padded_hypothetical_rect.top) {
           recalculateRect()
         }
       }
@@ -212,9 +232,11 @@ export default function Rain({ visibleUI }) {
     animate();
 
     window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleMouseMove);
+    window.addEventListener("touchmove", handleTouchMove);
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("touchstart", handleTouchStart);
+    window.addEventListener("touchend", handleTouchEnd);
     // Prevent default scroll on touch drag over canvas
     if (canvas) {
       canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
@@ -226,9 +248,11 @@ export default function Rain({ visibleUI }) {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleMouseMove);
+      window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("popstate", recalculateRect);
       if (canvas) {
@@ -236,7 +260,7 @@ export default function Rain({ visibleUI }) {
       }
       particles = [];
     };
-  }, []);
+  }, [theme.secondary]);
 
   useEffect(() => {
     visibleUIRef.current = visibleUI;

@@ -18,7 +18,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
   const [loadedImages, setLoadedImages] = useState(new Set());
 
   const mobile = useContext(MobileContext);
-  
+
 
   const defaultImages = [
     {
@@ -33,7 +33,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
     },
     {
       src: '/carousel_imgs/mandelbrot.png',
-      title: 'FPGA Mandelbrot Accelerator', 
+      title: 'FPGA Mandelbrot Accelerator',
       description: 'Multiple FPS rendering achieved with a Zynq 7020 board.'
     },
     {
@@ -61,17 +61,29 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
   // Update loading state when current image changes
   useEffect(() => {
     const currentImageSrc = imageList[currentIndex].src;
-    setImageLoading(!loadedImages.has(currentImageSrc));
+    const isCurrentImageLoaded = loadedImages.has(currentImageSrc) ||
+      Array.from(loadedImages).some(src => src.endsWith(currentImageSrc));
+    setImageLoading(!isCurrentImageLoaded);
   }, [currentIndex, loadedImages, imageList]);
 
-  const handleImageLoad = () => {
+  const handleImageLoad = (e) => {
+    const loadedImageSrc = e.target.src;
+    setLoadedImages(prev => new Set([...prev, loadedImageSrc]));
+
+    // Only update loading state if this is the currently displayed image
     const currentImageSrc = imageList[currentIndex].src;
-    setLoadedImages(prev => new Set([...prev, currentImageSrc]));
-    setImageLoading(false);
+    if (loadedImageSrc === currentImageSrc || loadedImageSrc.endsWith(currentImageSrc)) {
+      setImageLoading(false);
+    }
   };
 
-  const handleImageError = () => {
-    setImageLoading(false);
+  const handleImageError = (e) => {
+    // Only update loading state if this is the currently displayed image
+    const errorImageSrc = e.target.src;
+    const currentImageSrc = imageList[currentIndex].src;
+    if (errorImageSrc === currentImageSrc || errorImageSrc.endsWith(currentImageSrc)) {
+      setImageLoading(false);
+    }
   };
 
   const goToNext = useCallback(() => {
@@ -126,13 +138,13 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
       ref={carouselRef}
       style={{
         width: '100%',
-        maxWidth: mobile ? '90%':'50%',
+        maxWidth: mobile ? '90%' : '50%',
         margin: '1.5em auto',
         padding: '0 1em',
         zIndex: 100,
         opacity: isVisible_internal ? 1 : 0,
-        transform: isVisible_internal 
-          ? 'translateY(0) scale(1)' 
+        transform: isVisible_internal
+          ? 'translateY(0) scale(1)'
           : 'translateY(-30px) scale(0.95)',
         maxHeight: isVisible_internal ? '50em' : '0',
         overflow: 'hidden',
@@ -241,7 +253,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
         <div
           style={{
             width: '100%',
-            height: mobile ? '30vh': '60vh',
+            height: mobile ? '45vh' : '60vh',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -289,7 +301,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
               </span>
             </div>
           )}
-          
+
           <img
             src={imageList[currentIndex].src}
             alt={imageList[currentIndex].title}
@@ -315,7 +327,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
             right: 0,
             background: `linear-gradient(transparent, ${theme.primary}90)`,
             backdropFilter: 'blur(10px)',
-            padding: '20px 15px 15px',
+            padding: mobile ? '15px 10px 10px' : '20px 15px 15px',
             color: theme.accent,
             transform: isVisible_internal ? 'translateY(0)' : 'translateY(100%)',
             transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -325,7 +337,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
           <h4
             style={{
               margin: '0 0 5px 0',
-              fontSize: '1.1em',
+              fontSize: mobile ? '0.9em' : '1.1em',
               fontWeight: 'bold',
             }}
           >
@@ -334,7 +346,7 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
           <p
             style={{
               margin: 0,
-              fontSize: '0.9em',
+              fontSize: mobile ? '0.75em' : '0.9em',
               opacity: 0.8,
             }}
           >
