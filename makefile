@@ -23,5 +23,5 @@ build:
 
 deploy_manual:
 	rm -rf /home/nteagvxe/public_html/*; \
-	cp app/build/* /home/nteagvxe/public_html/; \
+	cp -r app/build/* /home/nteagvxe/public_html/; \
 	echo "Deployed successfully!"; \
