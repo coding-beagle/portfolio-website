@@ -73,10 +73,12 @@ const sceneNameToIndex = {
 export default function Title({
   text = "Nicholas Teague",
   initialScene = "",
+  proj = false,
+  disableInitialShake = false,
   visibleUI = true,
-  setVisibleUI = () => {},
-  handleThemeToggle = () => {},
-  handleVisibleToggle = () => {},
+  setVisibleUI = () => { },
+  handleThemeToggle = () => { },
+  handleVisibleToggle = () => { },
 }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
@@ -86,11 +88,18 @@ export default function Title({
   );
 
   const [clicked, setClicked] = useState(false);
-  const [autoShake, setAutoShake] = useState(true);
+  const [autoShake, setAutoShake] = useState(disableInitialShake);
   const headerRef = useRef(null);
   const animationNameRef = useRef("");
-  const [showMenu, setShowMenu] = useState(false);
-  const [showCarousel, setShowCarousel] = useState(false);
+  const [showCarousel, setShowCarousel] = useState(proj ?? false);
+
+  useEffect(() => {
+    setShowCarousel(proj);
+  }, [proj])
+
+  useEffect(() => {
+    setAutoShake(disableInitialShake);
+  }, [disableInitialShake])
 
   // Portfolio images for the carousel
   const portfolioImages = [
@@ -106,7 +115,7 @@ export default function Title({
     },
     {
       src: '/carousel_imgs/mandelbrot.png',
-      title: 'FPGA Mandelbrot Accelerator', 
+      title: 'FPGA Mandelbrot Accelerator',
       description: 'Multiple FPS rendering achieved with a Zynq 7020 board.'
     },
     {
@@ -325,69 +334,69 @@ export default function Title({
         )}
         {/* Mobile: show menu button, else show scene and links inline */}
         {visibleUI && <InlineCarousel
-                  images={portfolioImages}
-                  isVisible={showCarousel}
-                  onClose={() => setShowCarousel(false)}
-                />}
+          images={portfolioImages}
+          isVisible={showCarousel}
+          onClose={() => setShowCarousel(false)}
+        />}
         {visibleUI && (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    fontWeight: "bold",
-                    fontSize: "1.5em",
-                    WebkitUserSelect: "none",
-                    WebkitTouchCallout: "none",
-                    KhtmlUserSelect: "none",
-                    MozUserSelect: "none",
-                    userSelect: "none",
-                    msUserSelect: "none",
-                    zIndex: 100,
-                    paddingBottom: "0.5em",
-                  }}
-                >
-                  Current scene: {getSceneName(currentScene)}
-                </div>
-                
-                <div
-                  id="linkIcons"
-                  style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    gap: "1em",
-                    fontSize: "3em",
-                    zIndex: 100,
-                    paddingBottom: "1em",
-                  }}
-                >
-                  <IconButton
-                    icon={faFolder}
-                    onClick={() => setShowCarousel(!showCarousel)}
-                    openNewTab={false}
-                    title="View projects"
-                    style={{
-                      transform: showCarousel ? 'scale(1.1)' : 'scale(1)',
-                      transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    }}
-                  />
-                  <IconHover
-                    icon={faGithub}
-                    link="https://www.github.com/coding-beagle"
-                  />
-                  <IconHover
-                    icon={faLinkedin}
-                    link="https://www.linkedin.com/in/nicholasp-teague/"
-                  />
-                  <IconHover
-                    icon={faYoutube}
-                    link="https://www.youtube.com/@ntprod"
-                  />
-                </div>
-              </>
-            )}
+          <>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                fontWeight: "bold",
+                fontSize: "1.5em",
+                WebkitUserSelect: "none",
+                WebkitTouchCallout: "none",
+                KhtmlUserSelect: "none",
+                MozUserSelect: "none",
+                userSelect: "none",
+                msUserSelect: "none",
+                zIndex: 100,
+                paddingBottom: "0.5em",
+              }}
+            >
+              Current scene: {getSceneName(currentScene)}
+            </div>
+
+            <div
+              id="linkIcons"
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "1em",
+                fontSize: "3em",
+                zIndex: 100,
+                paddingBottom: "1em",
+              }}
+            >
+              <IconButton
+                icon={faFolder}
+                onClick={() => setShowCarousel(!showCarousel)}
+                openNewTab={false}
+                title="View projects"
+                style={{
+                  transform: showCarousel ? 'scale(1.1)' : 'scale(1)',
+                  transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              />
+              <IconHover
+                icon={faGithub}
+                link="https://www.github.com/coding-beagle"
+              />
+              <IconHover
+                icon={faLinkedin}
+                link="https://www.linkedin.com/in/nicholasp-teague/"
+              />
+              <IconHover
+                icon={faYoutube}
+                link="https://www.youtube.com/@ntprod"
+              />
+            </div>
+          </>
+        )}
       </div>
-      
+
       {/* Remove the old modal carousel */}
     </>
   );

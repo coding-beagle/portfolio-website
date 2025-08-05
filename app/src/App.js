@@ -30,6 +30,10 @@ function AppWrapper() {
   const queryString = search.includes("?") ? search.split("?")[1] : "";
   const searchParams = new URLSearchParams(queryString);
   const scene = searchParams.get("scene");
+  const openProjectsString = searchParams.get("projects");
+  const openProjectsBool = openProjectsString === "true" || openProjectsString !== null;
+  const disableShake = searchParams.get("shake");
+  const disableShakeBool = !(disableShake === "false" || disableShake !== null);
 
   // Animation state for theme icon
   const [iconAnim, setIconAnim] = useState(false);
@@ -74,6 +78,8 @@ function AppWrapper() {
       <Title
         text={path}
         initialScene={scene?.toUpperCase()}
+        proj={openProjectsBool}
+        disableInitialShake={disableShakeBool}
         visibleUI={visibleUI}
         setVisibleUI={setVisibleUI}
         handleThemeToggle={handleThemeToggle}
