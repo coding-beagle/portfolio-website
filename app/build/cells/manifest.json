@@ -1,0 +1,44 @@
+[
+  {
+    "filename": "2glideroctomino.cells",
+    "name": "2glideroctomino.cells",
+    "author": "https://conwaylife.com/wiki/List_of_common_evolutionary_sequences",
+    "description": ""
+  },
+  {
+    "filename": "2glideroctomino6cellpredecessors.cells",
+    "name": "2glideroctomino6cellpredecessors.cells",
+    "author": "https://conwaylife.com/wiki/Two-glider_octomino",
+    "description": ""
+  },
+  {
+    "filename": "2weekenderswithtagalong.cells",
+    "name": "2weekenderswithtagalong.cells",
+    "author": "https://conwaylife.com/wiki/Weekender",
+    "description": ""
+  },
+  {
+    "filename": "achimsp5.cells",
+    "name": "101",
+    "author": "Achim Flammenkamp",
+    "description": "A period 5 oscillator that was found in August 1994. The name was suggested by Bill Gosper, noting that the phase shown below displays the period in binary."
+  },
+  {
+    "filename": "gosperglidergun.cells",
+    "name": "Name: Gosper glider gun",
+    "author": "Author: Bill Gosper",
+    "description": "The first known gun and the first known finite pattern with unbounded growth. www.conwaylife.com/wiki/index.php?title=Gosper_glider_gun"
+  },
+  {
+    "filename": "herschelparent.cells",
+    "name": "Name: Herschel parent",
+    "author": "A parent of the herschel.",
+    "description": "https://www.conwaylife.com/wiki/index.php?title=Herschel_parent"
+  },
+  {
+    "filename": "hexagonalkeylwss.cells",
+    "name": "hexagonalkeylwss.cells",
+    "author": "https://conwaylife.com/wiki/Hexagonal_key",
+    "description": ""
+  }
+]

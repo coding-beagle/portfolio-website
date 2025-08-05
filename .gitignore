@@ -1,5 +1,4 @@
 app/node_modules
 *.env
-app/build
 .venv/*
 *.py
