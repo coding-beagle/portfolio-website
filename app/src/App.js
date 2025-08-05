@@ -30,10 +30,15 @@ function AppWrapper() {
   const queryString = search.includes("?") ? search.split("?")[1] : "";
   const searchParams = new URLSearchParams(queryString);
   const scene = searchParams.get("scene");
+
   const openProjectsString = searchParams.get("projects");
   const openProjectsBool = openProjectsString === "true" || openProjectsString !== null;
+
   const disableShake = searchParams.get("shake");
   const disableShakeBool = !(disableShake === "false" || disableShake !== null);
+
+  const hideUI = searchParams.get("hide");
+  const hideUIBool = !(hideUI === "false" || hideUI !== null);
 
   // Animation state for theme icon
   const [iconAnim, setIconAnim] = useState(false);
@@ -41,7 +46,7 @@ function AppWrapper() {
 
   const [UIShowiconAnim, setUIShowIconAnim] = useState(false);
   const [pendingShowUI, setPendingShowUI] = useState("hidden");
-  const [visibleUI, setVisibleUI] = useState(true);
+  const [visibleUI, setVisibleUI] = useState(hideUIBool);
 
   // Handler for animated theme toggle
   const handleThemeToggle = () => {
