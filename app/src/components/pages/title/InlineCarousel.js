@@ -14,6 +14,8 @@ const InlineCarousel = ({ images, isVisible }) => {
   const carouselRef = useRef(null);
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
+  const [imageLoading, setImageLoading] = useState(true);
+  const [loadedImages, setLoadedImages] = useState(new Set());
 
   const mobile = useContext(MobileContext);
   
@@ -55,6 +57,22 @@ const InlineCarousel = ({ images, isVisible }) => {
       setTimeout(() => setShouldRender(false), 400);
     }
   }, [isVisible]);
+
+  // Update loading state when current image changes
+  useEffect(() => {
+    const currentImageSrc = imageList[currentIndex].src;
+    setImageLoading(!loadedImages.has(currentImageSrc));
+  }, [currentIndex, loadedImages, imageList]);
+
+  const handleImageLoad = () => {
+    const currentImageSrc = imageList[currentIndex].src;
+    setLoadedImages(prev => new Set([...prev, currentImageSrc]));
+    setImageLoading(false);
+  };
+
+  const handleImageError = () => {
+    setImageLoading(false);
+  };
 
   const goToNext = useCallback(() => {
     if (isAnimating) return;
@@ -202,20 +220,59 @@ const InlineCarousel = ({ images, isVisible }) => {
             overflow: 'hidden',
             transform: isVisible_internal ? 'scale(1)' : 'scale(1.1)',
             transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+            position: 'relative',
           }}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
+          {/* Loading spinner */}
+          {imageLoading && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                zIndex: 102,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <img
+                src="/loadcat.gif"
+                alt="Loading..."
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  objectFit: 'contain',
+                }}
+              />
+              <span
+                style={{
+                  color: theme.accent,
+                  fontSize: '0.9em',
+                  opacity: 0.7,
+                }}
+              >
+                Loading...
+              </span>
+            </div>
+          )}
+          
           <img
             src={imageList[currentIndex].src}
             alt={imageList[currentIndex].title}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
             style={{
               width: '100%',
               height: '100%',
               objectFit: 'cover',
               transition: isAnimating ? 'opacity 0.4s ease, transform 0.4s ease' : 'none',
-              opacity: isAnimating ? 0.7 : 1,
+              opacity: imageLoading ? 0.3 : (isAnimating ? 0.7 : 1),
               transform: isAnimating ? 'scale(1.05)' : 'scale(1)',
             }}
           />
