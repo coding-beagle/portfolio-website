@@ -15,10 +15,14 @@ export default function Liquid({ visibleUI }) {
   const clearParticles = useRef(null);
   const visibleUIRef = useRef(visibleUI);
 
+  // Touch/swipe gesture refs
+  const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
+  const isSwipingRef = useRef(false);
+
   const simulationSpeedRef = useRef(100);
   const brushRadiusRef = useRef(100);
   const titleShieldRadiusRef = useRef(0);
-  const recalculateRectRef = useRef(() => {});
+  const recalculateRectRef = useRef(() => { });
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
@@ -85,6 +89,46 @@ export default function Liquid({ visibleUI }) {
       }
     }
 
+    // --- Touch/swipe gesture handlers for spawning particles ---
+    const handleTouchStart = (e) => {
+      if (e.touches && e.touches.length === 1) {
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        touchStartRef.current = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top,
+          time: Date.now()
+        };
+        isSwipingRef.current = true;
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (e.touches && e.touches.length === 1 && isSwipingRef.current) {
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const currentPos = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top
+        };
+
+        // Spawn particles along the swipe path
+        const numParticles = Math.floor(Math.random() * 5) + 2; // 2-6 particles per touch move
+        for (let i = 0; i < numParticles; i++) {
+          const x = (Math.random() - 0.5) * brushRadiusRef.current + currentPos.x;
+          const y = (Math.random() - 0.5) * brushRadiusRef.current + currentPos.y;
+          particles.push(new Particle(x, y));
+        }
+
+        // Update mouse position for other systems that might use it
+        mousePosRef.current = currentPos;
+      }
+    };
+
+    const handleTouchEnd = (e) => {
+      isSwipingRef.current = false;
+    };
+
     const inElement = (rect, x, y) => {
       return (
         x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
@@ -125,9 +169,10 @@ export default function Liquid({ visibleUI }) {
             const dx = (this.x - particle.x) ** 2;
             const dy = (this.y - particle.y) ** 2;
             if (dx + dy < (particle.size + this.size) ** 2) {
-              return particle;
+              return true;
             }
           }
+          return false;
         });
       }
 
@@ -219,22 +264,20 @@ export default function Liquid({ visibleUI }) {
 
       particleCountRef.current = particles.length;
 
-
-
       if (!element && document.getElementById("title")) {
         element = document.getElementById("title");
         recalculateRect();
       }
 
-      if(element){
+      if (element) {
         const rect_temp = element.getBoundingClientRect();
         const padded_hypothetical_rect = {
-        left: rect_temp.left - titleShieldRadiusRef.current,
-        right: rect_temp.right + titleShieldRadiusRef.current,
-        top: rect_temp.top - titleShieldRadiusRef.current,
-        bottom: rect_temp.bottom + titleShieldRadiusRef.current,
-      };
-        if(rect_padded.top !== padded_hypothetical_rect.top){
+          left: rect_temp.left - titleShieldRadiusRef.current,
+          right: rect_temp.right + titleShieldRadiusRef.current,
+          top: rect_temp.top - titleShieldRadiusRef.current,
+          bottom: rect_temp.bottom + titleShieldRadiusRef.current,
+        };
+        if (rect_padded.top !== padded_hypothetical_rect.top) {
           console.log("Not the same!")
           recalculateRect()
         }
@@ -267,6 +310,12 @@ export default function Liquid({ visibleUI }) {
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
     window.addEventListener("contextmenu", handleContextMenu);
+
+    // Touch event listeners for swipe gestures to spawn particles
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
+
     // Prevent default scroll on touch drag over canvas
     if (canvas) {
       canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
@@ -282,6 +331,9 @@ export default function Liquid({ visibleUI }) {
       window.removeEventListener("touchmove", handleMouseMove);
       window.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("popstate", recalculateRect);
       if (canvas) {
@@ -289,7 +341,7 @@ export default function Liquid({ visibleUI }) {
       }
       particles = [];
     };
-  }, []);
+  }, [theme.secondary]);
 
   useEffect(() => {
     visibleUIRef.current = visibleUI;

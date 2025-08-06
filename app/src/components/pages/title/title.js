@@ -139,6 +139,16 @@ export default function Title({
       description: "Connect an FPGA into the signal chain. Limitless possibilities. Hours of fun."
     },
     {
+      src: '/carousel_imgs/nanoplusplus.gif',
+      title: 'NanoPlusPlus',
+      description: "Nano, but with Emacs navigation and simple block select. And CTRL+C, CTRL+V to copy paste."
+    },
+    {
+      src: '/carousel_imgs/yeaguytele.jpg',
+      title: 'Custom Telecaster',
+      description: 'One of a kind instrument. Not for sale.'
+    },
+    {
       src: '/carousel_imgs/yeaguytele.jpg',
       title: 'Custom Telecaster',
       description: 'One of a kind instrument. Not for sale.'

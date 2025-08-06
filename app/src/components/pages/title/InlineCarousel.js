@@ -266,6 +266,25 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
         >
+          {/* Background blurred image */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              backgroundImage: `url(${imageList[currentIndex].src})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              filter: 'blur(20px) brightness(0.3)',
+              transform: 'scale(1.1)', // Slightly larger to avoid blur edge artifacts
+              zIndex: 1,
+              opacity: imageLoading ? 0 : (isAnimating ? 0.7 : 1),
+              transition: isAnimating ? 'opacity 0.4s ease' : 'opacity 0.3s ease',
+            }}
+          />
+
           {/* Loading spinner */}
           {imageLoading && (
             <div
@@ -302,18 +321,25 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
             </div>
           )}
 
+          {/* Main image (properly fitted) */}
           <img
             src={imageList[currentIndex].src}
             alt={imageList[currentIndex].title}
             onLoad={handleImageLoad}
             onError={handleImageError}
             style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              transition: isAnimating ? 'opacity 0.4s ease, transform 0.4s ease' : 'none',
-              opacity: imageLoading ? 0.3 : (isAnimating ? 0.7 : 1),
-              transform: isAnimating ? 'scale(1.05)' : 'scale(1)',
+              maxWidth: '100%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+              position: 'relative',
+              zIndex: 2,
+              transition: isAnimating ? 'opacity 0.4s ease, transform 0.4s ease' : 'opacity 0.3s ease',
+              opacity: imageLoading ? 0 : (isAnimating ? 0.8 : 1),
+              transform: isAnimating ? 'scale(1.02)' : 'scale(1)',
+              borderRadius: '4px',
+              boxShadow: imageLoading ? 'none' : '0 4px 20px rgba(0,0,0,0.3)',
             }}
           />
         </div>

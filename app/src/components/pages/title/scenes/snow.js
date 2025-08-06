@@ -83,7 +83,7 @@ export default function Snow({ visibleUI }) {
           this.vy += Math.random(0.1, 0.5) * Math.sign(gravity);
         }
 
-        if (this.x + this.size > canvas.width || this.x - this.size < 0) {
+        if (this.x - this.size > canvas.width || this.x + this.size < 0) {
           this.reset();
         }
       }
