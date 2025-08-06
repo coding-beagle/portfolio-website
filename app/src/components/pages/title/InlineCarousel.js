@@ -16,6 +16,10 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
   const [touchEnd, setTouchEnd] = useState(null);
   const [imageLoading, setImageLoading] = useState(true);
   const [loadedImages, setLoadedImages] = useState(new Set());
+  const [showZoom, setShowZoom] = useState(false);
+  const [zoomPosition, setZoomPosition] = useState({ x: 0, y: 0 });
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const imageRef = useRef(null);
 
   const mobile = useContext(MobileContext);
 
@@ -111,13 +115,18 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
   const minSwipeDistance = 50;
 
   const onTouchStart = (e) => {
+    if (!mobile) return; // Only handle touch on mobile
     setTouchEnd(null); // otherwise the swipe is fired even with usual touch events
     setTouchStart(e.targetTouches[0].clientX);
   };
 
-  const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
+  const onTouchMove = (e) => {
+    if (!mobile) return; // Only handle touch on mobile
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
 
   const onTouchEnd = () => {
+    if (!mobile) return; // Only handle touch on mobile
     if (!touchStart || !touchEnd) return;
     const distance = touchStart - touchEnd;
     const isLeftSwipe = distance > minSwipeDistance;
@@ -129,6 +138,47 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
     if (isRightSwipe && imageList.length > 1) {
       goToPrevious();
     }
+  };
+
+  // Zoom functionality
+  const handleImageClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    console.log('Image clicked!', { mobile, isAnimating }); // Debug log
+
+    if (mobile || isAnimating) {
+      console.log('Click disabled:', { mobile, isAnimating });
+      return;
+    }
+
+    const rect = e.target.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    console.log('Setting zoom position:', { x, y }); // Debug log
+
+    setZoomPosition({ x, y });
+    setShowZoom(true);
+  };
+
+  const handleImageMouseMove = (e) => {
+    if (!showZoom || mobile) return;
+
+    const rect = e.target.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    setZoomPosition({ x, y });
+  };
+
+  const handleZoomMouseMove = (e) => {
+    // This function is no longer needed since we track on the main image
+    return;
+  };
+
+  const handleZoomClose = () => {
+    setShowZoom(false);
   };
 
   if (!shouldRender) return null;
@@ -262,9 +312,11 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
             transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
             position: 'relative',
           }}
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
+          {...(mobile && {
+            onTouchStart: onTouchStart,
+            onTouchMove: onTouchMove,
+            onTouchEnd: onTouchEnd,
+          })}
         >
           {/* Background blurred image */}
           <div
@@ -323,10 +375,13 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
 
           {/* Main image (properly fitted) */}
           <img
+            ref={imageRef}
             src={imageList[currentIndex].src}
             alt={imageList[currentIndex].title}
             onLoad={handleImageLoad}
             onError={handleImageError}
+            onClick={handleImageClick}
+            onMouseMove={handleImageMouseMove}
             style={{
               maxWidth: '100%',
               maxHeight: '100%',
@@ -340,8 +395,103 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
               transform: isAnimating ? 'scale(1.02)' : 'scale(1)',
               borderRadius: '4px',
               boxShadow: imageLoading ? 'none' : '0 4px 20px rgba(0,0,0,0.3)',
+              cursor: mobile ? 'default' : 'zoom-in',
+              userSelect: 'none', // Prevent text selection
+              WebkitUserSelect: 'none',
+              MozUserSelect: 'none',
+              msUserSelect: 'none',
             }}
           />
+
+          {/* Zoom overlay - appears directly over the image */}
+          {showZoom && !mobile && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                right: '10px',
+                width: '300px',
+                height: '300px',
+                transform: 'translateY(-50%)',
+                backgroundColor: theme.primary,
+                borderRadius: '12px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                border: `2px solid ${theme.accent}40`,
+                zIndex: 103,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                pointerEvents: 'none', // Allow mouse events to pass through
+              }}
+            >
+              {/* Close button for zoom */}
+              <button
+                onClick={handleZoomClose}
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  background: `${theme.accent}20`,
+                  backdropFilter: 'blur(10px)',
+                  border: `1px solid ${theme.accent}40`,
+                  color: theme.accent,
+                  fontSize: '0.8em',
+                  cursor: 'pointer',
+                  padding: '6px 8px',
+                  borderRadius: '50%',
+                  transition: 'all 0.3s ease',
+                  opacity: 0.9,
+                  zIndex: 104,
+                  width: '24px',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'auto', // Enable clicks on close button
+                }}
+                onMouseEnter={(e) => (e.target.style.opacity = '1')}
+                onMouseLeave={(e) => (e.target.style.opacity = '0.9')}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+
+              {/* Zoomed image container */}
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  backgroundImage: `url(${imageList[currentIndex].src})`,
+                  backgroundSize: '400%', // 4x zoom
+                  backgroundPosition: `${zoomPosition.x}% ${zoomPosition.y}%`,
+                  backgroundRepeat: 'no-repeat',
+                  borderRadius: '10px',
+                  pointerEvents: 'none', // Make it non-interactive
+                }}
+              />
+
+              {/* Zoom level indicator */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '6px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: `${theme.accent}20`,
+                  backdropFilter: 'blur(10px)',
+                  border: `1px solid ${theme.accent}40`,
+                  color: theme.accent,
+                  fontSize: '0.6em',
+                  padding: '3px 6px',
+                  borderRadius: '10px',
+                  opacity: 0.8,
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                4x Zoom
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Image info overlay */}

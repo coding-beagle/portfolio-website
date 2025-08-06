@@ -149,9 +149,9 @@ export default function Title({
       description: 'One of a kind instrument. Not for sale.'
     },
     {
-      src: '/carousel_imgs/yeaguytele.jpg',
-      title: 'Custom Telecaster',
-      description: 'One of a kind instrument. Not for sale.'
+      src: '/carousel_imgs/ctkeasyeditor.png',
+      title: 'CTkEasyEditor',
+      description: 'Graphical UI Editor for CustomTkinter.'
     },
   ];
 
