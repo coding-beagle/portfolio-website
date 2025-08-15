@@ -17,8 +17,8 @@ export default function Plinko({ visibleUI }) {
     const canvas = canvasRef.current;
 
     const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      canvas.width = window?.innerWidth;
+      canvas.height = window?.innerHeight;
     };
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
@@ -51,7 +51,7 @@ export default function Plinko({ visibleUI }) {
       }
 
       draw() {
-        if(!canvas){ return }
+        if (!canvas) { return }
         this.gridPositions = [];
         let offsetRow = false;
 

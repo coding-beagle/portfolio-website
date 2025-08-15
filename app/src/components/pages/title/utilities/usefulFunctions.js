@@ -23,3 +23,7 @@ export const getRandomColour = () => {
     .toString(16)
     .padStart(6, "0")}`;
 };
+
+export const scale_value = (val, input_min, input_max, output_min, output_max) => {
+  return (val - input_min) * (output_max - output_min) / (input_max - input_min) + output_min;
+}

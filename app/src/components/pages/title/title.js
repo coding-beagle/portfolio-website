@@ -35,6 +35,7 @@ import Plinko from "./scenes/plinko";
 import GravitalOrbs from "./scenes/gravitalorbs";
 import Liquid from "./scenes/liquid";
 import Life from "./scenes/life";
+import Raven from "./scenes/raven";
 
 const Scenes = {
   0: { component: Snow },
@@ -51,6 +52,7 @@ const Scenes = {
   11: { component: GravitalOrbs },
   12: { component: Liquid },
   13: { component: Life },
+  14: { component: Raven },
 };
 
 const sceneNameToIndex = {
@@ -68,6 +70,7 @@ const sceneNameToIndex = {
   gravitalorbs: 11,
   liquid: 12,
   life: 13,
+  raven: 14,
 };
 
 export default function Title({

@@ -134,7 +134,6 @@ export default function Snow({ visibleUI }) {
     canvas._particles = particles;
 
     return () => {
-      // Cleanup function to cancel the animation frame
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resizeCanvas);
       particles = [];
