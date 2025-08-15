@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import * as THREE from 'three';
@@ -6,9 +6,11 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { scale_value } from "../utilities/usefulFunctions";
 import MouseTooltip from "../utilities/popovers";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Raven({ visibleUI }) {
   const { theme } = useTheme();
+  const mobile = useContext(MobileContext)
   const refContainer = useRef(null);
   const mounted = useRef(false);
 
@@ -31,8 +33,16 @@ export default function Raven({ visibleUI }) {
     refContainer.current && !mounted.current && refContainer.current.appendChild(renderer.domElement);
     mounted.current = true;
 
-    const min_rotation_x = -0.3;
-    const max_rotation_x = 1.0;
+    let min_rotation_x;
+    let max_rotation_x;
+    if (mobile) {
+      min_rotation_x = -0.5;
+      max_rotation_x = 0.5;
+    } else {
+      min_rotation_x = -0.3;
+      max_rotation_x = 1.0;
+    }
+
     const min_rotation_y = -0.5;
     const max_rotation_y = 0.5;
 
@@ -66,7 +76,13 @@ export default function Raven({ visibleUI }) {
 
       objLoader.load('resources/crow.obj', (root) => {
         root.scale.set(0.01, 0.01, 0.01); // Scale up the model
-        root.position.set(-0.5, -1, -1); // Center it
+
+        if (mobile) {
+          root.position.set(0.0, -1, -1); // Center it
+        } else {
+          root.position.set(-0.5, -1, -1); // Center it
+
+        }
         crow = root;
         scene.add(root);
         crowRef.current = root;

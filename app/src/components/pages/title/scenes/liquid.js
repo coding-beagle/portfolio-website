@@ -278,7 +278,6 @@ export default function Liquid({ visibleUI }) {
           bottom: rect_temp.bottom + titleShieldRadiusRef.current,
         };
         if (rect_padded.top !== padded_hypothetical_rect.top) {
-          console.log("Not the same!")
           recalculateRect()
         }
       }
