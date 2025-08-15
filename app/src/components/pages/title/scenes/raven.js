@@ -114,11 +114,29 @@ export default function Raven({ visibleUI }) {
       };
     };
 
+    const handleTouchMove = (event) => {
+      if (event.touches && event.touches.length > 0) {
+        let rect;
+
+        try {
+          rect = refContainer.current.getBoundingClientRect();
+        } catch (e) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        const touch = event.touches[0];
+        mouseposref.current = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top,
+        };
+      }
+    };
+
     window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("touchmove", handleTouchMove);
 
     return () => {
       window.removeEventListener("pointermove", handleMouseMove);
-
+      window.removeEventListener("touchmove", handleTouchMove);
 
       if (refContainer.current && renderer.domElement) {
         refContainer.current.removeChild(renderer.domElement);
