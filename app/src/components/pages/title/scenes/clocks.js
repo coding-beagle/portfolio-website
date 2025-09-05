@@ -112,18 +112,6 @@ export default function Clocks({ visibleUI }) {
     const canvas = canvasRef.current;
     // const titleShieldRadius = 30;
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    const maxSpeed = 1;
-    let animationFrameId;
-
     class ClockUnit {
       constructor(x, y, min_hand, hr_hand, radius, speed_factor = 1.0) {
         this.x = x;
@@ -213,13 +201,32 @@ export default function Clocks({ visibleUI }) {
     class Digit {
       constructor(x, y, width, speed_factor) {
         this.clocks = [];
-        // this.speed_factor = speed_factor;
+        this.speed_factor = speed_factor
+        this.init_clocks(x, y, width, speed_factor)
+      }
+
+      init_clocks(x, y, width, speed_factor = this.speed_factor) {
         const clock_radius = width / 8;
         for (let y_gap = 0; y_gap < 6; y_gap++) {
           for (let x_gap = 0; x_gap < 4; x_gap++) {
             const clock_x = x + clock_radius / 2 + x_gap * clock_radius * 2;
             const clock_y = y + clock_radius / 2 + y_gap * clock_radius * 2;
             this.clocks.push(new ClockUnit(clock_x, clock_y, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, clock_radius, speed_factor))
+          }
+        }
+      }
+
+      update_position(x, y, width) {
+        const clock_radius = width / 8;
+        let index = 0;
+        for (let y_gap = 0; y_gap < 6; y_gap++) {
+          for (let x_gap = 0; x_gap < 4; x_gap++) {
+            const clock_x = x + clock_radius / 2 + x_gap * clock_radius * 2;
+            const clock_y = y + clock_radius / 2 + y_gap * clock_radius * 2;
+            this.clocks[index].x = clock_x;
+            this.clocks[index].y = clock_y;
+            this.clocks[index].size = clock_radius
+            index++;
           }
         }
       }
@@ -290,6 +297,26 @@ export default function Clocks({ visibleUI }) {
         }
       }
 
+      update_position_and_size(x, y, width) {
+
+        if (!mobile) {
+          const one_clock_width = width / 6;
+
+          this.faces.forEach((face, index) => {
+            face.update_position(x + one_clock_width * index, y, one_clock_width)
+          })
+
+        } else {
+          const one_clock_width = width / 6;
+          const one_clock_height = width / 4;
+          this.faces[0].update_position(this.x, this.y, one_clock_width);
+          this.faces[1].update_position(this.x + one_clock_width, this.y, one_clock_width);
+
+          this.faces[2].update_position(this.x, this.y + one_clock_height, one_clock_width);
+          this.faces[3].update_position(this.x + one_clock_width, this.y + one_clock_height, one_clock_width);
+        }
+      }
+
       left_pad_and_split_number(input_number) {
         const num_zero_padded = String(input_number).padStart(2, '0')
         return [Number(num_zero_padded[0]), Number(num_zero_padded[1])]
@@ -337,26 +364,41 @@ export default function Clocks({ visibleUI }) {
       }
     }
 
-    // let digit;
+    function calculate_clock_position() {
+      let clock_width, clock_start_x, clock_start_y, clock_height;
+      if (!mobile) {
+        clock_width = 0.9 * canvas.width;
+        clock_start_x = 0.05 * canvas.width;
+        clock_height = (clock_width / 4)
+        clock_start_y = (canvas.height - clock_height) / 2;
+      } else {
+        clock_width = 2.5 * canvas.width;
+        clock_start_x = 0.1 * canvas.width;
+        clock_height = (clock_width / 4)
+        clock_start_y = (canvas.height - clock_height) / 4;
+      }
+      return { start_x: clock_start_x, start_y: clock_start_y, width: clock_width }
+    }
+
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      if (clockRef.current) {
+        const size = calculate_clock_position()
+        clockRef.current.update_position_and_size(size.start_x, size.start_y, size.width);
+      }
+    };
+
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    const ctx = canvas.getContext("2d");
+
+    let animationFrameId;
 
     function initParticles() {
-
-      if (!mobile) {
-        const clock_width = 0.9 * canvas.width;
-        const clock_start_x = 0.05 * canvas.width;
-        const clock_height = (clock_width / 4)
-        const clock_start_y = (canvas.height - clock_height) / 2;
-
-        clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
-      } else {
-        const clock_width = 2.5 * canvas.width;
-        const clock_start_x = 0.15 * canvas.width;
-        const clock_height = (clock_width / 4)
-        const clock_start_y = (canvas.height - clock_height) / 4;
-
-        clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
-      }
-
+      const size = calculate_clock_position()
+      clockRef.current = new DigitalAnalogClock(size.start_x, size.start_y, size.width);
     }
 
     function animate() {
@@ -364,11 +406,7 @@ export default function Clocks({ visibleUI }) {
       clockRef.current.update_num();
 
       clockRef.current.update();
-      // particle.target_hr_hand_angle = target_hr_ref.current / 100.0;
-      // particle.target_min_hand_angle = Math.random() * 2 * Math.PI;
       clockRef.current.draw();
-
-      // clockRef.current.set_digit();
 
       animationFrameId = requestAnimationFrame(animate);
     }
