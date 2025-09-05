@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 // named enum for convenience innit
 const NAMED_ANGLE = {
@@ -101,6 +102,8 @@ export default function Clocks({ visibleUI }) {
   const digitSelected = useRef(0);
   const [, setRender] = useState(0);
 
+  const mobile = useContext(MobileContext);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     // const titleShieldRadius = 30;
@@ -118,15 +121,17 @@ export default function Clocks({ visibleUI }) {
     let animationFrameId;
 
     class ClockUnit {
-      constructor(x, y, min_hand, hr_hand, radius) {
+      constructor(x, y, min_hand, hr_hand, radius, speed_factor = 1.0) {
         this.x = x;
         this.y = y;
         this.size = radius;
         this.min_hand_angle = min_hand;
         this.hr_hand_angle = hr_hand;
 
-        this.hr_hand_speed = Math.max(Math.random() * 0.01, 0.02);
-        this.min_hand_speed = Math.max(Math.random() * 0.01, 0.02);
+        this.speed_factor = speed_factor
+
+        // this.hr_hand_speed = Math.max(Math.random() * 0.01, 0.02);
+        // this.min_hand_speed = Math.max(Math.random() * 0.01, 0.02);
 
         this.target_min_hand_angle = 0.0;
         this.target_hr_hand_angle = 0.0;
@@ -137,17 +142,15 @@ export default function Clocks({ visibleUI }) {
       update() {
 
         const error_hr_hand = (this.target_hr_hand_angle - this.hr_hand_angle);
-        this.hr_hand_angle += error_hr_hand / 200.0;
+        this.hr_hand_angle += this.speed_factor * error_hr_hand / 200.0;
 
 
         const error_min_hand = (this.target_min_hand_angle - this.min_hand_angle);
-        this.min_hand_angle += error_min_hand / 200.0;
+        this.min_hand_angle += this.speed_factor * error_min_hand / 200.0;
 
 
         this.min_hand_angle %= 2 * Math.PI;
         this.hr_hand_angle %= 2 * Math.PI;
-
-        // console.log(this.target_hr_hand_angle, this.hr_hand_angle);
       }
 
       draw() {
@@ -189,14 +192,15 @@ export default function Clocks({ visibleUI }) {
     }
 
     class Digit {
-      constructor(x, y, width) {
+      constructor(x, y, width, speed_factor) {
         this.clocks = [];
+        // this.speed_factor = speed_factor;
         const clock_radius = width / 8;
         for (let y_gap = 0; y_gap < 6; y_gap++) {
           for (let x_gap = 0; x_gap < 4; x_gap++) {
             const clock_x = x + clock_radius / 2 + x_gap * clock_radius * 2;
             const clock_y = y + clock_radius / 2 + y_gap * clock_radius * 2;
-            this.clocks.push(new ClockUnit(clock_x, clock_y, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, clock_radius))
+            this.clocks.push(new ClockUnit(clock_x, clock_y, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, clock_radius, speed_factor))
           }
         }
       }
@@ -243,17 +247,28 @@ export default function Clocks({ visibleUI }) {
 
         this.faces = []
 
-        const one_clock_width = width / 6;
-        const hours_msd = new Digit(this.x, this.y, one_clock_width);
-        const hours_lsd = new Digit(this.x + one_clock_width, this.y, one_clock_width);
+        if (!mobile) {
+          const one_clock_width = width / 6;
+          const hours_msd = new Digit(this.x, this.y, one_clock_width);
+          const hours_lsd = new Digit(this.x + one_clock_width, this.y, one_clock_width);
 
-        const mins_msd = new Digit(this.x + 2 * one_clock_width, this.y, one_clock_width);
-        const mins_lsd = new Digit(this.x + 3 * one_clock_width, this.y, one_clock_width);
+          const mins_msd = new Digit(this.x + 2 * one_clock_width, this.y, one_clock_width);
+          const mins_lsd = new Digit(this.x + 3 * one_clock_width, this.y, one_clock_width);
 
-        const secs_msd = new Digit(this.x + 4 * one_clock_width, this.y, one_clock_width);
-        const secs_lsd = new Digit(this.x + 5 * one_clock_width, this.y, one_clock_width);
+          const secs_msd = new Digit(this.x + 4 * one_clock_width, this.y, one_clock_width, 6);
+          const secs_lsd = new Digit(this.x + 5 * one_clock_width, this.y, one_clock_width, 6);
 
-        this.faces.push(hours_msd, hours_lsd, mins_msd, mins_lsd, secs_msd, secs_lsd)
+          this.faces.push(hours_msd, hours_lsd, mins_msd, mins_lsd, secs_msd, secs_lsd)
+        } else {
+          const one_clock_width = width / 6;
+          const one_clock_height = width / 4;
+          const hours_msd = new Digit(this.x, this.y, one_clock_width);
+          const hours_lsd = new Digit(this.x + one_clock_width, this.y, one_clock_width);
+
+          const mins_msd = new Digit(this.x, this.y + one_clock_height, one_clock_width);
+          const mins_lsd = new Digit(this.x + one_clock_width, this.y + one_clock_height, one_clock_width);
+          this.faces.push(hours_msd, hours_lsd, mins_msd, mins_lsd)
+        }
       }
 
       left_pad_and_split_number(input_number) {
@@ -279,10 +294,10 @@ export default function Clocks({ visibleUI }) {
       }
 
       update_num() {
-        const num = String(digitSelected.current).padStart(6, '0');
-        this.hours = Number(`${num[0]}${num[1]}`)
-        this.minutes = Number(`${num[2]}${num[3]}`)
-        this.seconds = Number(`${num[4]}${num[5]}`)
+        const date = new Date()
+        this.hours = date.getHours()
+        this.minutes = date.getMinutes()
+        this.seconds = date.getSeconds()
       }
 
       draw() {
@@ -306,15 +321,23 @@ export default function Clocks({ visibleUI }) {
     // let digit;
 
     function initParticles() {
-      const center_x = canvas.width / 2;
-      const center_y = canvas.height / 2;
 
-      const clock_width = 0.9 * canvas.width;
-      const clock_start_x = 0.05 * canvas.width;
-      const clock_height = (clock_width / 4)
-      const clock_start_y = 0.1 * canvas.height;
+      if (!mobile) {
+        const clock_width = 0.9 * canvas.width;
+        const clock_start_x = 0.05 * canvas.width;
+        const clock_height = (clock_width / 4)
+        const clock_start_y = (canvas.height - clock_height) / 2;
 
-      clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
+        clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
+      } else {
+        const clock_width = 2.5 * canvas.width;
+        const clock_start_x = 0.1 * canvas.width;
+        const clock_height = (clock_width / 4)
+        const clock_start_y = (canvas.height - clock_height) / 4;
+
+        clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
+      }
+
     }
 
     function animate() {
@@ -342,14 +365,14 @@ export default function Clocks({ visibleUI }) {
       window.removeEventListener("resize", resizeCanvas);
       // particles = [];
     };
-  }, []);
+  }, [mobile]);
 
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
     // Update all existing particles' colors
     const canvas = canvasRef.current;
     if (!canvas) return;
-    clockRef.current.update_clock_themes(theme.tertiaryAccent, theme.primary);
+    clockRef.current.update_clock_themes(theme.secondaryAccent, theme.secondary);
   }, [theme]);
 
   return (
@@ -367,13 +390,6 @@ export default function Clocks({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
-              {
-                title: 'Selected Digit',
-                valueRef: digitSelected,
-                minValue: "0",
-                maxValue: "999999",
-                type: 'slider',
-              }
             ]}
             rerenderSetter={setRender}
           />
