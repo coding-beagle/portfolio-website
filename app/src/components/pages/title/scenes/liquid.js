@@ -259,14 +259,19 @@ export default function Liquid({ visibleUI }) {
       particles = [];
     };
 
+    let last_ui_visible = visibleUIRef.current;
+
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       particleCountRef.current = particles.length;
 
-      if (!element && document.getElementById("title")) {
+      if (visibleUIRef.current && !element) {
         element = document.getElementById("title");
         recalculateRect();
+        last_ui_visible = visibleUIRef.current;
+      } else {
+        element = null
       }
 
       if (element) {
@@ -280,6 +285,7 @@ export default function Liquid({ visibleUI }) {
         if (rect_padded.top !== padded_hypothetical_rect.top) {
           recalculateRect()
         }
+
       }
 
       if (mouseClickRef.current) {
@@ -299,6 +305,8 @@ export default function Liquid({ visibleUI }) {
         particle.draw();
       });
       animationFrameId = requestAnimationFrame(animate);
+
+
     }
 
     // initParticles();
