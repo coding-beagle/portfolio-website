@@ -31,12 +31,12 @@ const clock_angle_dict = {
   CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
   CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
   ],
-  1: [CPOS.UNUSED, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.UNUSED,
+  1: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.UNUSED,
+  CPOS.BOTTOM_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL, CPOS.UNUSED,
   CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.UNUSED,
   CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.UNUSED,
-  CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.UNUSED,
-  CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.UNUSED,
-  CPOS.UNUSED, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.UNUSED
+  CPOS.TOP_LEFT, CPOS.BOTTOM_RIGHT, CPOS.BOTTOM_LEFT, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
   ],
   2: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
   CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
@@ -168,16 +168,21 @@ export default function Clocks({ visibleUI }) {
       }
 
       draw() {
+        ctx.shadowColor = theme.secondaryAccent;
+        ctx.shadowBlur = 5;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
         ctx.fill();
+
+
         ctx.closePath();
 
 
         ctx.strokeStyle = this.strokeColor;
         ctx.fillStyle = this.strokeColor;
-
+        ctx.shadowColor = theme.secondary;
+        ctx.shadowBlur = 8;
         ctx.beginPath();
         ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
         ctx.fill();
