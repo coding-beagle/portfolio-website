@@ -36,6 +36,7 @@ import GravitalOrbs from "./scenes/gravitalorbs";
 import Liquid from "./scenes/liquid";
 import Life from "./scenes/life";
 import Raven from "./scenes/raven";
+import Clocks from "./scenes/clocks";
 
 const Scenes = {
   0: { component: Snow },
@@ -53,6 +54,7 @@ const Scenes = {
   12: { component: Liquid },
   13: { component: Life },
   14: { component: Raven },
+  15: { component: Clocks }
 };
 
 const sceneNameToIndex = {
@@ -71,6 +73,7 @@ const sceneNameToIndex = {
   liquid: 12,
   life: 13,
   raven: 14,
+  clocks: 15
 };
 
 export default function Title({
