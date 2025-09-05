@@ -232,9 +232,9 @@ export default function Rain({ visibleUI }) {
     animate();
 
     window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleTouchMove);
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("touchmove", handleTouchMove);
     window.addEventListener("touchstart", handleTouchStart);
     window.addEventListener("touchend", handleTouchEnd);
     // Prevent default scroll on touch drag over canvas
@@ -248,9 +248,9 @@ export default function Rain({ visibleUI }) {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("resize", resizeCanvas);

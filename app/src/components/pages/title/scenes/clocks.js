@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import MouseTooltip from "../utilities/popovers";
 
 // named enum for convenience innit
 const NAMED_ANGLE = {
@@ -99,7 +100,10 @@ export default function Clocks({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const clockRef = useRef(null);
-  const digitSelected = useRef(0);
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const mouseClickRef = useRef(false);
+  const touchActiveRef = useRef(false);
+  const mouseShieldRadiusRef = useRef(100);
   const [, setRender] = useState(0);
 
   const mobile = useContext(MobileContext);
@@ -142,11 +146,21 @@ export default function Clocks({ visibleUI }) {
       update() {
 
         const error_hr_hand = (this.target_hr_hand_angle - this.hr_hand_angle);
-        this.hr_hand_angle += this.speed_factor * error_hr_hand / 200.0;
-
-
         const error_min_hand = (this.target_min_hand_angle - this.min_hand_angle);
-        this.min_hand_angle += this.speed_factor * error_min_hand / 200.0;
+
+
+        const dx = mousePosRef.current.x - this.x;
+        const dy = mousePosRef.current.y - this.y;
+
+        const deltaMouse = Math.sqrt(dx ** 2 + dy ** 2);
+
+        if ((touchActiveRef.current || mouseClickRef.current) && deltaMouse < mouseShieldRadiusRef.current) {
+          this.hr_hand_angle -= Math.random() * 0.05;
+          this.min_hand_angle -= Math.random() * 0.03;
+        } else {
+          this.hr_hand_angle += this.speed_factor * error_hr_hand / 200.0;
+          this.min_hand_angle += this.speed_factor * error_min_hand / 200.0;
+        }
 
 
         this.min_hand_angle %= 2 * Math.PI;
@@ -331,7 +345,7 @@ export default function Clocks({ visibleUI }) {
         clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
       } else {
         const clock_width = 2.5 * canvas.width;
-        const clock_start_x = 0.1 * canvas.width;
+        const clock_start_x = 0.15 * canvas.width;
         const clock_height = (clock_width / 4)
         const clock_start_y = (canvas.height - clock_height) / 4;
 
@@ -360,10 +374,59 @@ export default function Clocks({ visibleUI }) {
     // Attach particles array to canvas for theme effect access
     // canvas._particles = particles;
 
+    const handleTouchMove = (event) => {
+      if (event.touches && event.touches.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const touch = event.touches[0];
+        mousePosRef.current = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top,
+        };
+      }
+    };
+
+    const handleTouchStart = () => {
+      touchActiveRef.current = true;
+    };
+
+    const handleTouchEnd = () => {
+      touchActiveRef.current = false;
+    };
+
+    const handleMouseMove = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      mousePosRef.current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    };
+
+    const handleMouseDown = () => {
+      mouseClickRef.current = true;
+    };
+
+    const handleMouseUp = () => {
+      mouseClickRef.current = false;
+    };
+
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("pointerdown", handleMouseDown);
+    window.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("touchmove", handleTouchMove);
+    window.addEventListener("touchstart", handleTouchStart);
+    window.addEventListener("touchend", handleTouchEnd);
+
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resizeCanvas);
-      // particles = [];
+      clockRef.current = null;
+
+      window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("pointerdown", handleMouseDown);
+      window.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchend", handleTouchEnd);
     };
   }, [mobile]);
 
@@ -390,10 +453,21 @@ export default function Clocks({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
+              {
+                title: "Click Effect Radius:",
+                valueRef: mouseShieldRadiusRef,
+                minValue: "10.0",
+                maxValue: "300.0",
+                type: "slider",
+              },
             ]}
             rerenderSetter={setRender}
           />
+          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
+            <MouseTooltip />
+          </div>
         </div>
+
       )}
     </>
   );
