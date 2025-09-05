@@ -36,12 +36,47 @@ const clock_angle_dict = {
   CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.UNUSED,
   CPOS.UNUSED, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.UNUSED
   ],
-  0: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
-  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL,
-  CPOS.VERTICAL, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.VERTICAL,
+  2: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT,
+  CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
+  ],
+  3: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
+  ],
+  4: [CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.TOP_LEFT, CPOS.TOP_RIGHT,
   CPOS.VERTICAL, CPOS.VERTICAL, CPOS.VERTICAL, CPOS.VERTICAL,
   CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT
+  ],
+  5: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT,
+  CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
   CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
+  ],
+  6: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT,
+  CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
+  ],
+  7: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.VERTICAL, CPOS.VERTICAL,
+  CPOS.UNUSED, CPOS.UNUSED, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT
   ],
   8: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
   CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL,
@@ -49,16 +84,21 @@ const clock_angle_dict = {
   CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL,
   CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
   CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
+  ],
+  9: [CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.TOP_RIGHT,
+  CPOS.VERTICAL, CPOS.TOP_LEFT, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.VERTICAL, CPOS.BOTTOM_LEFT, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.TOP_RIGHT, CPOS.VERTICAL,
+  CPOS.TOP_LEFT, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT, CPOS.VERTICAL,
+  CPOS.BOTTOM_LEFT, CPOS.HORIZONTAL, CPOS.HORIZONTAL, CPOS.BOTTOM_RIGHT
   ]
 }
 
 export default function Clocks({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
-  const digitRef = useRef(null);
-  const target_hr_ref = useRef(0.0);
-  const target_min_ref = useRef(0.0);
-  const colorRef = useRef(theme.accent);
+  const clockRef = useRef(null);
+  const digitSelected = useRef(0);
   const [, setRender] = useState(0);
 
   useEffect(() => {
@@ -77,7 +117,7 @@ export default function Clocks({ visibleUI }) {
     const maxSpeed = 1;
     let animationFrameId;
 
-    class Clock {
+    class ClockUnit {
       constructor(x, y, min_hand, hr_hand, radius) {
         this.x = x;
         this.y = y;
@@ -117,12 +157,19 @@ export default function Clocks({ visibleUI }) {
         ctx.fill();
         ctx.closePath();
 
+
         ctx.strokeStyle = this.strokeColor;
+        ctx.fillStyle = this.strokeColor;
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.closePath();
 
         // draw min hand
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 10;
         const min_hand_end_x = this.size * Math.cos(this.min_hand_angle) + this.x;
         const min_hand_end_y = this.size * Math.sin(this.min_hand_angle) + this.y;
         ctx.lineTo(min_hand_end_x, min_hand_end_y);
@@ -132,7 +179,7 @@ export default function Clocks({ visibleUI }) {
         // draw hr hand
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 10;
         const hr_hand_end_x = this.size * Math.cos(this.hr_hand_angle) + this.x;
         const hr_hand_end_y = this.size * Math.sin(this.hr_hand_angle) + this.y;
         ctx.lineTo(hr_hand_end_x, hr_hand_end_y);
@@ -144,12 +191,12 @@ export default function Clocks({ visibleUI }) {
     class Digit {
       constructor(x, y, width) {
         this.clocks = [];
-        const clock_radius = width / 4;
+        const clock_radius = width / 8;
         for (let y_gap = 0; y_gap < 6; y_gap++) {
           for (let x_gap = 0; x_gap < 4; x_gap++) {
             const clock_x = x + clock_radius / 2 + x_gap * clock_radius * 2;
             const clock_y = y + clock_radius / 2 + y_gap * clock_radius * 2;
-            this.clocks.push(new Clock(clock_x, clock_y, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, clock_radius))
+            this.clocks.push(new ClockUnit(clock_x, clock_y, Math.random() * 2 * Math.PI, Math.random() * 2 * Math.PI, clock_radius))
           }
         }
       }
@@ -185,23 +232,101 @@ export default function Clocks({ visibleUI }) {
       }
     }
 
+    class DigitalAnalogClock {
+      constructor(x, y, width) {
+        this.seconds = 0;
+        this.minutes = 0;
+        this.hours = 0;
+
+        this.x = x;
+        this.y = y;
+
+        this.faces = []
+
+        const one_clock_width = width / 6;
+        const hours_msd = new Digit(this.x, this.y, one_clock_width);
+        const hours_lsd = new Digit(this.x + one_clock_width, this.y, one_clock_width);
+
+        const mins_msd = new Digit(this.x + 2 * one_clock_width, this.y, one_clock_width);
+        const mins_lsd = new Digit(this.x + 3 * one_clock_width, this.y, one_clock_width);
+
+        const secs_msd = new Digit(this.x + 4 * one_clock_width, this.y, one_clock_width);
+        const secs_lsd = new Digit(this.x + 5 * one_clock_width, this.y, one_clock_width);
+
+        this.faces.push(hours_msd, hours_lsd, mins_msd, mins_lsd, secs_msd, secs_lsd)
+      }
+
+      left_pad_and_split_number(input_number) {
+        const num_zero_padded = String(input_number).padStart(2, '0')
+        return [Number(num_zero_padded[0]), Number(num_zero_padded[1])]
+      }
+
+      update() {
+
+        const hour_split = this.left_pad_and_split_number(this.hours);
+        const min_split = this.left_pad_and_split_number(this.minutes);
+        const sec_split = this.left_pad_and_split_number(this.seconds);
+
+        const num_array = [hour_split[0], hour_split[1],
+        min_split[0], min_split[1],
+        sec_split[0], sec_split[1],
+        ]
+
+        this.faces.forEach((digit, index) => {
+          digit.update()
+          digit.set_digit(clock_angle_dict[num_array[index]])
+        })
+      }
+
+      update_num() {
+        const num = String(digitSelected.current).padStart(6, '0');
+        this.hours = Number(`${num[0]}${num[1]}`)
+        this.minutes = Number(`${num[2]}${num[3]}`)
+        this.seconds = Number(`${num[4]}${num[5]}`)
+      }
+
+      draw() {
+        this.faces.forEach((digit) => {
+          digit.draw();
+        })
+      }
+
+      update_and_draw() {
+        this.update()
+        this.draw()
+      }
+
+      update_clock_themes(fill, stroke) {
+        this.faces.forEach((face) => {
+          face.update_clock_themes(fill, stroke);
+        })
+      }
+    }
+
     // let digit;
 
     function initParticles() {
-      digitRef.current = new Digit(200, 300, 100);
+      const center_x = canvas.width / 2;
+      const center_y = canvas.height / 2;
 
+      const clock_width = 0.9 * canvas.width;
+      const clock_start_x = 0.05 * canvas.width;
+      const clock_height = (clock_width / 4)
+      const clock_start_y = 0.1 * canvas.height;
+
+      clockRef.current = new DigitalAnalogClock(clock_start_x, clock_start_y, clock_width);
     }
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      clockRef.current.update_num();
 
-
-      digitRef.current.update();
+      clockRef.current.update();
       // particle.target_hr_hand_angle = target_hr_ref.current / 100.0;
       // particle.target_min_hand_angle = Math.random() * 2 * Math.PI;
-      digitRef.current.draw();
+      clockRef.current.draw();
 
-      digitRef.current.set_digit(clock_angle_dict[1]);
+      // clockRef.current.set_digit();
 
       animationFrameId = requestAnimationFrame(animate);
     }
@@ -221,11 +346,10 @@ export default function Clocks({ visibleUI }) {
 
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
-    colorRef.current = theme.accent;
     // Update all existing particles' colors
     const canvas = canvasRef.current;
     if (!canvas) return;
-    digitRef.current.update_clock_themes(theme.accent, theme.primary);
+    clockRef.current.update_clock_themes(theme.tertiaryAccent, theme.primary);
   }, [theme]);
 
   return (
@@ -244,10 +368,10 @@ export default function Clocks({ visibleUI }) {
           <ChangerGroup
             valueArrays={[
               {
-                title: 'Target Hour Hand',
-                valueRef: target_hr_ref,
-                minValue: "0.0",
-                maxValue: "628",
+                title: 'Selected Digit',
+                valueRef: digitSelected,
+                minValue: "0",
+                maxValue: "999999",
                 type: 'slider',
               }
             ]}
