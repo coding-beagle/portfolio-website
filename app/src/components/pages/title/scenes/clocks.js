@@ -101,6 +101,7 @@ export default function Clocks({ visibleUI }) {
   const canvasRef = useRef(null);
   const clockRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const thicknessRef = useRef(15);
   const mouseClickRef = useRef(false);
   const touchActiveRef = useRef(false);
   const mouseShieldRadiusRef = useRef(100);
@@ -172,14 +173,14 @@ export default function Clocks({ visibleUI }) {
         ctx.shadowColor = theme.secondary;
         ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, thicknessRef.current / 2, 0, Math.PI * 2);
         ctx.fill();
         ctx.closePath();
 
         // draw min hand
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineWidth = 10;
+        ctx.lineWidth = thicknessRef.current;
         const min_hand_end_x = this.size * Math.cos(this.min_hand_angle) + this.x;
         const min_hand_end_y = this.size * Math.sin(this.min_hand_angle) + this.y;
         ctx.lineTo(min_hand_end_x, min_hand_end_y);
@@ -189,7 +190,6 @@ export default function Clocks({ visibleUI }) {
         // draw hr hand
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineWidth = 10;
         const hr_hand_end_x = this.size * Math.cos(this.hr_hand_angle) + this.x;
         const hr_hand_end_y = this.size * Math.sin(this.hr_hand_angle) + this.y;
         ctx.lineTo(hr_hand_end_x, hr_hand_end_y);
@@ -216,7 +216,7 @@ export default function Clocks({ visibleUI }) {
         }
       }
 
-      update_position(x, y, width) {
+      update_position(x, y, width, line_thickness) {
         const clock_radius = width / 8;
         let index = 0;
         for (let y_gap = 0; y_gap < 6; y_gap++) {
@@ -225,7 +225,8 @@ export default function Clocks({ visibleUI }) {
             const clock_y = y + clock_radius / 2 + y_gap * clock_radius * 2;
             this.clocks[index].x = clock_x;
             this.clocks[index].y = clock_y;
-            this.clocks[index].size = clock_radius
+            this.clocks[index].size = clock_radius;
+            this.clocks[index].thickness = line_thickness;
             index++;
           }
         }
@@ -377,6 +378,8 @@ export default function Clocks({ visibleUI }) {
         clock_height = (clock_width / 4)
         clock_start_y = (canvas.height - clock_height) / 4;
       }
+
+
       return { start_x: clock_start_x, start_y: clock_start_y, width: clock_width }
     }
 
@@ -501,6 +504,13 @@ export default function Clocks({ visibleUI }) {
                 valueRef: mouseShieldRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
+                type: "slider",
+              },
+              {
+                title: "Hand Thickness",
+                valueRef: thicknessRef,
+                minValue: "1",
+                maxValue: "30",
                 type: "slider",
               },
             ]}
