@@ -10,8 +10,9 @@ export default function Pinball({ visibleUI }) {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const touchActiveRef = useRef(false);
-  const ballRefVX = useRef(0);
-  const ballRefVY = useRef(0);
+
+  const bouncynessRef = useRef(100);
+
   const gridSpacingX = useRef(200);
   const gridSpacingY = useRef(200);
   const ballRef = useRef(null);
@@ -150,8 +151,6 @@ export default function Pinball({ visibleUI }) {
           this.vx *= -1;
         }
 
-        ballRefVX.current = this.vx;
-        ballRefVY.current = this.vy;
       }
 
       draw() {
@@ -338,9 +337,14 @@ export default function Pinball({ visibleUI }) {
         if (collision_result !== false) {
           this.shadow = 20;
 
+          const dx = ballRef.current.x - collision_result.x;
+          const dy = ballRef.current.y - collision_result.y;
+          const angle2 = Math.atan2(dy, dx);
 
+          ballRef.current.vx = (Math.cos(angle2) * bouncynessRef.current) / 100 + ballRef.current.vx;
+          ballRef.current.vy = (Math.sin(angle2) * bouncynessRef.current) / 100 - ballRef.current.vy;
 
-          ballRef.current.y -= 10;
+          // ballRef.current.y -= 10;
 
           this.justHit = true;
         }
@@ -363,6 +367,7 @@ export default function Pinball({ visibleUI }) {
       }
 
       check_ball_collision() {
+        if (!this.canBeHit) { return false }
         let dx, dy;
         dx = (ballRef.current.x - this.x) ** 2;
         dy = (ballRef.current.y - this.y) ** 2;
@@ -415,7 +420,7 @@ export default function Pinball({ visibleUI }) {
 
         for (
           let y = 50;
-          y < canvasRef.current.height;
+          y < canvas.height * 5 / 6;
           y += gridSpacingY.current
         ) {
           offsetRow = !offsetRow;
@@ -562,15 +567,13 @@ export default function Pinball({ visibleUI }) {
                 maxValue: "400",
                 type: "slider",
               },
-              [{
-                title: "Ball Velocity X",
-                valueRef: ballRefVX,
-                type: "display",
-              }, {
-                title: "Ball Velocity Y",
-                valueRef: ballRefVY,
-                type: "display",
-              },]
+              {
+                title: "Ball Bounce Factor:",
+                valueRef: bouncynessRef,
+                minValue: "100",
+                maxValue: "300",
+                type: "slider",
+              },
             ]}
             rerenderSetter={setRender}
           />
