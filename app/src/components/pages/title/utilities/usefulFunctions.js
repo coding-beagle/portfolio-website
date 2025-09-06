@@ -39,9 +39,9 @@ export const getMiddleOfRectangle = (x, y, width, height) => {
   return { x: x + width / 2, y: y + height / 2 }
 }
 
-export const inRect = (rect, x, y) => {
+export const inRect = (rect, x, y, radius) => {
   return (
-    x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    x + radius >= rect.left && x - radius <= rect.right && y + radius >= rect.top && y - radius <= rect.bottom
   );
 };
 

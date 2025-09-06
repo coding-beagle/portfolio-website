@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { checkMouseInRadius, getMiddleOfRectangle, inRect, padRect } from "../utilities/usefulFunctions";
+import { checkMouseInRadius, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
 
 export default function Pinball({ visibleUI }) {
   const { theme } = useTheme();
@@ -10,6 +10,10 @@ export default function Pinball({ visibleUI }) {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const touchActiveRef = useRef(false);
+  const ballRefVX = useRef(0);
+  const ballRefVY = useRef(0);
+  const gridSpacingX = useRef(200);
+  const gridSpacingY = useRef(200);
   const ballRef = useRef(null);
   const controllables = useRef([]);
   const simulationSpeedRef = useRef(100);
@@ -97,53 +101,57 @@ export default function Pinball({ visibleUI }) {
 
     recalculateRect();
 
+    const BALL_MAX_VX = 8.0
+    const BALL_MAX_VY = 8.0
+
     class Particle {
       constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = 0;
+        this.vx = 3 * (Math.random() - 0.5) + Math.sign(Math.random() - 0.5) * 0.2;
         this.vy = 0;
-        this.size = 10;
+        this.size = 20;
         this.color = theme.secondary;
+        this.canBeHit = true;
       }
 
       update() {
-        if (element && visibleUIRef.current) {
-          const dxFromElementCenter = this.x - elementCenterX;
-          const dyFromElementCenter = this.y - elementCenterY;
-
-          if (inElement(rect_padded, this.x, this.y)) {
-            const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-            this.vx = Math.cos(angle2) * 5;
-            this.vy = Math.sin(angle2) * 5;
-          }
-        }
-
         if (this.vy < maxFallSpeed) {
           this.vy += gravity;
+        }
+
+        if (Math.abs(this.vx) > BALL_MAX_VX) {
+          this.vx = Math.sign(this.vx) * BALL_MAX_VX;
+        }
+
+        if (Math.abs(this.vy) > BALL_MAX_VY) {
+          this.vy = Math.sign(this.vy) * BALL_MAX_VY;
         }
 
         this.x += (this.vx * simulationSpeedRef.current) / 100;
         this.y += (this.vy * simulationSpeedRef.current) / 100;
 
         if (this.y > canvas.height) {
-          this.y = 0;
+          this.y = this.size * 2;
           this.x = Math.random() * canvas.width;
           this.vy = 0;
           this.vx = 0;
         }
 
-        if (this.x >= canvas.width + this.size * 3) {
-          this.x = Math.random() * canvas.width;
-          this.y = 0;
-          this.vx = 0;
+        if (this.y - this.size < 0.0) {
+          this.vy *= -1;
         }
 
-        if (this.x < 0 - this.size * 3) {
-          this.x = Math.random() * canvas.width;
-          this.y = 0;
-          this.vx = 0;
+        if (this.x >= canvas.width - this.size) {
+          this.vx *= -1;
         }
+
+        if (this.x < 0 + this.size) {
+          this.vx *= -1;
+        }
+
+        ballRefVX.current = this.vx;
+        ballRefVY.current = this.vy;
       }
 
       draw() {
@@ -153,10 +161,19 @@ export default function Pinball({ visibleUI }) {
         ctx.fill();
         ctx.closePath();
       }
+
+      startPaddleHitCooldown() {
+        this.canBeHit = false;
+        setTimeout(() => {
+          this.canBeHit = true;
+        }, 1000)
+      }
     }
 
     const MAX_ROTATION = 0.5;
     const MAX_ROTATION_COUNT = 50;
+
+    const MIN_UP_VELOCITY = -3;
 
     class ForceApplicator {
       constructor(x, y, width, height, left, pivot_x, pivot_y) {
@@ -182,7 +199,7 @@ export default function Pinball({ visibleUI }) {
 
       update() {
         if (checkMouseInRadius(getMiddleOfRectangle(this.x, this.y, this.width, this.height)
-          , mousePosRef.current, this.width) && this.rotating === false &&
+          , mousePosRef.current, this.width) && (Math.abs(this.rotation) < 0.01) &&
           mouseClickRef.current) {
           this.rotating = true;
           this.rotation_count = 0;
@@ -198,9 +215,9 @@ export default function Pinball({ visibleUI }) {
             this.rotation_count += 1;
           }
         } else {
-          if (Math.abs(this.rotation) > 0.01) {
+          if (Math.abs(this.rotation) > 0.1) {
             this.rotation += this.rotate_left ? -this.d_theta : this.d_theta;
-            this.d_theta -= 0.02;
+            this.d_theta -= 0.001;
           } else {
             this.d_theta = 0.0;
             this.rotation = 0.0;
@@ -211,6 +228,7 @@ export default function Pinball({ visibleUI }) {
 
       // transform the ball's coordinate system into the paddle's
       check_ball_collision() {
+        if (!ballRef.current.canBeHit) { return }
         const ball_pos = { x: ballRef.current.x, y: ballRef.current.y }
 
         const point_x = this.rect_midpoints.x - this.rotate_offset;
@@ -225,14 +243,41 @@ export default function Pinball({ visibleUI }) {
 
         const rect_paddle = { left: this.x, right: this.x + this.width, top: this.y, bottom: this.y + this.height }
         // kinky
-        const paddle_padded = padRect(rect_paddle, 2, 10);
+        const paddle_padded = padRect(rect_paddle, 2, 5);
 
-        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y)) {
-          if (this.rotation > 0.0) {
-            ballRef.current.vy = - ballRef.current.vy - this.d_theta;
+        // check collision
+        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y, ballRef.current.size)) {
+          if (Math.abs(this.rotation) > 0.0) {
+            const normalAngle = -Math.PI / 2 + this.rotation;
+            const normalX = Math.cos(normalAngle);
+            const normalY = Math.sin(normalAngle);
+
+            const dotProduct = ballRef.current.vx * normalX + ballRef.current.vy * normalY;
+            ballRef.current.vx -= 2 * dotProduct * normalX;
+            ballRef.current.vy -= (2 * dotProduct * normalY);
+
+            const speedMultiplier = 2.0;
+            ballRef.current.vx *= speedMultiplier;
+            ballRef.current.vy *= speedMultiplier;
+
+            if (this.rotating && this.d_theta > 0) {
+              const tangentialForce = this.d_theta * 15;
+              ballRef.current.vx += this.rotate_left ? -tangentialForce : tangentialForce;
+              ballRef.current.vy -= (tangentialForce);
+            }
           } else {
-            ballRef.current.vy = -ballRef.current.vy;
+            ballRef.current.vy = -ballRef.current.vy * 1.1;
           }
+
+          if (ballRef.current.vy < 0.0 && ballRef.current.vy > MIN_UP_VELOCITY) {
+            ballRef.current.vy = MIN_UP_VELOCITY;
+          }
+
+          this.d_theta = 0.0;
+          this.rotation_count = 0;
+          this.rotating = false;
+
+          ballRef.current.startPaddleHitCooldown();
         }
       }
 
@@ -266,8 +311,82 @@ export default function Pinball({ visibleUI }) {
       }
     }
 
-    function initParticles() {
-      ballRef.current = new Particle(Math.random() * canvas.width, Math.random() * canvas.height);
+    const ticks_to_stop_glowing = 300;
+
+    class Dingers {
+      constructor(x, y, size) {
+        this.x = x;
+        this.y = y;
+        this.size = size;
+        this.starting_size = size;
+        this.color = getRandomColour();
+        this.shadow_size = 0;
+        this.ticks = 0;
+        this.justHit = false;
+        this.canBeHit = true;
+      }
+
+      startHitCooldown() {
+        this.canBeHit = false;
+        setTimeout(() => {
+          this.canBeHit = true;
+        }, 400)
+      }
+
+      update() {
+        const collision_result = this.check_ball_collision()
+        if (collision_result !== false) {
+          this.shadow = 20;
+
+
+
+          ballRef.current.y -= 10;
+
+          this.justHit = true;
+        }
+
+        if (this.justHit) {
+          this.size += 3
+          this.sizeTickStart = true;
+          this.justHit = false;
+          this.startHitCooldown();
+        }
+
+        if (this.size > this.starting_size) {
+          this.size -= 0.01
+        }
+
+        if (this.shadow > 0) {
+          this.shadow -= 0.01;
+        }
+
+      }
+
+      check_ball_collision() {
+        let dx, dy;
+        dx = (ballRef.current.x - this.x) ** 2;
+        dy = (ballRef.current.y - this.y) ** 2;
+        if (dx + dy < (this.size + ballRef.current.size) ** 2) {
+          return { x: this.x, y: this.y };
+        }
+        return false
+      }
+
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.shadowBlur = this.shadow;
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.closePath();
+        ctx.restore();
+      }
+    }
+
+    function initScene() {
+      initDingers();
+      ballRef.current = new Particle(760, Math.random() * 0.5 * canvas.height + 20);
 
       const paddle_width = canvas.width / 5;
 
@@ -282,6 +401,68 @@ export default function Pinball({ visibleUI }) {
       controllables.current.push(right_paddle);
     }
 
+    class DingerManager {
+      constructor() {
+        this.childDingerPositions = [];
+        this.dingers = [];
+        this.change_existing_dingers_to_grid();
+      }
+
+      change_existing_dingers_to_grid() {
+        // dingers in the main play area:
+        let offsetRow = false;
+        let dinger_index = 0;
+
+        for (
+          let y = 50;
+          y < canvasRef.current.height;
+          y += gridSpacingY.current
+        ) {
+          offsetRow = !offsetRow;
+          for (
+            let x = 5;
+            x < canvasRef.current.width;
+            x += gridSpacingX.current
+          ) {
+            let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
+            if (dinger_index < this.dingers.length) {
+              this.dingers[dinger_index].x = xVal;
+              this.dingers[dinger_index].y = y;
+            } else {
+              this.dingers.push(new Dingers(xVal, y, 5))
+            }
+            dinger_index++;
+          }
+        }
+      }
+
+      update_and_draw() {
+        this.change_existing_dingers_to_grid()
+        this.dingers.forEach((dinger) => {
+          dinger.update();
+          dinger.draw();
+        })
+      }
+    }
+
+    let dingers = [];
+
+    const dingerMan = new DingerManager()
+
+    function initDingers() {
+      // line of dingers at the bottom
+      const dinger_y = canvas.height * 5 / 6;
+
+      for (let i = 0; i < 5; i++) {
+        dingers.push(new Dingers(i * 100 + 30, dinger_y, 30))
+      }
+
+      for (let i = 0; i < 5; i++) {
+        dingers.push(new Dingers(canvas.width - (i * 100 + 30), dinger_y, 30))
+      }
+    }
+
+
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -295,10 +476,17 @@ export default function Pinball({ visibleUI }) {
         controllable.draw();
       })
 
+      dingers.forEach((dinger) => {
+        dinger.update();
+        dinger.draw();
+      })
+
+      dingerMan.update_and_draw();
+
       animationFrameId = requestAnimationFrame(animate);
     }
 
-    initParticles();
+    initScene();
     animate();
 
     window.addEventListener("pointermove", handleMouseMove);
@@ -360,6 +548,29 @@ export default function Pinball({ visibleUI }) {
                 maxValue: "200.0",
                 type: "slider",
               },
+              {
+                title: "Grid Spacing X:",
+                valueRef: gridSpacingX,
+                minValue: "100",
+                maxValue: "400",
+                type: "slider",
+              },
+              {
+                title: "Grid Spacing Y:",
+                valueRef: gridSpacingY,
+                minValue: "100",
+                maxValue: "400",
+                type: "slider",
+              },
+              [{
+                title: "Ball Velocity X",
+                valueRef: ballRefVX,
+                type: "display",
+              }, {
+                title: "Ball Velocity Y",
+                valueRef: ballRefVY,
+                type: "display",
+              },]
             ]}
             rerenderSetter={setRender}
           />
