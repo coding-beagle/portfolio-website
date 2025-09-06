@@ -40,9 +40,14 @@ export const getMiddleOfRectangle = (x, y, width, height) => {
 }
 
 export const inRect = (rect, x, y, radius) => {
-  return (
-    x + radius >= rect.left && x - radius <= rect.right && y + radius >= rect.top && y - radius <= rect.bottom
-  );
+  const closestX = clamp(x, rect.left, rect.right);
+  const closestY = clamp(y, rect.top, rect.bottom);
+
+  const distanceX = x - closestX;
+  const distanceY = y - closestY;
+  const distanceSquared = distanceX * distanceX + distanceY * distanceY;
+
+  return distanceSquared <= radius * radius;
 };
 
 export const padRect = (rect, pad_amount_x, pad_amount_y) => {
