@@ -100,6 +100,7 @@ export default function Clocks({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const clockRef = useRef(null);
+  const moveSpeedModRef = useRef(100);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const thicknessRef = useRef(15);
   const mouseClickRef = useRef(false);
@@ -144,11 +145,11 @@ export default function Clocks({ visibleUI }) {
         const deltaMouse = Math.sqrt(dx ** 2 + dy ** 2);
 
         if ((touchActiveRef.current || mouseClickRef.current) && deltaMouse < mouseShieldRadiusRef.current) {
-          this.hr_hand_angle -= Math.random() * 0.05;
-          this.min_hand_angle -= Math.random() * 0.03;
+          this.hr_hand_angle -= Math.random() * 0.05 * moveSpeedModRef.current / 50;
+          this.min_hand_angle -= Math.random() * 0.03 * moveSpeedModRef.current / 50;
         } else {
-          this.hr_hand_angle += this.speed_factor * error_hr_hand / 200.0;
-          this.min_hand_angle += this.speed_factor * error_min_hand / 200.0;
+          this.hr_hand_angle += this.speed_factor * (moveSpeedModRef.current / 50.0) * error_hr_hand / 100;
+          this.min_hand_angle += this.speed_factor * (moveSpeedModRef.current / 50.0) * error_min_hand / 100;
         }
 
 
@@ -158,7 +159,7 @@ export default function Clocks({ visibleUI }) {
 
       draw() {
         ctx.shadowColor = theme.secondaryAccent;
-        ctx.shadowBlur = 5;
+        ctx.shadowBlur = 8;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
@@ -500,6 +501,13 @@ export default function Clocks({ visibleUI }) {
           <ChangerGroup
             valueArrays={[
               {
+                title: "Simulation Speed:",
+                valueRef: moveSpeedModRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+              {
                 title: "Click Effect Radius:",
                 valueRef: mouseShieldRadiusRef,
                 minValue: "10.0",
@@ -507,7 +515,7 @@ export default function Clocks({ visibleUI }) {
                 type: "slider",
               },
               {
-                title: "Hand Thickness",
+                title: "Hand Thickness:",
                 valueRef: thicknessRef,
                 minValue: "1",
                 maxValue: "30",
