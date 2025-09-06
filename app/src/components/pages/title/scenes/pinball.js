@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { checkMouseInRadius, getMiddleOfRectangle } from "../utilities/usefulFunctions";
+import { checkMouseInRadius, getMiddleOfRectangle, inRect, padRect } from "../utilities/usefulFunctions";
 
 export default function Pinball({ visibleUI }) {
   const { theme } = useTheme();
@@ -172,6 +172,9 @@ export default function Pinball({ visibleUI }) {
         this.height = height;
         this.rotate_left = left;
 
+        this.rect_midpoints = getMiddleOfRectangle(this.x, this.y, this.width, this.height);
+        this.rotate_offset = this.rotate_left ? this.width / 2.2 : -this.width / 2.2
+
         this.rotation = 0.0;
         this.rotation_count = 0;
         this.rotating = false;
@@ -190,29 +193,71 @@ export default function Pinball({ visibleUI }) {
             this.d_theta += 0.02;
           } else if (this.rotation_count > MAX_ROTATION_COUNT) {
             this.rotating = false;
-            this.rotation = 0.0;
             this.d_theta = 0.0;
           } else {
             this.rotation_count += 1;
+          }
+        } else {
+          if (Math.abs(this.rotation) > 0.01) {
+            this.rotation += this.rotate_left ? -this.d_theta : this.d_theta;
+            this.d_theta -= 0.02;
+          } else {
+            this.d_theta = 0.0;
+            this.rotation = 0.0;
+          }
+        }
+        this.check_ball_collision();
+      }
+
+      // transform the ball's coordinate system into the paddle's
+      check_ball_collision() {
+        const ball_pos = { x: ballRef.current.x, y: ballRef.current.y }
+
+        const point_x = this.rect_midpoints.x - this.rotate_offset;
+        const point_y = this.rect_midpoints.y;
+
+        const dx = ball_pos.x - point_x;
+        const dy = ball_pos.y - point_y;
+
+        const new_x = point_x + dx * Math.cos(-this.rotation) - dy * Math.sin(-this.rotation);
+        const new_y = point_y + dy * Math.cos(-this.rotation) + dx * Math.sin(-this.rotation);
+        const ball_pos_transformed = { x: new_x, y: new_y };
+
+        const rect_paddle = { left: this.x, right: this.x + this.width, top: this.y, bottom: this.y + this.height }
+        // kinky
+        const paddle_padded = padRect(rect_paddle, 2, 10);
+
+        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y)) {
+          if (this.rotation > 0.0) {
+            ballRef.current.vy = - ballRef.current.vy - this.d_theta;
+          } else {
+            ballRef.current.vy = -ballRef.current.vy;
           }
         }
       }
 
       draw() {
         ctx.save();
-        ctx.beginPath();
-        ctx.fillStyle = theme.secondary;
 
-        const rect_midpoints = getMiddleOfRectangle(this.x, this.y, this.width, this.height);
-        const rotate_offset = this.rotate_left ? this.width / 3 : -this.width / 3
-        if (this.rotating) {
-          ctx.translate(rect_midpoints.x - rotate_offset, rect_midpoints.y)
+        ctx.beginPath();
+
+        if (Math.abs(this.rotation) > 0.01) {
+          ctx.translate(this.rect_midpoints.x - this.rotate_offset, this.rect_midpoints.y)
           ctx.rotate(this.rotation);
-          ctx.translate(-(rect_midpoints.x - rotate_offset), -rect_midpoints.y)
+          ctx.translate(-(this.rect_midpoints.x - this.rotate_offset), -this.rect_midpoints.y)
+        } else {
+          this.rotation = 0.0;
         }
+        ctx.fillStyle = theme.secondary;
         ctx.rect(this.x, this.y, this.width, this.height);
 
 
+        ctx.fill();
+        ctx.closePath();
+
+        ctx.beginPath();
+        ctx.arc(this.rect_midpoints.x - this.rotate_offset, this.rect_midpoints.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = theme.primary;
         ctx.fill();
         ctx.closePath();
 

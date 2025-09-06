@@ -38,3 +38,16 @@ export const checkMouseInRadius = (pos_1, mouse_pos, check_radius) => {
 export const getMiddleOfRectangle = (x, y, width, height) => {
   return { x: x + width / 2, y: y + height / 2 }
 }
+
+export const inRect = (rect, x, y) => {
+  return (
+    x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+  );
+};
+
+export const padRect = (rect, pad_amount_x, pad_amount_y) => {
+  return {
+    left: rect.left - pad_amount_x, right: rect.right + pad_amount_x,
+    top: rect.top - pad_amount_y, bottom: rect.bottom + pad_amount_y
+  }
+}
