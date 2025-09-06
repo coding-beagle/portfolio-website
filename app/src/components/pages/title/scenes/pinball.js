@@ -103,7 +103,7 @@ export default function Pinball({ visibleUI }) {
     recalculateRect();
 
     const BALL_MAX_VX = 8.0
-    const BALL_MAX_VY = 8.0
+    const BALL_MAX_VY = 6.0
 
     class Particle {
       constructor(x, y) {
@@ -129,8 +129,18 @@ export default function Pinball({ visibleUI }) {
           this.vy = Math.sign(this.vy) * BALL_MAX_VY;
         }
 
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
+        // prevent tunneling
+        const new_potential_pos = this.ray_cast_collisions();
+
+        if (!new_potential_pos) {
+          this.x += (this.vx * simulationSpeedRef.current) / 100;
+          this.y += (this.vy * simulationSpeedRef.current) / 100;
+        } else {
+          this.x = new_potential_pos.x;
+          this.y = new_potential_pos.y;
+        }
+
+
 
         if (this.y > canvas.height) {
           this.y = this.size * 2;
@@ -159,6 +169,26 @@ export default function Pinball({ visibleUI }) {
         ctx.fillStyle = this.color;
         ctx.fill();
         ctx.closePath();
+      }
+
+      ray_cast_collisions() {
+        for (let x_vel = 0; x_vel < this.vx; x_vel++) {
+          for (let y_vel = 0; y_vel < this.vy; y_vel++) {
+            const check_x = this.x + x_vel;
+            const check_y = this.y + y_vel;
+            dingerMan.dingers.forEach((dinger) => {
+              const potential_pos = dinger.check_collision_with_pos(check_x, check_y);
+              if (potential_pos) {
+                return potential_pos;
+              }
+            })
+            controllables.current.forEach((controllable) => {
+              const potential_pos = controllable.check_collision_with_pos(check_x, check_y);
+              if (potential_pos) { return potential_pos }
+            })
+          }
+        }
+        return false
       }
 
       startPaddleHitCooldown() {
@@ -280,6 +310,28 @@ export default function Pinball({ visibleUI }) {
         }
       }
 
+      check_collision_with_pos(x, y) {
+        if (!ballRef.current.canBeHit) { return }
+        const ball_pos = { x: x, y: y }
+
+        const point_x = this.rect_midpoints.x - this.rotate_offset;
+        const point_y = this.rect_midpoints.y;
+
+        const dx = ball_pos.x - point_x;
+        const dy = ball_pos.y - point_y;
+
+        const new_x = point_x + dx * Math.cos(-this.rotation) - dy * Math.sin(-this.rotation);
+        const new_y = point_y + dy * Math.cos(-this.rotation) + dx * Math.sin(-this.rotation);
+        const ball_pos_transformed = { x: new_x, y: new_y };
+
+        const rect_paddle = { left: this.x, right: this.x + this.width, top: this.y, bottom: this.y + this.height }
+        // kinky
+        const paddle_padded = padRect(rect_paddle, 2, 5);
+
+        // check collision
+        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y, ballRef.current.size)) { return ball_pos }
+      }
+
       draw() {
         ctx.save();
 
@@ -344,8 +396,6 @@ export default function Pinball({ visibleUI }) {
           ballRef.current.vx = (Math.cos(angle2) * bouncynessRef.current) / 100 + ballRef.current.vx;
           ballRef.current.vy = (Math.sin(angle2) * bouncynessRef.current) / 100 - ballRef.current.vy;
 
-          // ballRef.current.y -= 10;
-
           this.justHit = true;
         }
 
@@ -371,6 +421,17 @@ export default function Pinball({ visibleUI }) {
         let dx, dy;
         dx = (ballRef.current.x - this.x) ** 2;
         dy = (ballRef.current.y - this.y) ** 2;
+        if (dx + dy < (this.size + ballRef.current.size) ** 2) {
+          return { x: this.x, y: this.y };
+        }
+        return false
+      }
+
+      check_collision_with_pos(x, y) {
+        if (!this.canBeHit) { return false }
+        let dx, dy;
+        dx = (x - this.x) ** 2;
+        dy = (y - this.y) ** 2;
         if (dx + dy < (this.size + ballRef.current.size) ** 2) {
           return { x: this.x, y: this.y };
         }
@@ -419,8 +480,8 @@ export default function Pinball({ visibleUI }) {
         let dinger_index = 0;
 
         for (
-          let y = 50;
-          y < canvas.height * 5 / 6;
+          let y = canvas.height / 6;
+          y < canvas.height * 4 / 6;
           y += gridSpacingY.current
         ) {
           offsetRow = !offsetRow;
@@ -459,11 +520,11 @@ export default function Pinball({ visibleUI }) {
       const dinger_y = canvas.height * 5 / 6;
 
       for (let i = 0; i < 5; i++) {
-        dingers.push(new Dingers(i * 100 + 30, dinger_y, 30))
+        dingers.push(new Dingers(i * 100 + 30, dinger_y + i * 20 - 100, 30))
       }
 
       for (let i = 0; i < 5; i++) {
-        dingers.push(new Dingers(canvas.width - (i * 100 + 30), dinger_y, 30))
+        dingers.push(new Dingers(canvas.width - (i * 100 + 30), dinger_y + i * 20 - 100, 30))
       }
     }
 
