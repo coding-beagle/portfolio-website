@@ -101,6 +101,7 @@ export default function Clocks({ visibleUI }) {
   const canvasRef = useRef(null);
   const clockRef = useRef(null);
   const moveSpeedModRef = useRef(100);
+  const bloomModRef = useRef(100);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const thicknessRef = useRef(15);
   const mouseClickRef = useRef(false);
@@ -159,7 +160,7 @@ export default function Clocks({ visibleUI }) {
 
       draw() {
         ctx.shadowColor = theme.secondaryAccent;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fillStyle = this.color;
@@ -172,7 +173,7 @@ export default function Clocks({ visibleUI }) {
         ctx.strokeStyle = this.strokeColor;
         ctx.fillStyle = this.strokeColor;
         ctx.shadowColor = theme.secondary;
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = 8 * bloomModRef.current / 100.0;
         ctx.beginPath();
         ctx.arc(this.x, this.y, thicknessRef.current / 2, 0, Math.PI * 2);
         ctx.fill();
@@ -519,6 +520,13 @@ export default function Clocks({ visibleUI }) {
                 valueRef: thicknessRef,
                 minValue: "1",
                 maxValue: "30",
+                type: "slider",
+              },
+              {
+                title: "NT UltraFidelity Bloom(TM):",
+                valueRef: bloomModRef,
+                minValue: "1",
+                maxValue: "200",
                 type: "slider",
               },
             ]}
