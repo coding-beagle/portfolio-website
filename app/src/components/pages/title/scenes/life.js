@@ -74,16 +74,16 @@ export default function Life({ visibleUI }) {
             if (current_week > total_weeks) { return }
 
             if (mobile) {
-              const dx = mousePosRef.current.x - rows * offsetX + boxSize / 2;
-              const dy = mousePosRef.current.y - columns * offsetY + boxSize / 2;
+              const dy = mousePosRef.current.y - rows * offsetX + boxSize / 2;
+              const dx = mousePosRef.current.x - columns * offsetY + boxSize / 2;
               if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize / 2) {
                 ctx.fillStyle = theme.secondaryAccent;
                 selectedDate.current = `${Math.round((current_week / total_weeks) * 100000) / 1000} %`
               }
               ctx.rect(columns * offsetY, rows * offsetX, boxSize, boxSize);
             } else {
-              const dx = rows * offsetX + canvasRef.current.height / 3 + boxSize / 2 - mousePosRef.current.y;
-              const dy = columns * offsetY + boxSize / 2 - mousePosRef.current.x;
+              const dy = rows * offsetX + canvasRef.current.height / 3 + boxSize / 2 - mousePosRef.current.y;
+              const dx = columns * offsetY + boxSize / 2 - mousePosRef.current.x;
 
               if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize / 2) {
                 ctx.fillStyle = theme.secondaryAccent;
