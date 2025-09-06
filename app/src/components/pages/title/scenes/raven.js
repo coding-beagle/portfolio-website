@@ -4,7 +4,7 @@ import { ChangerGroup } from "../utilities/valueChangers";
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
-import { scale_value } from "../utilities/usefulFunctions";
+import { scaleValue } from "../utilities/usefulFunctions";
 import MouseTooltip from "../utilities/popovers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
@@ -104,8 +104,8 @@ export default function Raven({ visibleUI }) {
         const width = rect.width;
         const height = rect.height;
 
-        const new_rotation_x = scale_value(mouseposref.current.x, 0, width, min_rotation_x, max_rotation_x);
-        const new_rotation_y = scale_value(mouseposref.current.y, 0, height, min_rotation_y, max_rotation_y);
+        const new_rotation_x = scaleValue(mouseposref.current.x, 0, width, min_rotation_x, max_rotation_x);
+        const new_rotation_y = scaleValue(mouseposref.current.y, 0, height, min_rotation_y, max_rotation_y);
         crow.rotation.y = new_rotation_x;
         crow.rotation.x = new_rotation_y;
 

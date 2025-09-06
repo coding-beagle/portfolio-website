@@ -24,6 +24,17 @@ export const getRandomColour = () => {
     .padStart(6, "0")}`;
 };
 
-export const scale_value = (val, input_min, input_max, output_min, output_max) => {
+// arduino map
+export const scaleValue = (val, input_min, input_max, output_min, output_max) => {
   return (val - input_min) * (output_max - output_min) / (input_max - input_min) + output_min;
+}
+
+export const checkMouseInRadius = (pos_1, mouse_pos, check_radius) => {
+  const dx = pos_1.x - mouse_pos.x;
+  const dy = pos_1.y - mouse_pos.y;
+  return Math.sqrt(dx ** 2 + dy ** 2) < check_radius;
+}
+
+export const getMiddleOfRectangle = (x, y, width, height) => {
+  return { x: x + width / 2, y: y + height / 2 }
 }
