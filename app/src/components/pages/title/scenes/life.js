@@ -8,7 +8,9 @@ export default function Life({ visibleUI }) {
   const mobile = useContext(MobileContext);
   const { theme } = useTheme();
   const canvasRef = useRef(null);
+  const selectedDate = useRef(0);
   const lifeRef = useRef(0);
+  const mousePosRef = useRef({ x: 0, y: 0 });
   const [birthdate, setBirthdate] = useState({ $d: myBirthday });
   const [lifeExpectancy, setLifeExpectancy] = useState(80);
   const colorRef = useRef(theme.accent);
@@ -45,10 +47,10 @@ export default function Life({ visibleUI }) {
         const current_date = new Date();
 
         const total_weeks = diff_weeks(birthdayDate, deathDate);
-        const current_weeks = diff_weeks(birthdayDate, current_date);
-        lifeRef.current = `${
-          Math.round((current_weeks / total_weeks) * 100000) / 1000
-        } %`;
+        const current_weeks = diff_weeks(current_date, birthdayDate);
+        // round up to three dp precision
+        lifeRef.current = `${Math.round((current_weeks / total_weeks) * 100000) / 1000
+          } %`;
 
         const boxPadding = 3;
 
@@ -67,9 +69,27 @@ export default function Life({ visibleUI }) {
                 ? theme.accent
                 : theme.secondary;
             ctx.beginPath();
+
+            const current_week = (rows * numColumns + columns)
+            if (current_week > total_weeks) { return }
+
             if (mobile) {
+              const dx = mousePosRef.current.x - rows * offsetX + boxSize / 2;
+              const dy = mousePosRef.current.y - columns * offsetY + boxSize / 2;
+              if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize * 3 / 2) {
+                ctx.fillStyle = theme.secondaryAccent;
+                selectedDate.current = `${Math.round((current_week / total_weeks) * 100000) / 1000} %`
+              }
               ctx.rect(columns * offsetY, rows * offsetX, boxSize, boxSize);
             } else {
+              const dx = rows * offsetX + canvasRef.current.height / 3 + boxSize / 2 - mousePosRef.current.y;
+              const dy = columns * offsetY + boxSize / 2 - mousePosRef.current.x;
+
+              if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize / 2) {
+                ctx.fillStyle = theme.secondaryAccent;
+                selectedDate.current = `${Math.round((current_week / total_weeks) * 100000) / 1000} %`
+              }
+
               ctx.rect(
                 columns * offsetY,
                 rows * offsetX + canvasRef.current.height / 3,
@@ -85,8 +105,44 @@ export default function Life({ visibleUI }) {
 
     calculate();
 
+    const handleMouseMove = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      mousePosRef.current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    };
+
+    const handleTouchMove = (event) => {
+      if (event.touches && event.touches.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const touch = event.touches[0];
+        mousePosRef.current = {
+          x: touch.clientX - rect.left,
+          y: touch.clientY - rect.top,
+        };
+      }
+    };
+
+    let animationFrameId
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      calculate();
+      animationFrameId = requestAnimationFrame(animate);
+    }
+
+    animate();
+
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("touchmove", handleTouchMove);
+
     return () => {
+      cancelAnimationFrame(animationFrameId);
       window.removeEventListener("resize", resizeCanvas);
+      window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("touchmove", handleTouchMove);
     };
   }, [birthdate, lifeExpectancy, theme]);
 
@@ -123,6 +179,11 @@ export default function Life({ visibleUI }) {
               {
                 title: "Percent of life lived:",
                 valueRef: lifeRef,
+                type: "display",
+              },
+              {
+                title: "Hovered Date",
+                valueRef: selectedDate,
                 type: "display",
               },
             ]}
