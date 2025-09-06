@@ -76,7 +76,7 @@ export default function Life({ visibleUI }) {
             if (mobile) {
               const dx = mousePosRef.current.x - rows * offsetX + boxSize / 2;
               const dy = mousePosRef.current.y - columns * offsetY + boxSize / 2;
-              if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize * 3 / 2) {
+              if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize / 2) {
                 ctx.fillStyle = theme.secondaryAccent;
                 selectedDate.current = `${Math.round((current_week / total_weeks) * 100000) / 1000} %`
               }
