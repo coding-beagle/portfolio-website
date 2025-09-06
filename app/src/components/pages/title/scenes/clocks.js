@@ -146,7 +146,7 @@ export default function Clocks({ visibleUI }) {
         const deltaMouse = Math.sqrt(dx ** 2 + dy ** 2);
 
         if ((touchActiveRef.current || mouseClickRef.current) && deltaMouse < mouseShieldRadiusRef.current) {
-          this.hr_hand_angle -= Math.random() * 0.05 * moveSpeedModRef.current / 50;
+          this.hr_hand_angle -= Math.random() * 0.03 * 0.06 * moveSpeedModRef.current / 50;
           this.min_hand_angle -= Math.random() * 0.03 * moveSpeedModRef.current / 50;
         } else {
           this.hr_hand_angle += this.speed_factor * (moveSpeedModRef.current / 50.0) * error_hr_hand / 100;
