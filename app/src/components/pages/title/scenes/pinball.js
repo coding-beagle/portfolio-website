@@ -102,8 +102,8 @@ export default function Pinball({ visibleUI }) {
 
     recalculateRect();
 
-    const BALL_MAX_VX = 15.0
-    const BALL_MAX_VY = 15.0
+    const BALL_MAX_VX = 8.0
+    const BALL_MAX_VY = 8.0
 
     class Ball {
       constructor(x, y, vx, vy) {
@@ -186,7 +186,7 @@ export default function Pinball({ visibleUI }) {
           for (let i = 0; i < controllables.current.length; i++) {
             const pos = controllables.current[i].check_collision_with_pos(check_x, check_y)
             if (pos) {
-              new_pos = { x: check_x, y: check_y, vx: pos.vx, vy: pos.vy }
+              new_pos = { x: ballRef.current.x + pos.vx, y: ballRef.current.y + pos.vy, vx: pos.vx, vy: pos.vy }
               break;
             }
           }
@@ -374,6 +374,9 @@ export default function Pinball({ visibleUI }) {
         // check collision
         if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y, ballRef.current.size + 10)) {
           if (Math.abs(this.rotation) > 0.0) {
+            this.d_theta = 0.0
+            this.rotation_count = 0;
+            this.rotating = false;
             const normalAngle = -Math.PI / 2 + this.rotation;
             const normalX = Math.cos(normalAngle);
             const normalY = Math.sin(normalAngle);
