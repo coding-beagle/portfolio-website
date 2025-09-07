@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { checkMouseInRadius, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Pinball({ visibleUI }) {
   const { theme } = useTheme();
@@ -21,6 +22,8 @@ export default function Pinball({ visibleUI }) {
   const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
+
+  const mobile = useContext(MobileContext)
 
   useEffect(() => {
     let element = document.getElementById("title") ?? null;
@@ -111,7 +114,7 @@ export default function Pinball({ visibleUI }) {
         this.y = y;
         this.vx = vx;
         this.vy = vy;
-        this.size = 20;
+        this.size = mobile ? 10 : 20;
         this.color = theme.secondary;
         this.canBeHit = true;
         this.stuckCounter = 0;
@@ -697,7 +700,6 @@ export default function Pinball({ visibleUI }) {
           x += gridSpacingX.current
         ) { cols++; }
 
-        // const cols = Math.floor(canvas.width / gridSpacingX.current);
         const num_dingers = rows * cols;
 
         while (this.dingers.length > num_dingers) {
@@ -744,12 +746,16 @@ export default function Pinball({ visibleUI }) {
       // line of dingers at the bottom
       const dinger_y = canvas.height * 5 / 6;
 
+      const dinger_size = canvas.width * 0.02;
+      const dinger_spacing = canvas.width * 0.04;
+      const dinger_y_spacing = canvas.width * 0.03
+
       for (let i = 0; i < 6; i++) {
-        dingers.push(new Dingers(i * 80 + 30, dinger_y + i * 16 - 100, 30))
+        dingers.push(new Dingers(i * dinger_spacing + dinger_size, dinger_y + i * 16 - dinger_y_spacing, dinger_size))
       }
 
       for (let i = 0; i < 6; i++) {
-        dingers.push(new Dingers(canvas.width - (i * 80 + 30), dinger_y + i * 16 - 100, 30))
+        dingers.push(new Dingers(canvas.width - (i * dinger_spacing + dinger_size), dinger_y + i * 16 - dinger_y_spacing, dinger_size))
       }
     }
 
