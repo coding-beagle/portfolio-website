@@ -102,8 +102,8 @@ export default function Pinball({ visibleUI }) {
 
     recalculateRect();
 
-    const BALL_MAX_VX = 8.0
-    const BALL_MAX_VY = 8.0
+    const BALL_MAX_VX = 15.0
+    const BALL_MAX_VY = 15.0
 
     class Ball {
       constructor(x, y, vx, vy) {
@@ -114,6 +114,10 @@ export default function Pinball({ visibleUI }) {
         this.size = 20;
         this.color = theme.secondary;
         this.canBeHit = true;
+        this.stuckCounter = 0;
+        this.lastX = x;
+        this.lastY = y;
+        this.stuckThreshold = 30; // frames to detect if stuck
       }
 
       update() {
@@ -128,6 +132,36 @@ export default function Pinball({ visibleUI }) {
         if (Math.abs(this.vy) > BALL_MAX_VY) {
           this.vy = Math.sign(this.vy) * BALL_MAX_VY;
         }
+
+        // Check if ball is stuck (not moving much)
+        const distanceMoved = Math.sqrt((this.x - this.lastX) ** 2 + (this.y - this.lastY) ** 2);
+        if (distanceMoved < 1 && Math.abs(this.vx) < 0.5 && Math.abs(this.vy) < 0.5) {
+          this.stuckCounter++;
+          if (this.stuckCounter > this.stuckThreshold) {
+            // Ball is stuck, give it a push
+            console.log("Ball stuck, applying emergency push");
+            this.vy = -3; // Push upward
+            this.vx += (Math.random() - 0.5) * 2; // Random horizontal push
+            this.stuckCounter = 0;
+          }
+        } else {
+          this.stuckCounter = 0;
+        }
+
+        // Add minimum velocity threshold to prevent getting stuck
+        const MIN_VELOCITY = 0.5;
+        if (Math.abs(this.vx) < MIN_VELOCITY && Math.abs(this.vy) < MIN_VELOCITY) {
+          // Give it a small push downward if nearly stationary
+          if (Math.abs(this.vy) < 0.1) {
+            this.vy = MIN_VELOCITY;
+          }
+          // Add slight horizontal randomness to break symmetrical situations
+          this.vx += (Math.random() - 0.5) * 0.2;
+        }
+
+        // Store previous position for stuck detection
+        this.lastX = this.x;
+        this.lastY = this.y;
 
         // prevent tunneling
         const new_potential_pos = this.ray_cast_collisions();
@@ -147,6 +181,7 @@ export default function Pinball({ visibleUI }) {
           this.x = Math.random() * canvas.width;
           this.vy = 0;
           this.vx = 0;
+          this.stuckCounter = 0; // Reset stuck counter
         }
 
         if (this.y - this.size < 0.0) {
@@ -175,47 +210,110 @@ export default function Pinball({ visibleUI }) {
         const deltaX = (this.vx * simulationSpeedRef.current) / 100;
         const deltaY = (this.vy * simulationSpeedRef.current) / 100;
 
-        const max_steps = 30;
+        const max_steps = 50;
+
+        // Track previous step to calculate collision point more accurately
+        let prev_x = this.x;
+        let prev_y = this.y;
 
         for (let steps = 1; steps < max_steps; steps++) {
           const check_x = this.x + (deltaX / max_steps) * steps;
           const check_y = this.y + (deltaY / max_steps) * steps;
 
-          let new_pos;
-
+          // Check collisions with controllables (paddles)
           for (let i = 0; i < controllables.current.length; i++) {
-            const pos = controllables.current[i].check_collision_with_pos(check_x, check_y)
+            const pos = controllables.current[i].check_collision_with_pos(check_x, check_y);
             if (pos) {
-              new_pos = { x: ballRef.current.x + pos.vx, y: ballRef.current.y + pos.vy, vx: pos.vx, vy: pos.vy }
-              break;
+              // For paddles, ensure ball is positioned safely away
+              const paddle = controllables.current[i];
+              let safe_x = pos.x;
+              let safe_y = pos.y;
+
+              // Additional safety check: ensure ball is above paddle
+              if (safe_y + this.size > paddle.y - 5) {
+                safe_y = paddle.y - this.size - 10;
+              }
+
+              // Ensure ball has upward velocity after paddle collision
+              let safe_vx = pos.vx;
+              let safe_vy = Math.min(pos.vy, -1); // Ensure upward movement
+
+              return {
+                x: safe_x,
+                y: safe_y,
+                vx: safe_vx,
+                vy: safe_vy
+              };
             }
           }
 
-          if (new_pos) { console.log(new_pos); return new_pos }
-
+          // Check collisions with dingers
           for (let i = 0; i < dingers.length; i++) {
-            const pos = dingers[i].check_collision_with_pos(check_x, check_y)
+            const pos = dingers[i].check_collision_with_pos(check_x, check_y);
             if (pos) {
+              console.log("Dinger collision detected:", i);
               dingers[i].justHit = true;
-              new_pos = pos;
-              break;
+
+              // Calculate safe position by moving ball away from dinger center
+              const dx = prev_x - dingers[i].x;
+              const dy = prev_y - dingers[i].y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              const safeDistance = this.size + dingers[i].size + 2;
+
+              let safe_x, safe_y;
+              if (distance > 0) {
+                safe_x = dingers[i].x + (dx / distance) * safeDistance;
+                safe_y = dingers[i].y + (dy / distance) * safeDistance;
+              } else {
+                // Fallback if ball is exactly on dinger center
+                safe_x = prev_x;
+                safe_y = prev_y;
+              }
+
+              return {
+                x: safe_x,
+                y: safe_y,
+                vx: pos.vx,
+                vy: pos.vy
+              };
             }
           }
 
-          if (new_pos) { console.log(new_pos); return new_pos }
-
+          // Check collisions with dinger manager dingers
           for (let i = 0; i < dingerMan.dingers.length; i++) {
-            const pos = dingerMan.dingers[i].check_collision_with_pos(check_x, check_y)
+            const pos = dingerMan.dingers[i].check_collision_with_pos(check_x, check_y);
             if (pos) {
+              console.log("DingerMan collision detected:", i);
               dingerMan.dingers[i].justHit = true;
-              new_pos = pos;
-              break;
+
+              // Calculate safe position by moving ball away from dinger center
+              const dx = prev_x - dingerMan.dingers[i].x;
+              const dy = prev_y - dingerMan.dingers[i].y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              const safeDistance = this.size + dingerMan.dingers[i].size + 2;
+
+              let safe_x, safe_y;
+              if (distance > 0) {
+                safe_x = dingerMan.dingers[i].x + (dx / distance) * safeDistance;
+                safe_y = dingerMan.dingers[i].y + (dy / distance) * safeDistance;
+              } else {
+                // Fallback if ball is exactly on dinger center
+                safe_x = prev_x;
+                safe_y = prev_y;
+              }
+
+              return {
+                x: safe_x,
+                y: safe_y,
+                vx: pos.vx,
+                vy: pos.vy
+              };
             }
           }
 
-          if (new_pos) { console.log(new_pos); return new_pos }
-
-
+          // Update previous position for next iteration
+          prev_x = check_x;
+          prev_y = check_y;
         }
 
         return false;
@@ -352,7 +450,7 @@ export default function Pinball({ visibleUI }) {
       // }
 
       check_collision_with_pos(x, y) {
-        if (!ballRef.current) return false; // Add safety check
+        if (!ballRef.current) return false;
 
         const new_velocity = { vx: ballRef.current.vx, vy: ballRef.current.vy }
         const ball_pos = { x: x, y: y }
@@ -368,15 +466,15 @@ export default function Pinball({ visibleUI }) {
         const ball_pos_transformed = { x: new_x, y: new_y };
 
         const rect_paddle = { left: this.x, right: this.x + this.width, top: this.y, bottom: this.y + this.height }
-        // kinky
         const paddle_padded = padRect(rect_paddle, 2, 5);
 
         // check collision
-        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y, ballRef.current.size + 10)) {
+        if (inRect(paddle_padded, ball_pos_transformed.x, ball_pos_transformed.y, ballRef.current.size)) {
+          this.d_theta = 0.0;
+          this.rotation_count = 0;
+          this.rotating = false;
+
           if (Math.abs(this.rotation) > 0.0) {
-            this.d_theta = 0.0
-            this.rotation_count = 0;
-            this.rotating = false;
             const normalAngle = -Math.PI / 2 + this.rotation;
             const normalX = Math.cos(normalAngle);
             const normalY = Math.sin(normalAngle);
@@ -389,30 +487,44 @@ export default function Pinball({ visibleUI }) {
             new_velocity.vx *= speedMultiplier;
             new_velocity.vy *= speedMultiplier;
 
-            if (this.rotating && this.d_theta > 0) {
+            if (Math.abs(this.d_theta) > 0) {
               const tangentialForce = this.d_theta * 15;
               new_velocity.vx += this.rotate_left ? -tangentialForce : tangentialForce;
-              new_velocity.vy -= (tangentialForce);
+              new_velocity.vy -= tangentialForce;
             }
 
-            // move ball outside paddle along the normal
-            const separationDistance = ballRef.current.size + 5;
-            new_x += normalX * separationDistance;
-            new_y += normalY * separationDistance;
+            const separationDistance = ballRef.current.size + 15; // Increased separation
+
+            new_x = ball_pos.x + normalX * separationDistance;
+            new_y = ball_pos.y + normalY * separationDistance;
+
+            if (new_y > this.y - ballRef.current.size - 10) {
+              new_y = this.y - ballRef.current.size - 10;
+            }
+
           } else {
-            new_velocity.vy = -new_velocity.vy * 1.1;
-            new_y = this.y - ballRef.current.size - 3;
+
+            new_velocity.vy = -Math.abs(new_velocity.vy) * 1.1;
+            new_y = this.y - ballRef.current.size - 10;
+            new_x = ball_pos.x;
           }
 
+          // Ensure minimum upward velocity
           if (new_velocity.vy < 0.0 && new_velocity.vy > MIN_UP_VELOCITY) {
             new_velocity.vy = MIN_UP_VELOCITY;
           }
+
+          // if ball would still be inside paddle, push it further away
+          const safety_check_rect = padRect(rect_paddle, ballRef.current.size + 5, ballRef.current.size + 5);
+          if (inRect(safety_check_rect, new_x, new_y, ballRef.current.size)) {
+            new_y = this.y - ballRef.current.size - 20;
+            new_velocity.vy = Math.min(new_velocity.vy, -2); // Ensure upward movement
+          }
+
           return { x: new_x, y: new_y, vx: new_velocity.vx, vy: new_velocity.vy }
         }
         return false;
-      }
-
-      draw() {
+      } draw() {
         ctx.save();
 
         ctx.beginPath();
@@ -459,7 +571,7 @@ export default function Pinball({ visibleUI }) {
         this.canBeHit = false;
         setTimeout(() => {
           this.canBeHit = true;
-        }, 400)
+        }, 100) // Reduced from 400 to 100ms to prevent missing collisions
       }
 
       update() {
@@ -495,30 +607,36 @@ export default function Pinball({ visibleUI }) {
 
       }
 
-      // check_ball_collision() {
-      //   if (!this.canBeHit) { return false }
-      //   let dx, dy;
-      //   dx = (ballRef.current.x - this.x) ** 2;
-      //   dy = (ballRef.current.y - this.y) ** 2;
-      //   if (dx + dy < (this.size + ballRef.current.size) ** 2) {
-      //     return { x: this.x, y: this.y };
-      //   }
-      //   return false
-      // }
-
       check_collision_with_pos(x, y) {
         if (!this.canBeHit) { return false }
         let dx, dy;
         dx = (x - this.x) ** 2;
         dy = (y - this.y) ** 2;
         if (dx + dy < (this.size + ballRef.current.size) ** 2) {
-          const dx = x - this.x;
-          const dy = y - this.y;
-          const angle2 = Math.atan2(dy, dx);
+          // Calculate collision normal (from dinger center to ball)
+          const dx_norm = x - this.x;
+          const dy_norm = y - this.y;
+          const distance = Math.sqrt(dx_norm * dx_norm + dy_norm * dy_norm);
 
-          const new_vx = (Math.cos(angle2) * bouncynessRef.current) / 100 + ballRef.current.vx;
-          const new_vy = (Math.sin(angle2) * bouncynessRef.current) / 100 - ballRef.current.vy;
-          return { x: x, y: y, vx: new_vx, vy: new_vy };
+          if (distance > 0) {
+            // Normalize the collision normal
+            const nx = dx_norm / distance;
+            const ny = dy_norm / distance;
+
+            // Reflect velocity using the normal
+            const dotProduct = ballRef.current.vx * nx + ballRef.current.vy * ny;
+            const new_vx = ballRef.current.vx - 2 * dotProduct * nx;
+            const new_vy = ballRef.current.vy - 2 * dotProduct * ny;
+
+            // Add some bounciness
+            const bounceMultiplier = (bouncynessRef.current) / 100;
+            return {
+              x: x,
+              y: y,
+              vx: new_vx * bounceMultiplier,
+              vy: new_vy * bounceMultiplier
+            };
+          }
         }
         return false
       }
@@ -537,8 +655,8 @@ export default function Pinball({ visibleUI }) {
 
     function initScene() {
       initDingers();
-      // ballRef.current = new Ball(760, Math.random() * 0.5 * canvas.height + 20); 3 * (Math.random() - 0.5) + Math.sign(Math.random() - 0.5) * 0.2
-      ballRef.current = new Ball(605, 600, 0, 50);
+      ballRef.current = new Ball(Math.random() * canvas.width, Math.random() * 0.5 * canvas.height + 20, Math.random() * 2, Math.random() * 2);
+      // ballRef.current = new Ball(605, 600, 0, );
 
       const paddle_width = canvas.width / 5;
 
@@ -564,6 +682,27 @@ export default function Pinball({ visibleUI }) {
         // dingers in the main play area:
         let offsetRow = false;
         let dinger_index = 0;
+
+        let rows = 0;
+        let cols = 0;
+        for (
+          let y = canvas.height / 6;
+          y < canvas.height * 4 / 6;
+          y += gridSpacingY.current
+        ) { rows++ }
+
+        for (
+          let x = 5;
+          x < canvasRef.current.width;
+          x += gridSpacingX.current
+        ) { cols++; }
+
+        // const cols = Math.floor(canvas.width / gridSpacingX.current);
+        const num_dingers = rows * cols;
+
+        while (this.dingers.length > num_dingers) {
+          this.dingers.pop()
+        }
 
         for (
           let y = canvas.height / 6;
@@ -673,7 +812,7 @@ export default function Pinball({ visibleUI }) {
         canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
       }
     };
-  }, [theme.secondary]);
+  }, [theme.primary, theme.secondary]);
 
   useEffect(() => {
     visibleUIRef.current = visibleUI;
