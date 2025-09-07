@@ -56,3 +56,15 @@ export const padRect = (rect, pad_amount_x, pad_amount_y) => {
     top: rect.top - pad_amount_y, bottom: rect.bottom + pad_amount_y
   }
 }
+
+export const drawCircleAt = (ctx, x, y, size, color) => {
+  ctx.save();
+
+  ctx.beginPath();
+  ctx.arc(x, y, size, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.closePath();
+
+  ctx.restore();
+}

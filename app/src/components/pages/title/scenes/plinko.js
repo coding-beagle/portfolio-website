@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
+import { drawCircleAt } from "../utilities/usefulFunctions";
 
 export default function Plinko({ visibleUI }) {
   const { theme } = useTheme();
@@ -58,23 +59,34 @@ export default function Plinko({ visibleUI }) {
         switch (this.gridType) {
           case gridTypes.grid: {
             for (
-              let y = 50;
-              y < canvasRef.current.height;
+              let y = 0;
+              y < canvasRef.current.height / 2.0;
               y += gridSpacingY.current
             ) {
               offsetRow = !offsetRow;
               for (
-                let x = 5;
-                x < canvasRef.current.width;
+                let x = 0;
+                x < canvasRef.current.width / 2;
                 x += gridSpacingX.current
               ) {
                 let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
-                this.gridPositions.push([xVal, y]);
-                ctx.beginPath();
-                ctx.arc(xVal, y, hitbox, 0, Math.PI * 2);
-                ctx.fillStyle = colorRef.current;
-                ctx.fill();
-                ctx.closePath();
+                const x1 = canvasRef.current.width / 2 + xVal;
+                const x2 = canvasRef.current.width / 2 - xVal;
+
+                const y1 = canvasRef.current.height / 2 + y;
+                const y2 = canvasRef.current.height / 2 - y;
+
+
+                this.gridPositions.push([x2, y1]);
+                this.gridPositions.push([x1, y1]);
+                this.gridPositions.push([x2, y2]);
+                this.gridPositions.push([x1, y2]);
+
+                drawCircleAt(ctx, x1, y1, hitbox, colorRef.current);
+                drawCircleAt(ctx, x2, y1, hitbox, colorRef.current);
+                drawCircleAt(ctx, x1, y2, hitbox, colorRef.current);
+                drawCircleAt(ctx, x2, y2, hitbox, colorRef.current);
+
               }
             }
 

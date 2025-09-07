@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { checkMouseInRadius, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
+import { checkMouseInRadius, drawCircleAt, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Pinball({ visibleUI }) {
@@ -136,33 +136,33 @@ export default function Pinball({ visibleUI }) {
           this.vy = Math.sign(this.vy) * BALL_MAX_VY;
         }
 
-        // Check if ball is stuck (not moving much)
+        // check if ball is stuck 
         const distanceMoved = Math.sqrt((this.x - this.lastX) ** 2 + (this.y - this.lastY) ** 2);
         if (distanceMoved < 1 && Math.abs(this.vx) < 0.5 && Math.abs(this.vy) < 0.5) {
           this.stuckCounter++;
           if (this.stuckCounter > this.stuckThreshold) {
-            // Ball is stuck, give it a push
+            // ball is stuck, give it a push
             console.log("Ball stuck, applying emergency push");
             this.vy = -3; // Push upward
-            this.vx += (Math.random() - 0.5) * 2; // Random horizontal push
+            this.vx += (Math.random() - 0.5) * 2; // random horizontal push
             this.stuckCounter = 0;
           }
         } else {
           this.stuckCounter = 0;
         }
 
-        // Add minimum velocity threshold to prevent getting stuck
+        // add minimum velocity threshold to prevent getting stuck
         const MIN_VELOCITY = 0.5;
         if (Math.abs(this.vx) < MIN_VELOCITY && Math.abs(this.vy) < MIN_VELOCITY) {
-          // Give it a small push downward if nearly stationary
+          // give it a small push downward if nearly stationary
           if (Math.abs(this.vy) < 0.1) {
             this.vy = MIN_VELOCITY;
           }
-          // Add slight horizontal randomness to break symmetrical situations
+          // add slight horizontal randomness to break symmetrical situations
           this.vx += (Math.random() - 0.5) * 0.2;
         }
 
-        // Store previous position for stuck detection
+        // store previous position for stuck detection
         this.lastX = this.x;
         this.lastY = this.y;
 
@@ -202,11 +202,7 @@ export default function Pinball({ visibleUI }) {
       }
 
       draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
+        drawCircleAt(ctx, this.x, this.y, this.size, this.color);
       }
 
       ray_cast_collisions() {
@@ -682,51 +678,44 @@ export default function Pinball({ visibleUI }) {
       }
 
       change_existing_dingers_to_grid() {
-        // dingers in the main play area:
+        const canvasWidth = canvasRef.current.width;
+        const canvasHeight = canvasRef.current.height;
+        const centerX = canvasWidth / 2;
+        const centerY = canvasHeight / 2;
+        const verticalOffset = canvasHeight / 6;
+
+        const gridPositions = [];
         let offsetRow = false;
-        let dinger_index = 0;
 
-        let rows = 0;
-        let cols = 0;
-        for (
-          let y = canvas.height / 6;
-          y < canvas.height * 4 / 6;
-          y += gridSpacingY.current
-        ) { rows++ }
-
-        for (
-          let x = 5;
-          x < canvasRef.current.width;
-          x += gridSpacingX.current
-        ) { cols++; }
-
-        const num_dingers = rows * cols;
-
-        while (this.dingers.length > num_dingers) {
-          this.dingers.pop()
-        }
-
-        for (
-          let y = canvas.height / 6;
-          y < canvas.height * 4 / 6;
-          y += gridSpacingY.current
-        ) {
+        for (let y = centerY - verticalOffset; y < centerY + canvasHeight / 8; y += gridSpacingY.current) {
           offsetRow = !offsetRow;
-          for (
-            let x = 5;
-            x < canvasRef.current.width;
-            x += gridSpacingX.current
-          ) {
-            let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
-            if (dinger_index < this.dingers.length) {
-              this.dingers[dinger_index].x = xVal;
-              this.dingers[dinger_index].y = y;
-            } else {
-              this.dingers.push(new Dingers(xVal, y, 5))
+
+          if (!offsetRow) {
+            gridPositions.push({ x: centerX, y });
+          }
+
+          for (let x = gridSpacingX.current; x < centerX; x += gridSpacingX.current) {
+            const xOffset = offsetRow ? x + gridSpacingX.current / 2 : x;
+
+            if (xOffset < centerX) {
+              gridPositions.push({ x: centerX + xOffset, y });
+              gridPositions.push({ x: centerX - xOffset, y });
             }
-            dinger_index++;
           }
         }
+
+        while (this.dingers.length > gridPositions.length) {
+          this.dingers.pop();
+        }
+
+        gridPositions.forEach((pos, index) => {
+          if (index < this.dingers.length) {
+            this.dingers[index].x = pos.x;
+            this.dingers[index].y = pos.y;
+          } else {
+            this.dingers.push(new Dingers(pos.x, pos.y, 5));
+          }
+        });
       }
 
       update_and_draw() {
