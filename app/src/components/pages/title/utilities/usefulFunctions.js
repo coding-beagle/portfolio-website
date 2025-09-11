@@ -1,5 +1,13 @@
 export const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
+export const colourToRGB = (colourHex) => {
+  return {
+    r: parseInt(colourHex.slice(1, 3), 16),
+    g: parseInt(colourHex.slice(3, 5), 16),
+    b: parseInt(colourHex.slice(5, 7), 16),
+  };
+}
+
 export const getCloseColour = (colourHex, varR = 10, varG = 5, varB = 5) => {
   const colour = {
     r: parseInt(colourHex.slice(1, 3), 16),
@@ -82,6 +90,8 @@ export const DIRECTIONS = {
 
 // assume that we're treating the array as width-wise
 export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, currentIndex) => {
+
+  // console.log("called with", { gridWidth: gridWidth, gridHeight: gridHeight, direction: direction, currentIndex: currentIndex })
   switch (direction) {
     case DIRECTIONS.NW:
 
@@ -105,7 +115,7 @@ export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, curr
       return currentIndex - gridWidth + 1;
     case DIRECTIONS.E:
 
-      // only have a NE neighbour if cell is not on rightmost column
+      // only have a E neighbour if cell is not on rightmost column
       if (currentIndex % gridWidth === gridWidth - 1) return -1;
       return currentIndex + 1;
     case DIRECTIONS.SE:
@@ -118,6 +128,7 @@ export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, curr
     case DIRECTIONS.S:
 
       if (currentIndex >= gridWidth * (gridHeight - 1)) return -1;
+      // console.log("returning: ", currentIndex + gridWidth)
       return currentIndex + gridWidth;
     case DIRECTIONS.SW:
 
@@ -133,3 +144,4 @@ export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, curr
       return -1;
   }
 }
+

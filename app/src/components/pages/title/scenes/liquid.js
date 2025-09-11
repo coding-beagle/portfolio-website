@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
+import { clamp, colourToRGB, DIRECTIONS, getNeighbourIndexFromGrid, scaleValue } from "../utilities/usefulFunctions";
 
 export default function Liquid({ visibleUI }) {
   const { theme } = useTheme();
@@ -107,32 +108,108 @@ export default function Liquid({ visibleUI }) {
 
     recalculateRect();
 
+    const gridWidth = 200;
+    const gridHeight = 100;
+
+    const cellTypes = {
+      WATER: 0,
+      WALL: 1,
+    }
+
     class Water {
       constructor(x, y, parent) {
         this.x = x;
         this.y = y;
-        this.value = 1;
+        this.value = 0;
         this.pressure = 1;
         this.parent = parent;
+        this.type = cellTypes.WATER;
       }
 
       update() {
+        const checkGrid = (direction) => {
+          return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
+        }
 
+        this.pressure = this.value;
+
+        const hasBottomNeighbour = checkGrid(DIRECTIONS.S);
+        const hasLeftNeighbour = checkGrid(DIRECTIONS.W);
+        const hasRightNeighbour = checkGrid(DIRECTIONS.E);
+        const hasTopNeighbour = checkGrid(DIRECTIONS.N);
+
+        if (hasBottomNeighbour !== -1) {
+          const bottomNeighbour = this.parent.grid[hasBottomNeighbour]
+          if (bottomNeighbour.type === cellTypes.WATER) {
+            // if this cell has more water than the bottom water cell
+            // then distribute half the difference, maybe this will be sort of realistic?
+            if (this.value > bottomNeighbour.value) {
+              // const halfDifference = (this.value - bottomNeighbour.value) / 2.0;
+              // this.value -= halfDifference;
+              bottomNeighbour.value += this.value;
+              this.value = 0;
+              if (this.value < 0.01) { this.value = 0 }
+            }
+          }
+        }
+
+        if (hasLeftNeighbour !== -1) {
+          const leftNeighbour = this.parent.grid[hasLeftNeighbour]
+
+          if (leftNeighbour.type === cellTypes.WATER) {
+            if (this.value > leftNeighbour.value) {
+              const halfDifference = (this.value - leftNeighbour.value) / 2.0;
+              this.value -= halfDifference;
+              leftNeighbour.value += halfDifference;
+            }
+          }
+
+        }
+
+        if (hasRightNeighbour !== -1) {
+          const rightNeighbour = this.parent.grid[hasRightNeighbour]
+
+          if (rightNeighbour.type === cellTypes.WATER) {
+            if (this.value > rightNeighbour.value) {
+              const halfDifference = (this.value - rightNeighbour.value) / 2.0;
+              this.value -= halfDifference;
+              rightNeighbour.value += halfDifference;
+            }
+          }
+        }
+
+        if (hasTopNeighbour !== -1 && this.pressure >= 1.0) {
+          const topNeighbour = this.parent.grid[hasTopNeighbour]
+
+          if (topNeighbour.type === cellTypes.WATER) {
+            if (this.value > topNeighbour.value) {
+              const halfDifference = (this.value - topNeighbour.value) / 2.0;
+              this.value -= halfDifference;
+              topNeighbour.value += halfDifference;
+            }
+          }
+        }
       }
     }
 
-
     class GridManager {
       constructor() {
-        this.children = []
-        this.image = ctx.createImageData(canvasRef.current.width, canvasRef.current.height);
+        this.grid = []
+
+        for (let y = 0; y < gridHeight; y++) {
+          for (let x = 0; x < gridWidth; x++) {
+            this.grid.push(new Water(x, y, this));
+          }
+        }
+
+        this.image = ctx.createImageData(gridWidth, gridHeight);
         this.clearImage()
       }
 
       clearImage() {
-        for (let x = 0; x < canvasRef.current.width; x++) {
-          for (let y = 0; y < canvasRef.current.height; y++) {
-            const pixelIndex = (y * canvasRef.current.width + x) * 4;
+        for (let y = 0; y < gridHeight; y++) {
+          for (let x = 0; x < gridWidth; x++) {
+            const pixelIndex = (y * gridWidth + x) * 4;
             this.image.data[pixelIndex] = 0;
             this.image.data[pixelIndex + 1] = 0;
             this.image.data[pixelIndex + 2] = 0;
@@ -141,15 +218,29 @@ export default function Liquid({ visibleUI }) {
         }
       }
 
+      setImageRGB(x, y, r, g, b, a = 255) {
+        const pixelIndex = (y * gridWidth + x) * 4;
+        this.image.data[pixelIndex] = r;
+        this.image.data[pixelIndex + 1] = g;
+        this.image.data[pixelIndex + 2] = b;
+        this.image.data[pixelIndex + 3] = a;
+      }
+
       update() {
-        this.children.forEach((child) => {
+        this.grid.forEach((child) => {
           child.update();
         })
       }
 
       draw() {
-        this.children.forEach((child) => {
-
+        this.clearImage();
+        this.grid.forEach((child) => {
+          const isWater = child.value > 0.0 && child.type === cellTypes.WATER;
+          const waterColour = colourToRGB(theme.secondary);
+          if (isWater) { this.setImageRGB(child.x, child.y, waterColour.r, waterColour.g, waterColour.b); }
+          else {
+            this.setImageRGB(child.x, child.y, 0, 0, 0, 0);
+          }
         })
       }
     }
@@ -158,10 +249,25 @@ export default function Liquid({ visibleUI }) {
 
     function animate() {
 
-      if (!gridManager)
-        gridManager.update();
-      ctx.putImageData(gridManager.image, 0, 0);
+      if (mouseClickRef.current) {
+        const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
+        const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
+        const index = mouseX + gridWidth * mouseY;
+        gridManager.grid[Math.floor(index)].value = 1;
+      }
 
+      gridManager.update();
+      gridManager.draw();
+
+      // Put image data to a temporary canvas and scale it
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = gridWidth;
+      tempCanvas.height = gridHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.putImageData(gridManager.image, 0, 0);
+
+      // Draw scaled to main canvas
+      ctx.drawImage(tempCanvas, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
       animationFrameId = requestAnimationFrame(animate);
     }
@@ -217,35 +323,35 @@ export default function Liquid({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
-              {
-                title: "Particle Count:",
-                valueRef: particleCountRef,
-                minValue: "100",
-                maxValue: "10000",
-                type: "slider",
-              },
-              {
-                title: "Simulation Speed:",
-                valueRef: simulationSpeedRef,
-                minValue: "1",
-                maxValue: "200.0",
-                type: "slider",
-              },
-              {
-                title: "Click Umbrella Radius:",
-                valueRef: mouseShieldRadiusRef,
-                minValue: "10.0",
-                maxValue: "300.0",
-                type: "slider",
-              },
-              {
-                title: "Title Umbrella Radius:",
-                valueRef: titleShieldRadiusRef,
-                minValue: "1.0",
-                maxValue: "100.0",
-                callback: recalculateRectRef.current,
-                type: "slider",
-              },
+              // {
+              //   title: "Particle Count:",
+              //   valueRef: particleCountRef,
+              //   minValue: "100",
+              //   maxValue: "10000",
+              //   type: "slider",
+              // },
+              // {
+              //   title: "Simulation Speed:",
+              //   valueRef: simulationSpeedRef,
+              //   minValue: "1",
+              //   maxValue: "200.0",
+              //   type: "slider",
+              // },
+              // {
+              //   title: "Click Umbrella Radius:",
+              //   valueRef: mouseShieldRadiusRef,
+              //   minValue: "10.0",
+              //   maxValue: "300.0",
+              //   type: "slider",
+              // },
+              // {
+              //   title: "Title Umbrella Radius:",
+              //   valueRef: titleShieldRadiusRef,
+              //   minValue: "1.0",
+              //   maxValue: "100.0",
+              //   callback: recalculateRectRef.current,
+              //   type: "slider",
+              // },
             ]}
             rerenderSetter={setRender}
           />
