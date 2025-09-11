@@ -68,3 +68,68 @@ export const drawCircleAt = (ctx, x, y, size, color) => {
 
   ctx.restore();
 }
+
+export const DIRECTIONS = {
+  NW: 0,
+  N: 1,
+  NE: 2,
+  E: 3,
+  SE: 4,
+  S: 5,
+  SW: 6,
+  W: 7
+};
+
+// assume that we're treating the array as width-wise
+export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, currentIndex) => {
+  switch (direction) {
+    case DIRECTIONS.NW:
+
+      // only have NW neighbour if cell is not on left side or top
+      if (currentIndex < gridWidth) return -1;
+      if (currentIndex % gridWidth === 0) return -1;
+
+      return currentIndex - gridWidth - 1;
+    case DIRECTIONS.N:
+
+      // only have a north neighbour if cell is not on top row
+      if (currentIndex < gridWidth) return -1;
+
+      return currentIndex - gridWidth;
+    case DIRECTIONS.NE:
+
+      // only have a NE neighbour if cell is not on top row or right most column
+      if (currentIndex < gridWidth) return -1;
+      if (currentIndex % gridWidth === gridWidth - 1) return -1;
+
+      return currentIndex - gridWidth + 1;
+    case DIRECTIONS.E:
+
+      // only have a NE neighbour if cell is not on rightmost column
+      if (currentIndex % gridWidth === gridWidth - 1) return -1;
+      return currentIndex + 1;
+    case DIRECTIONS.SE:
+
+      // only yadada
+      if (currentIndex % gridWidth === gridWidth - 1) return -1;
+      if (currentIndex >= gridWidth * (gridHeight - 1)) return -1;
+
+      return currentIndex + gridWidth + 1;
+    case DIRECTIONS.S:
+
+      if (currentIndex >= gridWidth * (gridHeight - 1)) return -1;
+      return currentIndex + gridWidth;
+    case DIRECTIONS.SW:
+
+      if (currentIndex >= gridWidth * (gridHeight - 1)) return -1;
+      if (currentIndex % gridWidth === 0) return -1;
+
+      return currentIndex + gridWidth - 1;
+    case DIRECTIONS.W:
+
+      if (currentIndex % gridWidth === 0) return -1;
+      return currentIndex - 1;
+    default:
+      return -1;
+  }
+}
