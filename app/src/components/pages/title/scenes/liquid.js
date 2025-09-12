@@ -22,7 +22,10 @@ export default function Liquid({ visibleUI }) {
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
 
-  const TOOLS = { WATER: 0, GRID: 1, ERASE: 2, SPONGE: 3 }
+  const tapFrequencyRef = useRef(99);
+  const tapOnTime = useRef(50);
+
+  const TOOLS = { WATER: 0, WALL: 1, ERASE: 2, SPONGE: 3, TAP: 4, DRAIN: 5 }
 
   const currentToolRef = useRef(TOOLS.WATER)
 
@@ -134,6 +137,8 @@ export default function Liquid({ visibleUI }) {
     const cellTypes = {
       WATER: 0,
       WALL: 1,
+      TAP: 2,
+      DRAIN: 3
     }
 
     // Max and min cell liquid values
@@ -172,9 +177,46 @@ export default function Liquid({ visibleUI }) {
         this.type = cellTypes.WATER;
         this.nextValue = 0;
         this.canTransition = true;
+        this.tapCounter = 0;
+      }
+
+      tapLogic() {
+        this.tapCounter += 1 * (tapFrequencyRef.current / 100.0);
+
+        if (this.tapCounter <= tapOnTime.current) {
+          const checkGrid = (direction) => {
+            return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
+          }
+
+          const checkNeighbourAndSpawn = (direction) => {
+            const hasNeighbourInDirection = checkGrid(direction)
+            if (hasNeighbourInDirection !== -1) {
+              const block = this.parent.grid[hasNeighbourInDirection]
+              if (block.type === cellTypes.WATER) {
+                block.value += 1;
+              }
+            }
+          }
+
+          checkNeighbourAndSpawn(DIRECTIONS.S);
+          checkNeighbourAndSpawn(DIRECTIONS.W);
+          checkNeighbourAndSpawn(DIRECTIONS.E);
+
+        }
+
+        if (this.tapCounter > 100) {
+          this.tapCounter = 0;
+        }
       }
 
       update() {
+
+        if (this.type === cellTypes.TAP) {
+          this.tapLogic()
+        }
+
+        if (this.type !== cellTypes.WATER) { return }
+
         const MaxFlow = maxFlowRate.current / 100;
         const FlowSpeed = fluidSpeedRef.current / 100.0;
 
@@ -210,6 +252,8 @@ export default function Liquid({ visibleUI }) {
               this.nextValue -= flow;
               bottomNeighbour.nextValue += flow;
             }
+          } else if (bottomNeighbour.type === cellTypes.DRAIN) {
+            this.nextValue -= this.value;
           }
         }
 
@@ -238,6 +282,8 @@ export default function Liquid({ visibleUI }) {
               this.nextValue -= flow;
               leftNeighbour.nextValue += flow;
             }
+          } else if (leftNeighbour.type === cellTypes.DRAIN) {
+            this.nextValue -= this.value;
           }
         }
 
@@ -266,6 +312,8 @@ export default function Liquid({ visibleUI }) {
               this.nextValue -= flow;
               rightNeighbour.nextValue += flow;
             }
+          } else if (rightNeighbour.type === cellTypes.DRAIN) {
+            this.nextValue -= this.value;
           }
         }
 
@@ -366,18 +414,28 @@ export default function Liquid({ visibleUI }) {
       draw() {
         this.clearImage();
         this.grid.forEach((cell) => {
-          const isWater = cell.value > 0.1 && cell.type === cellTypes.WATER;
-          const isWall = cell.type === cellTypes.WALL;
-          const waterColour = colourToRGB(themeRef.current.secondary);
-          const wallColour = colourToRGB(themeRef.current.accent);
-          if (isWater) {
-            this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value * 10), waterColour.b - Math.floor(cell.value * 10));
-          }
-          else if (isWall) {
-            this.setXYRGB(cell.x, cell.y, wallColour.r, wallColour.g, wallColour.b);
-          }
-          else {
-            this.setXYRGB(cell.x, cell.y, 0, 0, 0, 0);
+          switch (cell.type) {
+            case cellTypes.WALL:
+              const wallColour = colourToRGB(themeRef.current.accent);
+              this.setXYRGB(cell.x, cell.y, wallColour.r, wallColour.g, wallColour.b);
+              break;
+
+            case cellTypes.WATER:
+              if (cell.value > 0.05) {
+                const waterColour = colourToRGB(themeRef.current.secondary);
+                this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value * 10), waterColour.b - Math.floor(cell.value * 10));
+              }
+              break;
+            case cellTypes.TAP:
+              const tapColour = colourToRGB(themeRef.current.secondaryAccent);
+              this.setXYRGB(cell.x, cell.y, tapColour.r, tapColour.g, tapColour.b);
+              break;
+            case cellTypes.DRAIN:
+              const drainColour = colourToRGB(themeRef.current.tertiaryAccent);
+              this.setXYRGB(cell.x, cell.y, drainColour.r, drainColour.g, drainColour.b);
+              break;
+            default:
+              this.setXYRGB(cell.x, cell.y, 0, 0, 0, 0);
           }
         })
 
@@ -402,7 +460,7 @@ export default function Liquid({ visibleUI }) {
       const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
       const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
       const index = mouseX + gridWidth * mouseY;
-      const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, brushSizeRef.current);
+      const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, brushSizeRef.current - 1);
 
       gridManager.hoveredGrid = indexes;
 
@@ -416,7 +474,7 @@ export default function Liquid({ visibleUI }) {
               }
             })
             break;
-          case TOOLS.GRID:
+          case TOOLS.WALL:
             indexes.forEach((index) => {
               const item = gridManager.grid[Math.floor(index)]
               if (item.type === cellTypes.WATER) {
@@ -439,6 +497,21 @@ export default function Liquid({ visibleUI }) {
               if (item.type === cellTypes.WATER) {
                 item.value = 0.0;
               }
+            })
+            break;
+          case TOOLS.TAP:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              item.type = cellTypes.TAP;
+
+            })
+            break;
+
+          case TOOLS.DRAIN:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              item.type = cellTypes.DRAIN;
+
             })
             break;
 
@@ -526,8 +599,27 @@ export default function Liquid({ visibleUI }) {
                 maxValue: "10.0",
                 type: "slider",
               },
+              [
+                {
+                  title: "Tool Selection:",
+                  type: "button",
+                  enabled: currentToolRef.current === TOOLS.ERASE,
+                  buttonText: "Erase",
+                  callback: () => {
+                    currentToolRef.current = TOOLS.ERASE
+                  }
+                },
+                {
+                  type: "button",
+                  enabled: currentToolRef.current === TOOLS.SPONGE,
+                  buttonText: "Sponge",
+                  callback: () => {
+                    currentToolRef.current = TOOLS.SPONGE
+                  }
+                }
+              ],
               [{
-                title: "Tool Selection:",
+                title: "Block Selection:",
                 type: "button",
                 enabled: currentToolRef.current === TOOLS.WATER,
                 buttonText: "Water",
@@ -537,43 +629,44 @@ export default function Liquid({ visibleUI }) {
               },
               {
                 type: "button",
-                enabled: currentToolRef.current === TOOLS.GRID,
-                buttonText: "Grid",
+                enabled: currentToolRef.current === TOOLS.WALL,
+                buttonText: "Wall",
                 callback: () => {
-                  currentToolRef.current = TOOLS.GRID
+                  currentToolRef.current = TOOLS.WALL
                 }
               },
               {
                 type: "button",
-                enabled: currentToolRef.current === TOOLS.ERASE,
-                buttonText: "Erase",
+                enabled: currentToolRef.current === TOOLS.TAP,
+                buttonText: "Tap",
                 callback: () => {
-                  currentToolRef.current = TOOLS.ERASE
+                  currentToolRef.current = TOOLS.TAP
                 }
               },
               {
                 type: "button",
-                enabled: currentToolRef.current === TOOLS.SPONGE,
-                buttonText: "Sponge",
+                enabled: currentToolRef.current === TOOLS.DRAIN,
+                buttonText: "Drain",
                 callback: () => {
-                  currentToolRef.current = TOOLS.SPONGE
+                  currentToolRef.current = TOOLS.DRAIN
                 }
-              }
+              },
               ],
-              // {
-              //   title: "Fluid Speed:",
-              //   valueRef: fluidSpeedRef,
-              //   minValue: "1.0",
-              //   maxValue: "200.0",
-              //   type: "slider",
-              // },
-              // {
-              //   title: "Fluid Viscosity:",
-              //   valueRef: maxFlowRate,
-              //   minValue: "1.0",
-              //   maxValue: "800.0",
-              //   type: "slider",
-              // },
+              [
+                {
+                  title: "Tap Spawn Rate:",
+                  valueRef: tapFrequencyRef,
+                  minValue: "1.0",
+                  maxValue: "200.0",
+                  type: "slider",
+                },
+                {
+                  title: "Tap Spawn Duration:",
+                  valueRef: tapOnTime,
+                  minValue: "1.0",
+                  maxValue: "100.0",
+                  type: "slider",
+                },],
               {
                 type: "button",
                 buttonText: "Reset",
