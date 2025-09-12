@@ -1,14 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, scaleValue } from "../utilities/usefulFunctions";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Liquid({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
 
+  const [reset, setReset] = useState(false);
   const brushSizeRef = useRef(1);
   const mouseClickRef = useRef(false);
   const rightClickRef = useRef(false);
@@ -24,6 +26,8 @@ export default function Liquid({ visibleUI }) {
 
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
+
+  const mobile = useContext(MobileContext);
 
   useEffect(() => {
     let element = document.getElementById("title") ?? null;
@@ -120,8 +124,8 @@ export default function Liquid({ visibleUI }) {
 
     recalculateRect();
 
-    const gridWidth = 200;
-    const gridHeight = 100;
+    const gridWidth = mobile ? 50 : 300;
+    const gridHeight = mobile ? 100 : 150;
 
     const cellTypes = {
       WATER: 0,
@@ -479,7 +483,7 @@ export default function Liquid({ visibleUI }) {
         canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
       }
     };
-  }, []);
+  }, [reset]);
 
   useEffect(() => {
     visibleUIRef.current = visibleUI;
@@ -535,8 +539,15 @@ export default function Liquid({ visibleUI }) {
                   currentToolRef.current = TOOLS.ERASE
                 }
               }
-              ]
+              ],
+              {
+                type: "button",
+                buttonText: "Reset",
+                callback: () => {
+                  setReset((prev) => { return !prev });
+                }
 
+              }
             ]}
             rerenderSetter={setRender}
           />
