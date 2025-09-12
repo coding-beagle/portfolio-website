@@ -15,6 +15,7 @@ export default function Liquid({ visibleUI }) {
   const fluidSpeedRef = useRef(100);
   const maxFlowRate = useRef(400);
 
+  const clearRef = useRef(null);
 
   const mouseClickRef = useRef(false);
   const rightClickRef = useRef(false);
@@ -22,8 +23,8 @@ export default function Liquid({ visibleUI }) {
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
 
-  const tapFrequencyRef = useRef(99);
-  const tapOnTime = useRef(50);
+  const tapFrequencyRef = useRef(20);
+  const tapOnTime = useRef(5);
 
   const TOOLS = { WATER: 0, WALL: 1, ERASE: 2, SPONGE: 3, TAP: 4, DRAIN: 5 }
 
@@ -168,22 +169,25 @@ export default function Liquid({ visibleUI }) {
     }
 
     class Water {
-      constructor(x, y, parent) {
+      constructor(x, y, parent, initType = cellTypes.WATER, phase = 0) {
         this.x = x;
         this.y = y;
         this.value = 0;
         this.pressure = 1;
         this.parent = parent;
-        this.type = cellTypes.WATER;
+        this.type = initType;
         this.nextValue = 0;
         this.canTransition = true;
-        this.tapCounter = 0;
+        this.tapCounter = phase;
+        this.phase = phase;
       }
 
       tapLogic() {
         this.tapCounter += 1 * (tapFrequencyRef.current / 100.0);
 
-        if (this.tapCounter <= tapOnTime.current) {
+        const cyclePosition = (this.tapCounter + this.phase) % 100;
+
+        if (cyclePosition <= tapOnTime.current) {
           const checkGrid = (direction) => {
             return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
           }
@@ -193,15 +197,14 @@ export default function Liquid({ visibleUI }) {
             if (hasNeighbourInDirection !== -1) {
               const block = this.parent.grid[hasNeighbourInDirection]
               if (block.type === cellTypes.WATER) {
-                block.value += 1;
+                block.value = 1;
               }
             }
           }
 
           checkNeighbourAndSpawn(DIRECTIONS.S);
-          checkNeighbourAndSpawn(DIRECTIONS.W);
-          checkNeighbourAndSpawn(DIRECTIONS.E);
-
+          // checkNeighbourAndSpawn(DIRECTIONS.W);
+          // checkNeighbourAndSpawn(DIRECTIONS.E);
         }
 
         if (this.tapCounter > 100) {
@@ -351,16 +354,35 @@ export default function Liquid({ visibleUI }) {
       constructor() {
         this.grid = []
 
-        for (let y = 0; y < gridHeight; y++) {
-          for (let x = 0; x < gridWidth; x++) {
-            this.grid.push(new Water(x, y, this));
-          }
-        }
+        this.initScene()
+
+
 
         this.image = ctx.createImageData(gridWidth, gridHeight);
         this.clearImage()
 
         this.hoveredGrid = []
+
+      }
+
+      initScene() {
+        for (let y = 0; y < gridHeight; y++) {
+          for (let x = 0; x < gridWidth; x++) {
+            let type, phase;
+            phase = Math.floor((x / gridWidth) * 100.0);
+            if (y === 0) { type = cellTypes.TAP }
+            else if (y === gridHeight - 1) { type = cellTypes.DRAIN }
+            else { type = cellTypes.WATER }
+            this.grid.push(new Water(x, y, this, type, phase));
+          }
+        }
+      }
+
+      clearScene() {
+        this.grid.forEach((cell) => {
+          cell.value = 0;
+          cell.type = cellTypes.WATER;
+        })
       }
 
       clearImage() {
@@ -463,6 +485,7 @@ export default function Liquid({ visibleUI }) {
       const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, brushSizeRef.current - 1);
 
       gridManager.hoveredGrid = indexes;
+      clearRef.current = () => gridManager.clearScene();
 
       if (mouseClickRef.current) {
         switch (currentToolRef.current) {
@@ -486,7 +509,7 @@ export default function Liquid({ visibleUI }) {
           case TOOLS.ERASE:
             indexes.forEach((index) => {
               const item = gridManager.grid[Math.floor(index)]
-              if (item.type === cellTypes.WALL) {
+              if (item.type !== cellTypes.WATER) {
                 item.type = cellTypes.WATER;
               }
             })
@@ -667,13 +690,23 @@ export default function Liquid({ visibleUI }) {
                   maxValue: "100.0",
                   type: "slider",
                 },],
-              {
+              [{
                 type: "button",
                 buttonText: "Reset",
                 callback: () => {
                   setReset((prev) => { return !prev });
                 }
-              }
+              },
+              {
+                type: "button",
+                buttonText: "Clear",
+                callback: () => {
+                  if (clearRef.current) {
+                    clearRef.current()
+                  }
+                }
+              }]
+
             ]}
             rerenderSetter={setRender}
           />
