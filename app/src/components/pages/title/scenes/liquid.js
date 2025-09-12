@@ -116,6 +116,35 @@ export default function Liquid({ visibleUI }) {
       WALL: 1,
     }
 
+    // Max and min cell liquid values
+    const MaxValue = 1.0;
+    const MinValue = 0.005;
+
+    // Extra liquid a cell can store than the cell above it
+    const MaxCompression = 0.25;
+
+    // Lowest and highest amount of liquids allowed to flow per iteration
+    const MinFlow = 0.005;
+    const MaxFlow = 4;
+
+    // Adjusts flow speed (0.0f - 1.0f)
+    const FlowSpeed = 1;
+
+    const CalculateVerticalFlowValue = (remainingLiquid, destinationLiquid) => {
+      const sum = remainingLiquid + destinationLiquid;
+      let value = 0;
+
+      if (sum <= MaxValue) {
+        value = MaxValue;
+      } else if (sum < 2 * MaxValue + MaxCompression) {
+        value = (MaxValue * MaxValue + sum * MaxCompression) / (MaxValue + MaxCompression);
+      } else {
+        value = (sum + MaxCompression) / 2.0;
+      }
+
+      return value;
+    }
+
     class Water {
       constructor(x, y, parent) {
         this.x = x;
@@ -124,6 +153,7 @@ export default function Liquid({ visibleUI }) {
         this.pressure = 1;
         this.parent = parent;
         this.type = cellTypes.WATER;
+        this.nextValue = 0;
       }
 
       update() {
@@ -131,64 +161,122 @@ export default function Liquid({ visibleUI }) {
           return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
         }
 
-        this.pressure = this.value;
+        // this.pressure = this.value * 2;
+
+        const startValue = this.value;
+        let remainingValue = this.value;
+        let flow = 0;
 
         const hasBottomNeighbour = checkGrid(DIRECTIONS.S);
         const hasLeftNeighbour = checkGrid(DIRECTIONS.W);
         const hasRightNeighbour = checkGrid(DIRECTIONS.E);
         const hasTopNeighbour = checkGrid(DIRECTIONS.N);
 
+
+        // Calculate all potential flows without modifying nextValue yet
         if (hasBottomNeighbour !== -1) {
-          const bottomNeighbour = this.parent.grid[hasBottomNeighbour]
+          const bottomNeighbour = this.parent.grid[hasBottomNeighbour];
           if (bottomNeighbour.type === cellTypes.WATER) {
-            // if this cell has more water than the bottom water cell
-            // then distribute half the difference, maybe this will be sort of realistic?
-            if (this.value > bottomNeighbour.value) {
-              // const halfDifference = (this.value - bottomNeighbour.value) / 2.0;
-              // this.value -= halfDifference;
-              bottomNeighbour.value += this.value;
-              this.value = 0;
-              if (this.value < 0.01) { this.value = 0 }
+            flow = CalculateVerticalFlowValue(this.value, bottomNeighbour.value) - bottomNeighbour.value;
+            if (bottomNeighbour.value > 0 && flow > MinFlow)
+              flow *= FlowSpeed;
+
+            flow = Math.max(flow, 0);
+            if (flow > Math.min(MaxFlow, this.value))
+              flow = Math.min(MaxFlow, this.value);
+
+            // Update temp values
+            if (flow != 0) {
+              remainingValue -= flow;
+              this.nextValue -= flow;
+              bottomNeighbour.nextValue += flow;
             }
           }
+        }
+
+        // Check to ensure we still have liquid in this cell
+        if (remainingValue < MinValue) {
+          this.nextValue -= remainingValue;
+          return;
         }
 
         if (hasLeftNeighbour !== -1) {
-          const leftNeighbour = this.parent.grid[hasLeftNeighbour]
-
+          const leftNeighbour = this.parent.grid[hasLeftNeighbour];
           if (leftNeighbour.type === cellTypes.WATER) {
-            if (this.value > leftNeighbour.value) {
-              const halfDifference = (this.value - leftNeighbour.value) / 2.0;
-              this.value -= halfDifference;
-              leftNeighbour.value += halfDifference;
+            // Calculate flow rate
+            flow = (remainingValue - leftNeighbour.value) / 4.0;
+            if (flow > MinFlow)
+              flow *= FlowSpeed;
+
+            // constrain flow
+            flow = Math.max(flow, 0);
+            if (flow > Math.min(MaxFlow, remainingValue))
+              flow = Math.min(MaxFlow, remainingValue);
+
+            // Adjust temp values
+            if (flow != 0) {
+              remainingValue -= flow;
+              this.nextValue -= flow;
+              leftNeighbour.nextValue += flow;
             }
           }
+        }
 
+        // Check to ensure we still have liquid in this cell
+        if (remainingValue < MinValue) {
+          this.nextValue -= remainingValue;
+          return;
         }
 
         if (hasRightNeighbour !== -1) {
-          const rightNeighbour = this.parent.grid[hasRightNeighbour]
-
+          const rightNeighbour = this.parent.grid[hasRightNeighbour];
           if (rightNeighbour.type === cellTypes.WATER) {
-            if (this.value > rightNeighbour.value) {
-              const halfDifference = (this.value - rightNeighbour.value) / 2.0;
-              this.value -= halfDifference;
-              rightNeighbour.value += halfDifference;
+            // Calculate flow rate
+            flow = (remainingValue - rightNeighbour.value) / 4.0;
+            if (flow > MinFlow)
+              flow *= FlowSpeed;
+
+            // constrain flow
+            flow = Math.max(flow, 0);
+            if (flow > Math.min(MaxFlow, remainingValue))
+              flow = Math.min(MaxFlow, remainingValue);
+
+            // Adjust temp values
+            if (flow != 0) {
+              remainingValue -= flow;
+              this.nextValue -= flow;
+              rightNeighbour.nextValue += flow;
             }
           }
         }
 
-        if (hasTopNeighbour !== -1 && this.pressure >= 1.0) {
-          const topNeighbour = this.parent.grid[hasTopNeighbour]
+        // Check to ensure we still have liquid in this cell
+        if (remainingValue < MinValue) {
+          this.nextValue -= remainingValue;
+          return;
+        }
 
+        if (hasTopNeighbour !== -1) {
+          const topNeighbour = this.parent.grid[hasTopNeighbour];
           if (topNeighbour.type === cellTypes.WATER) {
-            if (this.value > topNeighbour.value) {
-              const halfDifference = (this.value - topNeighbour.value) / 2.0;
-              this.value -= halfDifference;
-              topNeighbour.value += halfDifference;
+            flow = remainingValue - CalculateVerticalFlowValue(remainingValue, topNeighbour.value);
+            if (flow > MinFlow)
+              flow *= FlowSpeed;
+
+            // constrain flow
+            flow = Math.max(flow, 0);
+            if (flow > Math.min(MaxFlow, remainingValue))
+              flow = Math.min(MaxFlow, remainingValue);
+
+            // Adjust values
+            if (flow != 0) {
+              remainingValue -= flow;
+              this.nextValue -= flow;
+              topNeighbour.nextValue += flow;
             }
           }
         }
+
       }
     }
 
@@ -227,19 +315,27 @@ export default function Liquid({ visibleUI }) {
       }
 
       update() {
-        this.grid.forEach((child) => {
-          child.update();
+        this.grid.forEach((cell) => {
+          cell.nextValue = cell.value;
+        })
+
+        this.grid.forEach((cell) => {
+          cell.update();
+        })
+
+        this.grid.forEach((cell) => {
+          cell.value = Math.max(0, cell.nextValue); // Ensure no negative values
         })
       }
 
       draw() {
         this.clearImage();
-        this.grid.forEach((child) => {
-          const isWater = child.value > 0.0 && child.type === cellTypes.WATER;
+        this.grid.forEach((cell) => {
+          const isWater = cell.value > 0.1 && cell.type === cellTypes.WATER;
           const waterColour = colourToRGB(theme.secondary);
-          if (isWater) { this.setImageRGB(child.x, child.y, waterColour.r, waterColour.g, waterColour.b); }
+          if (isWater) { this.setImageRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value), waterColour.b - Math.floor(cell.value)); }
           else {
-            this.setImageRGB(child.x, child.y, 0, 0, 0, 0);
+            this.setImageRGB(cell.x, cell.y, 0, 0, 0, 0);
           }
         })
       }
@@ -247,24 +343,34 @@ export default function Liquid({ visibleUI }) {
 
     const gridManager = new GridManager();
 
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = gridWidth;
+    tempCanvas.height = gridHeight;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    tempCtx.imageSmoothingEnabled = false;
+
     function animate() {
+
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
 
       if (mouseClickRef.current) {
         const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
         const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
         const index = mouseX + gridWidth * mouseY;
-        gridManager.grid[Math.floor(index)].value = 1;
+        gridManager.grid[Math.floor(index)].value += 1;
+        gridManager.grid[Math.floor(index + 1)].value += 1;
+        gridManager.grid[Math.floor(index - 1)].value += 1;
       }
 
       gridManager.update();
       gridManager.draw();
 
-      // Put image data to a temporary canvas and scale it
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = gridWidth;
-      tempCanvas.height = gridHeight;
-      const tempCtx = tempCanvas.getContext('2d');
+      // Put image data to the temp canvas (reuse existing canvas)
       tempCtx.putImageData(gridManager.image, 0, 0);
+
+      // Disable smoothing on main context for crisp pixels
+      ctx.imageSmoothingEnabled = false;
 
       // Draw scaled to main canvas
       ctx.drawImage(tempCanvas, 0, 0, canvasRef.current.width, canvasRef.current.height);

@@ -128,7 +128,6 @@ export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, curr
     case DIRECTIONS.S:
 
       if (currentIndex >= gridWidth * (gridHeight - 1)) return -1;
-      // console.log("returning: ", currentIndex + gridWidth)
       return currentIndex + gridWidth;
     case DIRECTIONS.SW:
 
