@@ -372,7 +372,9 @@ export default function Liquid({ visibleUI }) {
             phase = Math.floor((x / gridWidth) * 100.0);
             if (y === 0) { type = cellTypes.TAP }
             else if (y === gridHeight - 1) { type = cellTypes.DRAIN }
+            else if (Math.random() > 0.95) { type = cellTypes.WALL }
             else { type = cellTypes.WATER }
+
             this.grid.push(new Water(x, y, this, type, phase));
           }
         }
