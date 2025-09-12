@@ -12,13 +12,17 @@ export default function Liquid({ visibleUI }) {
 
   const [reset, setReset] = useState(false);
   const brushSizeRef = useRef(1);
+  const fluidSpeedRef = useRef(100);
+  const maxFlowRate = useRef(400);
+
+
   const mouseClickRef = useRef(false);
   const rightClickRef = useRef(false);
   const touchActiveRef = useRef(false);
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
 
-  const TOOLS = { WATER: 0, GRID: 1, ERASE: 2 }
+  const TOOLS = { WATER: 0, GRID: 1, ERASE: 2, SPONGE: 3 }
 
   const currentToolRef = useRef(TOOLS.WATER)
 
@@ -141,10 +145,7 @@ export default function Liquid({ visibleUI }) {
 
     // Lowest and highest amount of liquids allowed to flow per iteration
     const MinFlow = 0.005;
-    const MaxFlow = 4;
 
-    // Adjusts flow speed (0.0f - 1.0f)
-    const FlowSpeed = 1;
 
     const CalculateVerticalFlowValue = (remainingLiquid, destinationLiquid) => {
       const sum = remainingLiquid + destinationLiquid;
@@ -174,6 +175,9 @@ export default function Liquid({ visibleUI }) {
       }
 
       update() {
+        const MaxFlow = maxFlowRate.current / 100;
+        const FlowSpeed = fluidSpeedRef.current / 100.0;
+
         const checkGrid = (direction) => {
           return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
         }
@@ -367,7 +371,7 @@ export default function Liquid({ visibleUI }) {
           const waterColour = colourToRGB(themeRef.current.secondary);
           const wallColour = colourToRGB(themeRef.current.accent);
           if (isWater) {
-            this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value), waterColour.b - Math.floor(cell.value));
+            this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value * 10), waterColour.b - Math.floor(cell.value * 10));
           }
           else if (isWall) {
             this.setXYRGB(cell.x, cell.y, wallColour.r, wallColour.g, wallColour.b);
@@ -426,6 +430,14 @@ export default function Liquid({ visibleUI }) {
               const item = gridManager.grid[Math.floor(index)]
               if (item.type === cellTypes.WALL) {
                 item.type = cellTypes.WATER;
+              }
+            })
+            break;
+          case TOOLS.SPONGE:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              if (item.type === cellTypes.WATER) {
+                item.value = 0.0;
               }
             })
             break;
@@ -538,15 +550,36 @@ export default function Liquid({ visibleUI }) {
                 callback: () => {
                   currentToolRef.current = TOOLS.ERASE
                 }
+              },
+              {
+                type: "button",
+                enabled: currentToolRef.current === TOOLS.SPONGE,
+                buttonText: "Sponge",
+                callback: () => {
+                  currentToolRef.current = TOOLS.SPONGE
+                }
               }
               ],
+              // {
+              //   title: "Fluid Speed:",
+              //   valueRef: fluidSpeedRef,
+              //   minValue: "1.0",
+              //   maxValue: "200.0",
+              //   type: "slider",
+              // },
+              // {
+              //   title: "Fluid Viscosity:",
+              //   valueRef: maxFlowRate,
+              //   minValue: "1.0",
+              //   maxValue: "800.0",
+              //   type: "slider",
+              // },
               {
                 type: "button",
                 buttonText: "Reset",
                 callback: () => {
                   setReset((prev) => { return !prev });
                 }
-
               }
             ]}
             rerenderSetter={setRender}
