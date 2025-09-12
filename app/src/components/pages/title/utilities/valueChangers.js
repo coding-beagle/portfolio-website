@@ -450,7 +450,7 @@ export function Slider({
   );
 }
 
-export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
+export function ChangerButton({ rerenderSetter, title, buttonText, callback, enabled = true }) {
   const { theme } = useTheme();
   const btnRef = useRef();
   const timeouts = useRef([]);
@@ -530,8 +530,10 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
           fontSize: 15,
           borderRadius: 6,
           border: `0px solid ${theme.accent}`,
-          background: `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
-          color: theme.text,
+          background: enabled
+            ? `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`
+            : `linear-gradient(45deg, #bbb 0%, #eee 100%)`,
+          color: enabled ? theme.text : "#888",
           fontWeight: 500,
           cursor: "pointer",
           transition:
@@ -539,17 +541,22 @@ export function ChangerButton({ rerenderSetter, title, buttonText, callback }) {
           marginLeft: title ? 0 : 0,
           boxShadow: `0 1px 6px ${theme.secondaryAccent}22`,
           fontFamily: theme.font,
+          opacity: enabled ? 1 : 0.6,
         }}
         onMouseOver={(e) => {
           if (btnRef.current) {
             btnRef.current.style.transform = "scale(1.07)";
-            btnRef.current.style.background = `linear-gradient(45deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
+            btnRef.current.style.background = enabled
+              ? `linear-gradient(45deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`
+              : `linear-gradient(45deg, #bbb 0%, #eee 100%)`;
           }
         }}
         onMouseOut={(e) => {
           if (btnRef.current) {
             btnRef.current.style.transform = "scale(1)";
-            btnRef.current.style.background = `linear-gradient(90deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`;
+            btnRef.current.style.background = enabled
+              ? `linear-gradient(90deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`
+              : `linear-gradient(90deg, #bbb 0%, #eee 100%)`;
           }
         }}
       >
@@ -577,22 +584,22 @@ export function ChangerColor({ rerenderSetter, title, colorValue, onChange }) {
           marginLeft: "0.5em",
           width: 32,
           height: 32,
-          border: `0px solid ${theme.secondaryAccent}`,
+          border: `0px solid ${theme.secondaryAccent} `,
           borderRadius: 6,
-          background: `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`,
-          boxShadow: `0 1px 6px ${theme.secondaryAccent}22`,
+          background: `linear - gradient(45deg, ${theme.secondary} 0 %, ${theme.secondaryAccent} 100 %)`,
+          boxShadow: `0 1px 6px ${theme.secondaryAccent} 22`,
           fontFamily: theme.font,
           fontWeight: 500,
           transition: "background 0.15s, border 0.15s, box-shadow 0.15s",
           cursor: "pointer",
         }}
         onMouseOver={(e) => {
-          e.target.style.background = `linear-gradient(45deg, ${theme.secondaryAccent} 0%, ${theme.secondary} 100%)`;
-          e.target.style.boxShadow = `0 2px 10px ${theme.secondaryAccent}44`;
+          e.target.style.background = `linear - gradient(45deg, ${theme.secondaryAccent} 0 %, ${theme.secondary} 100 %)`;
+          e.target.style.boxShadow = `0 2px 10px ${theme.secondaryAccent} 44`;
         }}
         onMouseOut={(e) => {
-          e.target.style.background = `linear-gradient(45deg, ${theme.secondary} 0%, ${theme.secondaryAccent} 100%)`;
-          e.target.style.boxShadow = `0 1px 6px ${theme.secondaryAccent}22`;
+          e.target.style.background = `linear - gradient(45deg, ${theme.secondary} 0 %, ${theme.secondaryAccent} 100 %)`;
+          e.target.style.boxShadow = `0 1px 6px ${theme.secondaryAccent} 22`;
         }}
       />
     </div>
@@ -627,8 +634,7 @@ export function DisplayEntity({
         slice
           .map(
             ([k, v]) =>
-              `${k}: ${
-                typeof v === "object" && v !== null ? "[object]" : String(v)
+              `${k}: ${typeof v === "object" && v !== null ? "[object]" : String(v)
               }`
           )
           .join("    ") // 4 spaces between pairs, no commas

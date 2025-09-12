@@ -513,6 +513,7 @@ export default function Liquid({ visibleUI }) {
               [{
                 title: "Tool Selection:",
                 type: "button",
+                enabled: currentToolRef.current === TOOLS.WATER,
                 buttonText: "Water",
                 callback: () => {
                   currentToolRef.current = TOOLS.WATER
@@ -520,6 +521,7 @@ export default function Liquid({ visibleUI }) {
               },
               {
                 type: "button",
+                enabled: currentToolRef.current === TOOLS.GRID,
                 buttonText: "Grid",
                 callback: () => {
                   currentToolRef.current = TOOLS.GRID
@@ -527,6 +529,7 @@ export default function Liquid({ visibleUI }) {
               },
               {
                 type: "button",
+                enabled: currentToolRef.current === TOOLS.ERASE,
                 buttonText: "Erase",
                 callback: () => {
                   currentToolRef.current = TOOLS.ERASE
