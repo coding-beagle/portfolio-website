@@ -2,19 +2,25 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { clamp, colourToRGB, DIRECTIONS, getNeighbourIndexFromGrid, scaleValue } from "../utilities/usefulFunctions";
+import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, scaleValue } from "../utilities/usefulFunctions";
 
 export default function Liquid({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
+
+  const brushSizeRef = useRef(1);
   const mouseClickRef = useRef(false);
+  const rightClickRef = useRef(false);
   const touchActiveRef = useRef(false);
-  const particleCountRef = useRef(2000);
-  const simulationSpeedRef = useRef(100);
-  const mouseShieldRadiusRef = useRef(100);
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
+
+  const TOOLS = { WATER: 0, GRID: 1, ERASE: 2 }
+
+  const currentToolRef = useRef(TOOLS.WATER)
+
+  const themeRef = useRef(theme);
 
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
@@ -25,12 +31,7 @@ export default function Liquid({ visibleUI }) {
     let elementCenterX = 0;
     let elementCenterY = 0;
 
-    let particles = [];
-    const gravity = 0.5;
-    const windSpeed = 0.2;
     let animationFrameId;
-    const maxFallSpeed = 13;
-    const maxWindSpeed = (Math.random() - 0.5) * 10;
 
     const recalculateRect = () => {
       if (!element) return;
@@ -66,12 +67,23 @@ export default function Liquid({ visibleUI }) {
       };
     };
 
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
+    const handleMouseDown = (e) => {
+      // e.preventDefault()
+      if (e.buttons === 2) {
+        rightClickRef.current = true;
+      } else {
+        mouseClickRef.current = true;
+      }
     };
 
-    const handleMouseUp = () => {
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+    }
+
+    const handleMouseUp = (e) => {
+
       mouseClickRef.current = false;
+      rightClickRef.current = false;
     };
 
     const handleTouchMove = (event) => {
@@ -154,14 +166,13 @@ export default function Liquid({ visibleUI }) {
         this.parent = parent;
         this.type = cellTypes.WATER;
         this.nextValue = 0;
+        this.canTransition = true;
       }
 
       update() {
         const checkGrid = (direction) => {
           return getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, (this.x + this.y * gridWidth))
         }
-
-        // this.pressure = this.value * 2;
 
         const startValue = this.value;
         let remainingValue = this.value;
@@ -292,6 +303,8 @@ export default function Liquid({ visibleUI }) {
 
         this.image = ctx.createImageData(gridWidth, gridHeight);
         this.clearImage()
+
+        this.hoveredGrid = []
       }
 
       clearImage() {
@@ -306,12 +319,26 @@ export default function Liquid({ visibleUI }) {
         }
       }
 
-      setImageRGB(x, y, r, g, b, a = 255) {
+      setXYRGB(x, y, r, g, b, a = 255) {
         const pixelIndex = (y * gridWidth + x) * 4;
         this.image.data[pixelIndex] = r;
         this.image.data[pixelIndex + 1] = g;
         this.image.data[pixelIndex + 2] = b;
         this.image.data[pixelIndex + 3] = a;
+      }
+
+      setIndexRGB(index, r, g, b, a = 255, add = false) {
+        if (add) {
+          this.image.data[index] += r;
+          this.image.data[index + 1] += g;
+          this.image.data[index + 2] += b;
+          this.image.data[index + 3] += a;
+        } else {
+          this.image.data[index] = r;
+          this.image.data[index + 1] = g;
+          this.image.data[index + 2] = b;
+          this.image.data[index + 3] = a;
+        }
       }
 
       update() {
@@ -332,11 +359,22 @@ export default function Liquid({ visibleUI }) {
         this.clearImage();
         this.grid.forEach((cell) => {
           const isWater = cell.value > 0.1 && cell.type === cellTypes.WATER;
-          const waterColour = colourToRGB(theme.secondary);
-          if (isWater) { this.setImageRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value), waterColour.b - Math.floor(cell.value)); }
-          else {
-            this.setImageRGB(cell.x, cell.y, 0, 0, 0, 0);
+          const isWall = cell.type === cellTypes.WALL;
+          const waterColour = colourToRGB(themeRef.current.secondary);
+          const wallColour = colourToRGB(themeRef.current.accent);
+          if (isWater) {
+            this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value), waterColour.b - Math.floor(cell.value));
           }
+          else if (isWall) {
+            this.setXYRGB(cell.x, cell.y, wallColour.r, wallColour.g, wallColour.b);
+          }
+          else {
+            this.setXYRGB(cell.x, cell.y, 0, 0, 0, 0);
+          }
+        })
+
+        this.hoveredGrid.forEach((index) => {
+          this.setIndexRGB(index * 4, 255, 255, 255, 50, true);
         })
       }
     }
@@ -353,14 +391,46 @@ export default function Liquid({ visibleUI }) {
     function animate() {
 
       ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
+      const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
+      const index = mouseX + gridWidth * mouseY;
+      const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, brushSizeRef.current);
+
+      gridManager.hoveredGrid = indexes;
 
       if (mouseClickRef.current) {
-        const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
-        const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
-        const index = mouseX + gridWidth * mouseY;
-        gridManager.grid[Math.floor(index)].value += 1;
-        gridManager.grid[Math.floor(index + 1)].value += 1;
-        gridManager.grid[Math.floor(index - 1)].value += 1;
+        switch (currentToolRef.current) {
+          case TOOLS.WATER:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              if (item.type === cellTypes.WATER) {
+                gridManager.grid[Math.floor(index)].value = 1;
+              }
+            })
+            break;
+          case TOOLS.GRID:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              if (item.type === cellTypes.WATER) {
+                item.type = cellTypes.WALL;
+              }
+            })
+            break;
+
+          case TOOLS.ERASE:
+            indexes.forEach((index) => {
+              const item = gridManager.grid[Math.floor(index)]
+              if (item.type === cellTypes.WALL) {
+                item.type = cellTypes.WATER;
+              }
+            })
+            break;
+
+          default:
+            console.log("Lmao")
+        }
+
+
       }
 
       gridManager.update();
@@ -380,12 +450,13 @@ export default function Liquid({ visibleUI }) {
 
     animate();
 
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
+    canvas.addEventListener("pointermove", handleMouseMove);
+    canvas.addEventListener("pointerdown", handleMouseDown);
+    canvas.addEventListener("pointerup", handleMouseUp);
+    canvas.addEventListener("touchmove", handleTouchMove);
+    canvas.addEventListener("touchstart", handleTouchStart);
+    canvas.addEventListener("touchend", handleTouchEnd);
+    canvas.addEventListener("contextmenu", handleContextMenu);
     // Prevent default scroll on touch drag over canvas
     if (canvas) {
       canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
@@ -396,24 +467,27 @@ export default function Liquid({ visibleUI }) {
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("popstate", recalculateRect);
+      canvas.removeEventListener("contextmenu", handleContextMenu);
+      canvas.removeEventListener("pointermove", handleMouseMove);
+      canvas.removeEventListener("pointerdown", handleMouseDown);
+      canvas.removeEventListener("pointerup", handleMouseUp);
+      canvas.removeEventListener("touchmove", handleTouchMove);
+      canvas.removeEventListener("touchstart", handleTouchStart);
+      canvas.removeEventListener("touchend", handleTouchEnd);
+      canvas.removeEventListener("resize", resizeCanvas);
       if (canvas) {
         canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
       }
-      particles = [];
     };
-  }, [theme.secondary]);
+  }, []);
 
   useEffect(() => {
     visibleUIRef.current = visibleUI;
   }, [visibleUI]);
+
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme])
 
   return (
     <>
@@ -429,35 +503,37 @@ export default function Liquid({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
-              // {
-              //   title: "Particle Count:",
-              //   valueRef: particleCountRef,
-              //   minValue: "100",
-              //   maxValue: "10000",
-              //   type: "slider",
-              // },
-              // {
-              //   title: "Simulation Speed:",
-              //   valueRef: simulationSpeedRef,
-              //   minValue: "1",
-              //   maxValue: "200.0",
-              //   type: "slider",
-              // },
-              // {
-              //   title: "Click Umbrella Radius:",
-              //   valueRef: mouseShieldRadiusRef,
-              //   minValue: "10.0",
-              //   maxValue: "300.0",
-              //   type: "slider",
-              // },
-              // {
-              //   title: "Title Umbrella Radius:",
-              //   valueRef: titleShieldRadiusRef,
-              //   minValue: "1.0",
-              //   maxValue: "100.0",
-              //   callback: recalculateRectRef.current,
-              //   type: "slider",
-              // },
+              {
+                title: "Brush Size:",
+                valueRef: brushSizeRef,
+                minValue: "1.0",
+                maxValue: "10.0",
+                type: "slider",
+              },
+              [{
+                title: "Tool Selection:",
+                type: "button",
+                buttonText: "Water",
+                callback: () => {
+                  currentToolRef.current = TOOLS.WATER
+                }
+              },
+              {
+                type: "button",
+                buttonText: "Grid",
+                callback: () => {
+                  currentToolRef.current = TOOLS.GRID
+                }
+              },
+              {
+                type: "button",
+                buttonText: "Erase",
+                callback: () => {
+                  currentToolRef.current = TOOLS.ERASE
+                }
+              }
+              ]
+
             ]}
             rerenderSetter={setRender}
           />

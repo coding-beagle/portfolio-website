@@ -156,14 +156,14 @@ export default function Conway({ visibleUI }) {
       // yeah these are swapped unfortunately hahhaah
       const newColumns = Math.round(
         (numGridRows.current / canvasRef.current.width) *
-          canvasRef.current.height
+        canvasRef.current.height
       );
       numGridColumns.current = newColumns;
     } else {
       // yeah these are swapped unfortunately hahhaah
       const newRows = Math.round(
         (numGridColumns.current / canvasRef.current.height) *
-          canvasRef.current.width
+        canvasRef.current.width
       );
       numGridRows.current = newRows;
     }
@@ -183,7 +183,7 @@ export default function Conway({ visibleUI }) {
       canvas.height = window.innerHeight;
       try {
         gridManagerRef.current.draw();
-      } catch (e) {}
+      } catch (e) { }
     };
 
     // --- Touch gesture state ---
@@ -815,7 +815,7 @@ export default function Conway({ visibleUI }) {
       valueRef: simulationSpeedRef,
       minValue: 100,
       maxValue: 200,
-      callback: () => {},
+      callback: () => { },
     },
     [
       {

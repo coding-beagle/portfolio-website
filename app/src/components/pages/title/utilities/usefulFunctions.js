@@ -144,3 +144,29 @@ export const getNeighbourIndexFromGrid = (gridWidth, gridHeight, direction, curr
   }
 }
 
+// for all items in a grid, get the indexes of radius brushSize around index, returns a list
+export const getIndexFromBrushSize = (gridWidth, gridHeight, index, brushSize) => {
+  let outputVals = []
+
+  const searchX = index % gridWidth;
+  const searchY = Math.floor(index / gridWidth);
+
+  // Loop through a square area around the center point
+  for (let y = searchY - brushSize; y <= searchY + brushSize; y++) {
+    for (let x = searchX - brushSize; x <= searchX + brushSize; x++) {
+      // Check if coordinates are within grid bounds
+      if (x >= 0 && x < gridWidth && y >= 0 && y < gridHeight) {
+        // Calculate distance from center point
+        const distance = Math.sqrt((x - searchX) ** 2 + (y - searchY) ** 2);
+
+        // Only include if within circular radius
+        if (distance <= brushSize) {
+          const targetIndex = y * gridWidth + x;
+          outputVals.push(targetIndex);
+        }
+      }
+    }
+  }
+
+  return outputVals;
+}
