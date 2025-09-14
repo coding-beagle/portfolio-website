@@ -165,8 +165,8 @@ function AppWrapper() {
         position: "fixed",
         right: "0em",
         bottom: "0em",
-        width: "25vw",
-        height: "50vh",
+        width: "10vw",
+        height: "20vh",
       }}
         onMouseEnter={() => setShowHideButton(true)}
         onMouseLeave={() => setShowHideButton(false)}

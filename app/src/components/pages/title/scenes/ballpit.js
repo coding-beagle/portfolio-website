@@ -16,7 +16,7 @@ export default function BallPit({ visibleUI }) {
   const visibleUIRef = useRef(visibleUI);
 
   // zero is straight down
-  const gravityDirectionRef = useRef(-90);
+  const gravityDirectionRef = useRef(0);
 
   // Touch/swipe gesture refs
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
@@ -132,6 +132,13 @@ export default function BallPit({ visibleUI }) {
       isSwipingRef.current = false;
     };
 
+    let lastGravity, gravity_horizontal, gravity_vertical;
+
+    const recalcGravity = () => {
+      gravity_vertical = gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));
+      gravity_horizontal = gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));
+    }
+
     const inElement = (rect, x, y) => {
       return (
         x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
@@ -149,6 +156,9 @@ export default function BallPit({ visibleUI }) {
     const num_particle_rows = 100;
     const num_particle_columns = 100;
     const lifespan = 1500;
+
+
+
 
     class Particle {
       constructor(x, y) {
@@ -219,8 +229,8 @@ export default function BallPit({ visibleUI }) {
         this.vx *= 0.9;
 
         if (this.y + this.size < canvasRef.current.height && this.y - this.size > 0) {
-          this.vy += gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));
-          this.vx += gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));
+          this.vy += gravity_vertical;
+          this.vx += gravity_horizontal;
         } else if (this.y - this.size < 0) { this.vy += 1 } else {
           this.vy -= 1;
         }
@@ -267,6 +277,10 @@ export default function BallPit({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      if (lastGravity !== gravityDirectionRef.current) {
+        recalcGravity();
+      }
+
       particleCountRef.current = particles.length;
 
       if (visibleUIRef.current && !element) {
@@ -307,6 +321,8 @@ export default function BallPit({ visibleUI }) {
         particle.draw();
       });
       animationFrameId = requestAnimationFrame(animate);
+
+      lastGravity = gravityDirectionRef.current;
 
 
     }
@@ -403,6 +419,13 @@ export default function BallPit({ visibleUI }) {
                 valueRef: brushRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
+                type: "slider",
+              },
+              {
+                title: "Gravity Direction:",
+                valueRef: gravityDirectionRef,
+                minValue: "-180.0",
+                maxValue: "180.0",
                 type: "slider",
               },
               {
