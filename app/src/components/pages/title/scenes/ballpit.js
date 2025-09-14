@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { GyroToolTip, IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
+import { getCloseColour, getRandomColour, scaleValue } from "../utilities/usefulFunctions";
 
 export default function BallPit({ visibleUI }) {
   const { theme } = useTheme();
@@ -147,12 +147,6 @@ export default function BallPit({ visibleUI }) {
 
     recalculateRect();
 
-    const map = (x, in_min, in_max, out_min, out_max) => {
-      return Math.floor(
-        ((x - in_min) * (out_max - out_min)) / (in_max - in_min) + out_min
-      );
-    };
-
     const num_particle_rows = 100;
     const num_particle_columns = 100;
     const lifespan = 1500;
@@ -255,8 +249,8 @@ export default function BallPit({ visibleUI }) {
 
       update_grid_from_pos() {
         this.grid = {
-          x: map(this.x, 0, canvasRef.current.width, 0, num_particle_columns),
-          y: map(this.y, 0, canvasRef.current.height, 0, num_particle_rows),
+          x: scaleValue(this.x, 0, canvasRef.current.width, 0, num_particle_columns),
+          y: scaleValue(this.y, 0, canvasRef.current.height, 0, num_particle_rows),
         };
       }
 
@@ -328,7 +322,8 @@ export default function BallPit({ visibleUI }) {
     }
 
     const handleOrientation = (event) => {
-      gravityDirectionRef.current = 90 - event.gamma;
+      gravityDirectionRef.current = event.gamma;
+      recalcGravity();
     }
 
     // initParticles();
