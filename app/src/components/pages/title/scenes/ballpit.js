@@ -15,6 +15,9 @@ export default function BallPit({ visibleUI }) {
   const clearParticles = useRef(null);
   const visibleUIRef = useRef(visibleUI);
 
+  // zero is straight down
+  const gravityDirectionRef = useRef(-90);
+
   // Touch/swipe gesture refs
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const isSwipingRef = useRef(false);
@@ -151,8 +154,8 @@ export default function BallPit({ visibleUI }) {
       constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = 0;
-        this.vy = Math.random() * 10 + 5;
+        this.vx = 2 * gravity * Math.sin(gravityDirectionRef.current / (Math.PI / 180));;
+        this.vy = 2 * gravity * Math.cos(gravityDirectionRef.current / (Math.PI / 180));;
         this.size = Math.random() * 10 + 5;
         this.color = getRandomColour();
         this.grid = { x: 0, y: 0 };
@@ -215,9 +218,10 @@ export default function BallPit({ visibleUI }) {
 
         this.vx *= 0.9;
 
-        if (this.y + this.size < canvasRef.current.height) {
-          this.vy += gravity;
-        } else {
+        if (this.y + this.size < canvasRef.current.height && this.y - this.size > 0) {
+          this.vy += gravity * Math.sin(gravityDirectionRef.current / (Math.PI / 180));
+          this.vx += gravity * Math.cos(gravityDirectionRef.current / (Math.PI / 180));
+        } else if (this.y - this.size < 0) { this.vy += 1 } else {
           this.vy -= 1;
         }
 
@@ -307,6 +311,10 @@ export default function BallPit({ visibleUI }) {
 
     }
 
+    const handleOrientation = (event) => {
+      gravityDirectionRef.current = event.gamma;
+    }
+
     // initParticles();
     animate();
 
@@ -315,6 +323,8 @@ export default function BallPit({ visibleUI }) {
     window.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("pointerup", handleMouseUp);
     window.addEventListener("contextmenu", handleContextMenu);
+
+    window.addEventListener("deviceorientation", handleOrientation, true);
 
     // Touch event listeners for swipe gestures to spawn particles
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
@@ -331,6 +341,7 @@ export default function BallPit({ visibleUI }) {
     return () => {
       // Cleanup function to cancel the animation frame and remove event listeners
       cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("deviceorientation", handleOrientation);
       window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("touchmove", handleMouseMove);
