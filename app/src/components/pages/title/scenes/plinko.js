@@ -10,6 +10,11 @@ export default function Plinko({ visibleUI }) {
   const gridSpacingX = useRef(100);
   const gridSpacingY = useRef(100);
   const bouncynessRef = useRef(100);
+
+  const gridTypes = { GRID: 0, TRIANGLE: 1 };
+
+  const gridTypeRef = useRef(gridTypes.GRID);
+
   const colorRef = useRef(theme.accent);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
@@ -30,7 +35,6 @@ export default function Plinko({ visibleUI }) {
     const maxSpeed = 1;
     let animationFrameId;
 
-    const gridTypes = { grid: 0, triangle: 1 };
 
     const hitbox = 5;
 
@@ -56,8 +60,8 @@ export default function Plinko({ visibleUI }) {
         this.gridPositions = [];
         let offsetRow = false;
 
-        switch (this.gridType) {
-          case gridTypes.grid: {
+        switch (gridTypeRef.current) {
+          case gridTypes.GRID:
             for (
               let y = 0;
               y < canvasRef.current.height / 2.0;
@@ -91,11 +95,36 @@ export default function Plinko({ visibleUI }) {
             }
 
             break;
-          }
-          case gridTypes.triangle: {
-            // draw here
+
+          case gridTypes.TRIANGLE:
+            for (
+              let y = 0;
+              y < canvasRef.current.height;
+              y += gridSpacingY.current
+            ) {
+              offsetRow = !offsetRow;
+              for (
+                let x = 0;
+                x < y;
+                x += gridSpacingX.current
+              ) {
+                let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
+                const x1 = canvasRef.current.width / 2 + xVal;
+                const x2 = canvasRef.current.width / 2 - xVal;
+
+                const y2 = y;
+
+                this.gridPositions.push([x2, y2]);
+                this.gridPositions.push([x1, y2]);
+
+                drawCircleAt(ctx, x1, y2, hitbox, colorRef.current);
+                drawCircleAt(ctx, x2, y2, hitbox, colorRef.current);
+
+              }
+
+            }
             break;
-          }
+
           default: {
           }
         }
@@ -116,13 +145,13 @@ export default function Plinko({ visibleUI }) {
 
       reset() {
         if (gravity > 0.0) {
-          this.y = 0;
+          this.y = this.size;
           this.vy *= -0.5;
-          this.x = Math.random() * canvas.width;
+          this.x = gridTypeRef.current === gridTypes.TRIANGLE ? canvasRef.current.width / 2.0 + (Math.random() - 0.5) * canvasRef.current.width / 10.0 : Math.random() * canvas.width;
           this.vx = Math.random() * 4 - 2;
         } else {
           this.y = canvas.height;
-          this.x = Math.random() * canvas.width;
+          this.x = gridTypeRef.current === gridTypes.TRIANGLE ? canvasRef.current.width / 2.0 : Math.random() * canvas.width;
           this.vx = Math.random() * 4 - 2;
         }
       }
@@ -195,6 +224,7 @@ export default function Plinko({ visibleUI }) {
         particle.update();
         particle.draw();
       });
+
       animationFrameId = requestAnimationFrame(animate);
     }
 
@@ -253,6 +283,18 @@ export default function Plinko({ visibleUI }) {
                 maxValue: "300",
                 type: "slider",
               },
+              [{
+                title: 'Grid Type:',
+                type: "button",
+                buttonText: "Classic",
+                enabled: gridTypeRef.current === gridTypes.GRID,
+                callback: () => { gridTypeRef.current = gridTypes.GRID }
+              }, {
+                type: "button",
+                buttonText: "Triangle",
+                enabled: gridTypeRef.current === gridTypes.TRIANGLE,
+                callback: () => { gridTypeRef.current = gridTypes.TRIANGLE }
+              }],
               {
                 title: "Grid Spacing X:",
                 valueRef: gridSpacingX,
