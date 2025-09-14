@@ -495,8 +495,10 @@ export default function Liquid({ visibleUI }) {
           }
         })
 
+        const selectedColour = colourToRGB(themeRef.current.accent);
+
         this.hoveredGrid.forEach((index) => {
-          this.setIndexRGB(index * 4, 255, 255, 255, 50, true);
+          this.setIndexRGB(index * 4, selectedColour.r, selectedColour.b, selectedColour.g, 50, true);
         })
       }
     }
