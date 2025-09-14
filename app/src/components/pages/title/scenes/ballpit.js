@@ -154,8 +154,8 @@ export default function BallPit({ visibleUI }) {
       constructor(x, y) {
         this.x = x;
         this.y = y;
-        this.vx = 2 * gravity * Math.sin(gravityDirectionRef.current / (Math.PI / 180));;
-        this.vy = 2 * gravity * Math.cos(gravityDirectionRef.current / (Math.PI / 180));;
+        this.vx = 2 * gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));;
+        this.vy = 2 * gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));;
         this.size = Math.random() * 10 + 5;
         this.color = getRandomColour();
         this.grid = { x: 0, y: 0 };
@@ -219,8 +219,8 @@ export default function BallPit({ visibleUI }) {
         this.vx *= 0.9;
 
         if (this.y + this.size < canvasRef.current.height && this.y - this.size > 0) {
-          this.vy += gravity * Math.sin(gravityDirectionRef.current / (Math.PI / 180));
-          this.vx += gravity * Math.cos(gravityDirectionRef.current / (Math.PI / 180));
+          this.vy += gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));
+          this.vx += gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));
         } else if (this.y - this.size < 0) { this.vy += 1 } else {
           this.vy -= 1;
         }
@@ -312,7 +312,7 @@ export default function BallPit({ visibleUI }) {
     }
 
     const handleOrientation = (event) => {
-      gravityDirectionRef.current = event.beta;
+      gravityDirectionRef.current = event.gamma;
     }
 
     // initParticles();
