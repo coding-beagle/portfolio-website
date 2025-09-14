@@ -145,8 +145,8 @@ export default function Plinko({ visibleUI }) {
 
       reset() {
         if (gravity > 0.0) {
-          this.y = this.size;
-          this.vy *= -0.5;
+          this.y = 0;
+          this.vy = 0.5;
           this.x = gridTypeRef.current === gridTypes.TRIANGLE ? canvasRef.current.width / 2.0 + (Math.random() - 0.5) * canvasRef.current.width / 10.0 : Math.random() * canvas.width;
           this.vx = Math.random() * 4 - 2;
         } else {
