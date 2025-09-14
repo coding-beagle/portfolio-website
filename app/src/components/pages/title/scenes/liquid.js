@@ -516,7 +516,7 @@ export default function Liquid({ visibleUI }) {
       const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
       const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
       const index = mouseX + gridWidth * mouseY;
-      const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, brushSizeRef.current - 1);
+      const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, Math.floor(brushSizeRef.current - 1));
 
       gridManager.hoveredGrid = indexes;
       clearRef.current = () => gridManager.clearScene();
