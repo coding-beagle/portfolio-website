@@ -312,7 +312,7 @@ export default function BallPit({ visibleUI }) {
     }
 
     const handleOrientation = (event) => {
-      gravityDirectionRef.current = event.gamma;
+      gravityDirectionRef.current = event.gamma - 90;
     }
 
     // initParticles();
