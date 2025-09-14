@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 
 export default function Rain({ visibleUI }) {
@@ -313,9 +313,9 @@ export default function Rain({ visibleUI }) {
             rerenderSetter={setRender}
           />
 
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
-          </div>
+          <IconGroup icons={[
+            { type: "MOUSE" },
+          ]} />
         </div>
       )}
     </>

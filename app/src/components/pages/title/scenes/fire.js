@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { IconGroup } from "../utilities/popovers";
 
 export default function Fire({ visibleUI }) {
   const { theme } = useTheme();
@@ -271,9 +271,9 @@ export default function Fire({ visibleUI }) {
         </div>
       )}
       {visibleUI && (
-        <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-          <MouseTooltip />
-        </div>
+        <IconGroup icons={[
+          { type: "MOUSE" },
+        ]} />
       )}
     </>
   );

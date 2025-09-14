@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { GyroToolTip, IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
 
@@ -417,9 +417,11 @@ export default function BallPit({ visibleUI }) {
             rerenderSetter={setRender}
           />
 
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
-          </div>
+          <IconGroup icons={
+            [{ type: 'MOUSE' },
+            { type: 'GYRO', text: "Tilt your phone!" }
+            ]
+          } />
         </div>
       )}
     </>

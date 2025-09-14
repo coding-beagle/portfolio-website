@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { IconGroup } from "../utilities/popovers";
 
 // named enum for convenience innit
 const NAMED_ANGLE = {
@@ -532,9 +532,7 @@ export default function Clocks({ visibleUI }) {
             ]}
             rerenderSetter={setRender}
           />
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
-          </div>
+          <IconGroup icons={[{ type: "MOUSE" }]} />
         </div>
 
       )}

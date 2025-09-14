@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { checkMouseInRadius, drawCircleAt, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
@@ -859,9 +859,9 @@ export default function Pinball({ visibleUI }) {
             rerenderSetter={setRender}
           />
 
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
-          </div>
+          <IconGroup icons={[
+            { type: "MOUSE", text: "Click next to the levers to activate!" },
+          ]} />
         </div>
       )}
     </>

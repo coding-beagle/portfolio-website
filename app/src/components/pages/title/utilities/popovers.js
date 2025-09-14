@@ -3,11 +3,12 @@ import {
   faArrowsUpDownLeftRight,
   faMagnifyingGlass,
   faMouse,
+  faRotate,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useTheme } from "../../../../themes/ThemeProvider";
 
-export default function MouseTooltip({ text }) {
+function GenericToolTip(text, icon) {
   const [hovered, setHovered] = useState(false);
   const { theme } = useTheme();
 
@@ -18,7 +19,7 @@ export default function MouseTooltip({ text }) {
       onMouseLeave={() => setHovered(false)}
     >
       <div style={{ fontSize: "2em", display: "inline-block" }}>
-        <FontAwesomeIcon icon={faMouse} />
+        <FontAwesomeIcon icon={icon} />
       </div>
       {hovered && text && (
         <div
@@ -56,106 +57,52 @@ export default function MouseTooltip({ text }) {
       )}
     </span>
   );
+}
+
+export default function MouseTooltip({ text }) {
+  return GenericToolTip(text, faMouse);
 }
 
 export function ZoomableToolTip({ text }) {
-  const [hovered, setHovered] = useState(false);
-  const { theme } = useTheme();
-
-  return (
-    <span
-      style={{ position: "relative", display: "inline-block" }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div style={{ fontSize: "2em", display: "inline-block" }}>
-        <FontAwesomeIcon icon={faMagnifyingGlass} />
-      </div>
-      {hovered && text && (
-        <div
-          style={{
-            position: "absolute",
-            top: "110%",
-            left: "100%", // align right edge of popover to right edge of icon
-            transform: "translateX(-100%)", // shift popover left so its right edge is at the icon
-            background: theme.primary,
-            color: theme.accent,
-            padding: "6px 12px",
-            borderRadius: "6px",
-            whiteSpace: "normal",
-            boxShadow: `0 2px 8px ${theme.secondary}30`,
-            zIndex: 1000,
-            pointerEvents: "none",
-            maxWidth: "15rem",
-            minWidth: "15rem",
-            overflowWrap: "break-word",
-            wordBreak: "break-word",
-          }}
-        >
-          {text.split("\n").map((line, idx) => (
-            <div key={idx}>
-              {line.includes(":") ? (
-                <>
-                  <b>{line.split(":")[0]}</b>:{line.split(":")[1]}
-                </>
-              ) : (
-                line
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </span>
-  );
+  return GenericToolTip(text, faMagnifyingGlass);
 }
 
 export function PannableToolTip({ text }) {
-  const [hovered, setHovered] = useState(false);
-  const { theme } = useTheme();
+  return GenericToolTip(text, faArrowsUpDownLeftRight);
+}
 
+export function GyroToolTip({ text }) {
+  return GenericToolTip(text, faRotate);
+}
+
+export const iconTypes = {
+  MOUSE: MouseTooltip,
+  ZOOMABLE: ZoomableToolTip,
+  PANNABLE: PannableToolTip,
+  GYRO: GyroToolTip
+}
+
+// icons is an array of {type: validType, text: 'text'}
+export function IconGroup({ icons }) {
   return (
-    <span
-      style={{ position: "relative", display: "inline-block" }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div style={{ fontSize: "2em", display: "inline-block" }}>
-        <FontAwesomeIcon icon={faArrowsUpDownLeftRight} />
+    <div style={{ zIndex: 3000 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          position: "absolute",
+          top: "1em",
+          right: "1em",
+          gap: "0.5em",
+        }}
+      >
+        {icons.map((icon, index) => {
+          const IconComponent = iconTypes[icon.type];
+          return IconComponent ? (
+            <IconComponent key={index} text={icon.text} />
+          ) : null;
+        })}
       </div>
-      {hovered && text && (
-        <div
-          style={{
-            position: "absolute",
-            top: "110%",
-            left: "100%", // align right edge of popover to right edge of icon
-            transform: "translateX(-100%)", // shift popover left so its right edge is at the icon
-            background: theme.primary,
-            color: theme.accent,
-            padding: "6px 12px",
-            borderRadius: "6px",
-            whiteSpace: "normal",
-            boxShadow: `0 2px 8px ${theme.secondary}30`,
-            zIndex: 1000,
-            pointerEvents: "none",
-            maxWidth: "15rem",
-            minWidth: "15rem",
-            overflowWrap: "break-word",
-            wordBreak: "break-word",
-          }}
-        >
-          {text.split("\n").map((line, idx) => (
-            <div key={idx}>
-              {line.includes(":") ? (
-                <>
-                  <b>{line.split(":")[0]}</b>:{line.split(":")[1]}
-                </>
-              ) : (
-                line
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </span>
+    </div>
   );
 }

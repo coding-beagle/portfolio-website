@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import { IconGroup } from "../utilities/popovers";
 
 export default function Life({ visibleUI }) {
   const myBirthday = new Date("July 12, 2004");
@@ -189,6 +190,9 @@ export default function Life({ visibleUI }) {
             ]}
             rerenderSetter={setRender}
           />
+          <IconGroup icons={[
+            { type: "MOUSE" },
+          ]} />
         </div>
       )}
     </>

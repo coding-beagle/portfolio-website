@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, {
+  IconGroup,
   PannableToolTip,
   ZoomableToolTip,
 } from "../utilities/popovers";
@@ -1034,23 +1035,13 @@ export default function Conway({ visibleUI }) {
         </div>
       )}
       {visibleUI && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            position: "absolute",
-            top: "1em",
-            right: "1em",
-            gap: "0.5em",
-          }}
-        >
-          <ZoomableToolTip text={"Scroll: Zoom in and out"} />
-          <PannableToolTip text={"Middle Mouse: Pan"} />
-          <MouseTooltip
-            text={"Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell"}
-          />
-        </div>
-      )}
+        <IconGroup icons={[
+          { type: "MOUSE", text: "Left mouse: Place Alive Cell\nRight mouse: Place Dead Cell" },
+          { type: "ZOOMABLE", text: "Scroll: Zoom in and out" },
+          { type: "PANNABLE", text: "Middle Mouse: Pan" }
+        ]} />
+      )
+      }
     </>
   );
 }

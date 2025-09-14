@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { PannableToolTip, ZoomableToolTip } from "../utilities/popovers";
+import { IconGroup, iconTypes, PannableToolTip, ZoomableToolTip } from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
 import { ChangerGroup } from "../utilities/valueChangers";
@@ -13,7 +13,7 @@ export default function Mandelbrot({ visibleUI }) {
   const [, setRender] = useState(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
-  const drawEverythingRef = useRef(() => {});
+  const drawEverythingRef = useRef(() => { });
   const currentlyDrawingRef = useRef(false);
   const currentThemeRef = useRef(0);
 
@@ -209,7 +209,7 @@ export default function Mandelbrot({ visibleUI }) {
       valueRef: drawResolutionRef,
       minValue: 1,
       maxValue: 20,
-      callback: () => {},
+      callback: () => { },
     },
     [
       {
@@ -289,70 +289,70 @@ export default function Mandelbrot({ visibleUI }) {
     // Add color pickers if Custom theme is selected
     ...(currentThemeRef.current === themesList.length - 1
       ? [
-          [
-            {
-              type: "color",
-              title: "Max Iteration Colour:",
-              colorValue: customColours[0],
-              onChange: (newColor) => {
-                const newColours = [
-                  newColor,
-                  customColours[1],
-                  customColours[2],
-                ];
-                setCustomColours(newColours);
-                calculateColourComponents(
-                  newColours[0],
-                  newColours[1],
-                  newColours[2]
-                );
-                drawEverythingRef.current();
-              },
+        [
+          {
+            type: "color",
+            title: "Max Iteration Colour:",
+            colorValue: customColours[0],
+            onChange: (newColor) => {
+              const newColours = [
+                newColor,
+                customColours[1],
+                customColours[2],
+              ];
+              setCustomColours(newColours);
+              calculateColourComponents(
+                newColours[0],
+                newColours[1],
+                newColours[2]
+              );
+              drawEverythingRef.current();
             },
-          ],
-          [
-            {
-              type: "color",
-              title: "Max Interp Colour:",
-              colorValue: customColours[1],
-              onChange: (newColor) => {
-                const newColours = [
-                  customColours[0],
-                  newColor,
-                  customColours[2],
-                ];
-                setCustomColours(newColours);
-                calculateColourComponents(
-                  newColours[0],
-                  newColours[1],
-                  newColours[2]
-                );
-                drawEverythingRef.current();
-              },
+          },
+        ],
+        [
+          {
+            type: "color",
+            title: "Max Interp Colour:",
+            colorValue: customColours[1],
+            onChange: (newColor) => {
+              const newColours = [
+                customColours[0],
+                newColor,
+                customColours[2],
+              ];
+              setCustomColours(newColours);
+              calculateColourComponents(
+                newColours[0],
+                newColours[1],
+                newColours[2]
+              );
+              drawEverythingRef.current();
             },
-          ],
-          [
-            {
-              type: "color",
-              title: "Min Interp Colour:",
-              colorValue: customColours[2],
-              onChange: (newColor) => {
-                const newColours = [
-                  customColours[0],
-                  customColours[1],
-                  newColor,
-                ];
-                setCustomColours(newColours);
-                calculateColourComponents(
-                  newColours[0],
-                  newColours[1],
-                  newColours[2]
-                );
-                drawEverythingRef.current();
-              },
+          },
+        ],
+        [
+          {
+            type: "color",
+            title: "Min Interp Colour:",
+            colorValue: customColours[2],
+            onChange: (newColor) => {
+              const newColours = [
+                customColours[0],
+                customColours[1],
+                newColor,
+              ];
+              setCustomColours(newColours);
+              calculateColourComponents(
+                newColours[0],
+                newColours[1],
+                newColours[2]
+              );
+              drawEverythingRef.current();
             },
-          ],
-        ]
+          },
+        ],
+      ]
       : []),
   ];
 
@@ -752,21 +752,11 @@ export default function Mandelbrot({ visibleUI }) {
         />
       )}
       {visibleUI && (
-        <div style={{ zIndex: 3000 }}>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              position: "absolute",
-              top: "1em",
-              right: "1em",
-              gap: "0.5em",
-            }}
-          >
-            <ZoomableToolTip text={"Scroll wheel: Zoom in and out!"} />
-            <PannableToolTip text={"Left click: Pan around!"} />
-          </div>
-        </div>
+        <IconGroup icons={
+          [{ type: 'ZOOMABLE', text: "Scroll wheel: Zoom in and out!" },
+          { type: 'PANNABLE', text: "Left click: Pan around!" }
+          ]
+        } />
       )}
     </>
   );

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { scaleValue } from "../utilities/usefulFunctions";
-import MouseTooltip from "../utilities/popovers";
+import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Raven({ visibleUI }) {
@@ -185,9 +185,9 @@ export default function Raven({ visibleUI }) {
             ]}
             rerenderSetter={setRender}
           />
-          <div style={{ position: "absolute", top: "1em", right: "1em" }}>
-            <MouseTooltip />
-          </div>
+          <IconGroup icons={[
+            { type: "MOUSE" },
+          ]} />
         </div>
       )}
     </>
