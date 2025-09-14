@@ -295,6 +295,8 @@ export default function Title({
               whiteSpace: "pre-wrap",
             }}
             id="title"
+            aria-label="Next scene (left click), previous scene (right click)"
+            title="Next scene (left click), previous scene (right click)"
           >
             {text === "" || text === undefined
               ? "NTeague"

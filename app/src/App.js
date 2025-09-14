@@ -46,6 +46,8 @@ function AppWrapper() {
 
   const [UIShowiconAnim, setUIShowIconAnim] = useState(false);
   const [pendingShowUI, setPendingShowUI] = useState("hidden");
+
+  const [showHideButton, setShowHideButton] = useState(true);
   const [visibleUI, setVisibleUI] = useState(hideUIBool);
 
   // Handler for animated theme toggle
@@ -157,64 +159,78 @@ function AppWrapper() {
           )}
         </button>
       )}
-      <button
-        onClick={handleVisibleToggle}
-        style={{
-          position: "fixed",
-          right: "1em",
-          bottom: "1em",
-          zIndex: 9999,
-          background: theme.accent,
-          color: theme.primary,
-          border: "none",
-          borderRadius: "50%",
-          width: "3em",
-          height: "3em",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-          cursor: "pointer",
-          fontSize: "1.5em",
-          transition: "background 0.3s, color 0.3s",
-          overflow: "hidden",
-        }}
-        aria-label={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
-        title={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
+      <div style={{
+        padding: '1em',
+        overflow: "hidden",
+        position: "fixed",
+        right: "0em",
+        bottom: "0em",
+        width: "25vw",
+        height: "50vh",
+      }}
+        onMouseEnter={() => setShowHideButton(true)}
+        onMouseLeave={() => setShowHideButton(false)}
       >
-        {pendingShowUI === "hidden" ? (
-          <span
-            style={{
-              display: "inline-block",
-              transition:
-                "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
-              transform: UIShowiconAnim
-                ? "translateY(40px) scale(0.7) rotate(-20deg)"
-                : "translateY(0) scale(1) rotate(0deg)",
-              opacity: UIShowiconAnim ? 0 : 1,
-              position: "absolute",
-            }}
-          >
-            <FontAwesomeIcon icon={faEyeSlash} />
-          </span>
-        ) : (
-          <span
-            style={{
-              display: "inline-block",
-              transition:
-                "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
-              transform: UIShowiconAnim
-                ? "translateY(40px) scale(0.7) rotate(20deg)"
-                : "translateY(0) scale(1) rotate(0deg)",
-              opacity: UIShowiconAnim ? 0 : 1,
-              position: "absolute",
-            }}
-          >
-            <FontAwesomeIcon icon={faEye} />
-          </span>
-        )}
-      </button>
-    </div>
+        <button
+          onClick={handleVisibleToggle}
+          style={{
+            position: "fixed",
+            right: "1em",
+            bottom: "1em",
+            zIndex: 9999,
+            background: theme.accent,
+            color: theme.primary,
+            border: "none",
+            borderRadius: "50%",
+            width: "3em",
+            height: "3em",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            cursor: "pointer",
+            fontSize: "1.5em",
+            transition: "background 0.3s, color 0.3s, transform 0.5s ease",
+            transform: !visibleUI && !showHideButton ? 'translateX(200%)' : 'translateX(0%)',
+            overflow: "hidden",
+          }}
+          aria-label={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
+          title={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
+        >
+          {pendingShowUI === "hidden" ? (
+            <span
+              style={{
+                display: "inline-block",
+                transition:
+                  "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+                transform: UIShowiconAnim
+                  ? "scale(0.7) rotate(180deg)"
+                  : "scale(1) rotate(0deg)",
+                opacity: UIShowiconAnim ? 0 : 1,
+                position: "absolute",
+              }}
+            >
+              <FontAwesomeIcon icon={faEyeSlash} />
+            </span>
+          ) : (
+            <span
+              style={{
+                display: "inline-block",
+                transition:
+                  "transform 0.5s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s",
+                transform: UIShowiconAnim
+                  ? "scale(0.7) rotate(180deg)"
+                  : "scale(1) rotate(0deg)",
+                opacity: UIShowiconAnim ? 0 : 1,
+                position: "absolute",
+              }}
+            >
+              <FontAwesomeIcon icon={faEye} />
+            </span>
+          )}
+        </button>
+      </div>
+    </div >
   );
 }
 
