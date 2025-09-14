@@ -596,6 +596,13 @@ export default function Liquid({ visibleUI }) {
 
     animate();
 
+    const handleWheel = (e) => {
+      e.preventDefault();
+      const stepSize = 0.5; // Smaller steps for smoother control
+      const newSize = brushSizeRef.current + (Math.sign(e.deltaY) * stepSize);
+      brushSizeRef.current = Math.max(1, Math.min(10, newSize));
+    }
+
     canvas.addEventListener("pointermove", handleMouseMove);
     canvas.addEventListener("pointerdown", handleMouseDown);
     canvas.addEventListener("pointerup", handleMouseUp);
@@ -603,6 +610,7 @@ export default function Liquid({ visibleUI }) {
     canvas.addEventListener("touchstart", handleTouchStart);
     canvas.addEventListener("touchend", handleTouchEnd);
     canvas.addEventListener("contextmenu", handleContextMenu);
+    canvas.addEventListener("wheel", handleWheel);
     // Prevent default scroll on touch drag over canvas
     if (canvas) {
       canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
@@ -621,6 +629,7 @@ export default function Liquid({ visibleUI }) {
       canvas.removeEventListener("touchstart", handleTouchStart);
       canvas.removeEventListener("touchend", handleTouchEnd);
       canvas.removeEventListener("resize", resizeCanvas);
+      canvas.addEventListener("wheel", handleWheel);
       if (canvas) {
         canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
       }
