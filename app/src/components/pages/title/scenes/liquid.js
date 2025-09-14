@@ -14,6 +14,7 @@ export default function Liquid({ visibleUI }) {
   const brushSizeRef = useRef(1);
   const fluidSpeedRef = useRef(100);
   const maxFlowRate = useRef(400);
+  const simulationSpeedRef = useRef(100);
 
   const clearRef = useRef(null);
 
@@ -363,21 +364,45 @@ export default function Liquid({ visibleUI }) {
 
         this.hoveredGrid = []
 
+        this.simValue = 0;
       }
 
       initScene() {
+        // init scene with top row as taps, bottom row as drains, everything else as water
         for (let y = 0; y < gridHeight; y++) {
           for (let x = 0; x < gridWidth; x++) {
             let type, phase;
             phase = Math.floor((x / gridWidth) * 100.0);
             if (y === 0) { type = cellTypes.TAP }
             else if (y === gridHeight - 1) { type = cellTypes.DRAIN }
-            else if (Math.random() > 0.95 && (x < gridWidth / 2.5 || x > 1.5 * gridWidth / 2.5 || y < gridHeight / 3 || y > 1.5 * gridHeight / 2.5)) { type = cellTypes.WALL }
             else { type = cellTypes.WATER }
 
             this.grid.push(new Water(x, y, this, type, phase));
           }
         }
+
+        // create random arrangement of crosses
+        for (let y = 0; y < gridHeight; y++) {
+          for (let x = 0; x < gridWidth; x++) {
+            const ignoreCenterX = mobile ? (x < gridWidth / 4 || x > 3 * gridWidth / 4) : (x < gridWidth / 2.5 || x > 1.5 * gridWidth / 2.5)
+            const ignoreCenterY = (y < gridHeight / 3 || y > 1.5 * gridHeight / 2.5)
+            if (Math.random() > 0.99 && (ignoreCenterX || ignoreCenterY)) {
+              const setNeighbourToWallFromDirection = (direction) => {
+                const index = getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, x + y * gridWidth);
+                if (index !== -1) {
+                  this.grid[index].type = cellTypes.WALL;
+                }
+              }
+              setNeighbourToWallFromDirection(DIRECTIONS.N);
+              setNeighbourToWallFromDirection(DIRECTIONS.W);
+              setNeighbourToWallFromDirection(DIRECTIONS.E);
+              setNeighbourToWallFromDirection(DIRECTIONS.S);
+              this.grid[x + y * gridWidth].type = cellTypes.WALL
+            }
+          }
+        }
+
+
       }
 
       clearScene() {
@@ -422,6 +447,13 @@ export default function Liquid({ visibleUI }) {
       }
 
       update() {
+
+        this.simValue += simulationSpeedRef.current;
+        if (this.simValue < 100) { return }
+        else {
+          this.simValue = 0;
+        }
+
         this.grid.forEach((cell) => {
           cell.nextValue = cell.value;
         })
@@ -617,6 +649,13 @@ export default function Liquid({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "0.0",
+                maxValue: "100.0",
+                type: "slider",
+              },
               {
                 title: "Brush Size:",
                 valueRef: brushSizeRef,
