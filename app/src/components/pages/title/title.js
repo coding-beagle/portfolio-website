@@ -40,6 +40,7 @@ import Clocks from "./scenes/clocks";
 import { portfolioImages } from "./portfolio";
 import Pinball from "./scenes/pinball";
 import BallPit from "./scenes/ballpit";
+import PID from "./scenes/pid";
 
 const Scenes = {
   0: { component: Snow },
@@ -59,7 +60,8 @@ const Scenes = {
   14: { component: Raven },
   15: { component: Clocks },
   16: { component: Pinball },
-  17: { component: BallPit }
+  17: { component: BallPit },
+  18: { component: PID },
 };
 
 const sceneNameToIndex = {
@@ -80,7 +82,8 @@ const sceneNameToIndex = {
   raven: 14,
   clocks: 15,
   pinball: 16,
-  ballpit: 17
+  ballpit: 17,
+  pid: 18
 };
 
 export default function Title({
