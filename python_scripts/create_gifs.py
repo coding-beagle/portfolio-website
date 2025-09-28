@@ -2,10 +2,11 @@ import pyscreenrec
 import webbrowser
 import time
 from moviepy.editor import VideoFileClip
-from os import makedirs, remove
+from os import makedirs, rmdir
 import sys
 from PIL import Image, ImageSequence
 import pyautogui
+from shutil import rmtree
 
 PORT = 3000
 BASE_URL = f"http://localhost:{PORT}/#?"
@@ -36,7 +37,7 @@ RESIZE_FACTOR = 2
 def convert_vid_to_gif(video_path: str, gif_path: str) -> None:
     videoClip = VideoFileClip(f"recordings/{video_path}.mp4")
     makedirs("outgifs/", exist_ok=True)
-    videoClip.subclip(-3).resize(
+    videoClip.subclip(-1).resize(
         (int(1920 / RESIZE_FACTOR), int(920 / RESIZE_FACTOR))
     ).write_gif(f"outgifs/{gif_path}.gif", fps=GIF_FPS)
 
@@ -58,12 +59,12 @@ def do_record(scene_name: str, drag: bool) -> None:
         time.sleep(0.1)
 
     if drag:
-        time.sleep(7)
-        pyautogui.moveTo(x=500, y=300)
-        pyautogui.dragTo(x=1000, y=200, duration=1)
-        pyautogui.dragTo(x=1500, y=300, duration=1)
+        time.sleep(1)
+        pyautogui.moveTo(x=460, y=300)
+        pyautogui.dragTo(x=960, y=200, duration=0.5)
+        pyautogui.dragTo(x=1460, y=300, duration=0.5)
     else:
-        time.sleep(9)
+        time.sleep(2)
 
     recorder.stop_recording()
 
@@ -75,4 +76,48 @@ def create_preview_gif(scene_name: str, drag: bool = False) -> None:
     pyautogui.hotkey("ctrl", "w")
 
 
-create_preview_gif("rain", True)
+SCENES = {
+    "snow": False,
+    "rain": True,
+    "plants": False,
+    "stars": True,
+    "boids": True,
+    "conway": True,
+    "hexapod": True,
+    "mandelbrot": True,
+    "fire": True,
+    "fireworks": False,
+    "plinko": False,
+    "gravitalorbs": False,
+    "liquid": True,
+    "life": False,
+    "raven": True,
+    "clocks": True,
+    "pinball": True,
+    "ballpit": True,
+    "pid": True,
+}
+
+rmtree("recordings")
+rmtree("outgifs")
+
+for scene, drag in SCENES.items():
+    create_preview_gif(scene, drag)
+
+with open("../README.md", "w") as f:
+    new_text = """# Nicholas Teague's public portfolio website
+
+## Scene previews:"""
+
+    for scene in SCENES:
+        new_text += f"\n\n###{scene.capitalize()}:\n![{scene.upper()}](python_scripts/outgifs/{scene}.gif)"
+
+    new_text += """\n\n## Make Commands:
+
+`make install` -> Install JS deps
+
+`make run` -> Run webpack to render website locally
+
+`make clean` -> Clear out node_modules
+"""
+    f.write(new_text)
