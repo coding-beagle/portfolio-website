@@ -110,7 +110,7 @@ with open("../README.md", "w") as f:
 ## Scene previews:"""
 
     for scene in SCENES:
-        new_text += f"\n\n###{scene.capitalize()}:\n![{scene.upper()}](python_scripts/outgifs/{scene}.gif)"
+        new_text += f"\n\n### {scene.capitalize()}:\n![{scene.upper()}](python_scripts/outgifs/{scene}.gif)"
 
     new_text += """\n\n## Make Commands:
 

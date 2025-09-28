@@ -2,61 +2,61 @@
 
 ## Scene previews:
 
-###Snow:
+### Snow:
 ![SNOW](python_scripts/outgifs/snow.gif)
 
-###Rain:
+### Rain:
 ![RAIN](python_scripts/outgifs/rain.gif)
 
-###Plants:
+### Plants:
 ![PLANTS](python_scripts/outgifs/plants.gif)
 
-###Stars:
+### Stars:
 ![STARS](python_scripts/outgifs/stars.gif)
 
-###Boids:
+### Boids:
 ![BOIDS](python_scripts/outgifs/boids.gif)
 
-###Conway:
+### Conway:
 ![CONWAY](python_scripts/outgifs/conway.gif)
 
-###Hexapod:
+### Hexapod:
 ![HEXAPOD](python_scripts/outgifs/hexapod.gif)
 
-###Mandelbrot:
+### Mandelbrot:
 ![MANDELBROT](python_scripts/outgifs/mandelbrot.gif)
 
-###Fire:
+### Fire:
 ![FIRE](python_scripts/outgifs/fire.gif)
 
-###Fireworks:
+### Fireworks:
 ![FIREWORKS](python_scripts/outgifs/fireworks.gif)
 
-###Plinko:
+### Plinko:
 ![PLINKO](python_scripts/outgifs/plinko.gif)
 
-###Gravitalorbs:
+### Gravitalorbs:
 ![GRAVITALORBS](python_scripts/outgifs/gravitalorbs.gif)
 
-###Liquid:
+### Liquid:
 ![LIQUID](python_scripts/outgifs/liquid.gif)
 
-###Life:
+### Life:
 ![LIFE](python_scripts/outgifs/life.gif)
 
-###Raven:
+### Raven:
 ![RAVEN](python_scripts/outgifs/raven.gif)
 
-###Clocks:
+### Clocks:
 ![CLOCKS](python_scripts/outgifs/clocks.gif)
 
-###Pinball:
+### Pinball:
 ![PINBALL](python_scripts/outgifs/pinball.gif)
 
-###Ballpit:
+### Ballpit:
 ![BALLPIT](python_scripts/outgifs/ballpit.gif)
 
-###Pid:
+### Pid:
 ![PID](python_scripts/outgifs/pid.gif)
 
 ## Make Commands:
