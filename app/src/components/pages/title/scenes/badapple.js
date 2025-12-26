@@ -11,6 +11,8 @@ export default function BadApple({ visibleUI }) {
   const simulationSpeedRef = useRef(100);
   const visibleUIRef = useRef(visibleUI);
 
+  const volumeRef = useRef(0.0);
+
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const touchActiveRef = useRef(false);
@@ -22,6 +24,7 @@ export default function BadApple({ visibleUI }) {
   const [, setRender] = useState(0);
 
   const titleShieldRadiusRef = useRef(20);
+  const titleShieldRadiusRef2 = useRef(20);
 
   const VID_WIDTH = 480;
   const VID_HEIGHT = 360;
@@ -36,6 +39,8 @@ export default function BadApple({ visibleUI }) {
 
     let element = document.getElementById("title") ?? null;
     let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
+    let element2 = document.getElementById("linkIcons") ?? null;
+    let rect_padded2 = { left: 0, right: 0, top: 0, bottom: 0 };
 
     const inElement = (rect, x, y) => {
       return (
@@ -51,6 +56,14 @@ export default function BadApple({ visibleUI }) {
         right: rect.right + titleShieldRadiusRef.current,
         top: rect.top - titleShieldRadiusRef.current,
         bottom: rect.bottom + titleShieldRadiusRef.current,
+      };
+      if (!element2) return;
+      let rect2 = element2.getBoundingClientRect();
+      rect_padded2 = {
+        left: rect2.left - titleShieldRadiusRef2.current,
+        right: rect2.right + titleShieldRadiusRef2.current,
+        top: rect2.top - titleShieldRadiusRef2.current,
+        bottom: rect2.bottom + titleShieldRadiusRef2.current,
       };
     };
 
@@ -96,8 +109,10 @@ export default function BadApple({ visibleUI }) {
     }
 
     const calculateTotalParticles = () => {
-      VIDEO_X = VID_WIDTH / scaleRef.current;
-      VIDEO_Y = VID_HEIGHT / scaleRef.current;
+      VIDEO_X = Math.floor(VID_WIDTH / (8 - scaleRef.current + 2));
+      VIDEO_Y = Math.floor(VID_HEIGHT / (8 - scaleRef.current + 2));
+      // console.log(VIDEO_X * VIDEO_Y);
+      // console.log(particles.length);
       return VIDEO_X * VIDEO_Y;
     }
 
@@ -125,7 +140,7 @@ export default function BadApple({ visibleUI }) {
       }
 
       update(color) {
-        if ((inElement(rect_padded, this.x, this.y)) && visibleUIRef.current) {
+        if ((inElement(rect_padded, this.x, this.y) || inElement(rect_padded2, this.x, this.y)) && visibleUIRef.current) {
           this.color = theme.primary;
         } else
           this.color = color;
@@ -199,6 +214,13 @@ export default function BadApple({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      if (volumeRef.current > 0.0) {
+        videoRef.current.volume = volumeRef.current / 100.0;
+        videoRef.current.muted = false;
+      } else {
+        videoRef.current.muted = true;
+      }
+
       // incase element changes location or we hide ui
       if (visibleUIRef.current && !element) {
         element = document.getElementById("title");
@@ -221,17 +243,38 @@ export default function BadApple({ visibleUI }) {
 
       }
 
+      if (visibleUIRef.current && !element2) {
+        element2 = document.getElementById("linkIcons");
+        recalculateRect();
+      } else {
+        element2 = null
+      }
+
+      if (element2) {
+        const rect_temp = element2.getBoundingClientRect();
+        const padded_hypothetical_rect = {
+          left: rect_temp.left - titleShieldRadiusRef2.current,
+          right: rect_temp.right + titleShieldRadiusRef2.current,
+          top: rect_temp.top - titleShieldRadiusRef2.current,
+          bottom: rect_temp.bottom + titleShieldRadiusRef2.current,
+        };
+        if (rect_padded.top !== padded_hypothetical_rect.top) {
+          recalculateRect()
+        }
+
+      }
+
       // Adjust particle count when scaling changes
-      // const currentParticleCount = particles.length;
-      // if (currentParticleCount < calculateTotalParticles()) {
-      //   for (let i = currentParticleCount; i < calculateTotalParticles(); i++) {
-      //     const x = Math.random() * canvas.width;
-      //     const y = Math.random() * canvas.height;
-      //     particles.push(new Particle(x, y));
-      //   }
-      // } else if (currentParticleCount > particleCountRef.current) {
-      //   particles.splice(particleCountRef.current);
-      // }
+      const currentParticleCount = particles.length;
+      if (currentParticleCount < calculateTotalParticles()) {
+        for (let i = currentParticleCount; i < calculateTotalParticles(); i++) {
+          const x = Math.random() * canvas.width;
+          const y = Math.random() * canvas.height;
+          particles.push(new Particle(x, y));
+        }
+      } else if (currentParticleCount > calculateTotalParticles()) {
+        particles.splice(calculateTotalParticles());
+      }
 
       // console.log(Object.getOwnPropertyNames(videoRef.current))
       const frameData = videoRef.current
@@ -350,7 +393,6 @@ export default function BadApple({ visibleUI }) {
       <video
         ref={videoRef}
         autoPlay={true}
-        muted={true}
         style={{
           position: "absolute",
           display: "none",
@@ -394,13 +436,13 @@ export default function BadApple({ visibleUI }) {
                   maxValue: "200.0",
                   type: "slider",
                 },
-                // {
-                //   title: "Scaling:",
-                //   valueRef: scaleRef,
-                //   minValue: "1",
-                //   maxValue: "8",
-                //   type: "slider",
-                // },
+                {
+                  title: "Scaling:",
+                  valueRef: scaleRef,
+                  minValue: "2",
+                  maxValue: "8",
+                  type: "slider",
+                },
                 {
                   title: "Click Radius:",
                   valueRef: mouseShieldRadiusRef,
@@ -412,6 +454,13 @@ export default function BadApple({ visibleUI }) {
                   title: "Click Strength:",
                   valueRef: mouseDisplacementStrengthRef,
                   minValue: "1.0",
+                  maxValue: "100.0",
+                  type: "slider",
+                },
+                {
+                  title: "Volume:",
+                  valueRef: volumeRef,
+                  minValue: "0.0",
                   maxValue: "100.0",
                   type: "slider",
                 },

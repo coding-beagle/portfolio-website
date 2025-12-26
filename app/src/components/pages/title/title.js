@@ -345,7 +345,7 @@ export default function Title({
                 gap: "1em",
                 fontSize: "3em",
                 zIndex: 100,
-                paddingBottom: "1em",
+                // paddingBottom: "1em",
               }}
             >
               <IconButton
