@@ -41,6 +41,7 @@ import { portfolioImages } from "./portfolio";
 import Pinball from "./scenes/pinball";
 import BallPit from "./scenes/ballpit";
 import PID from "./scenes/pid";
+import BadApple from "./scenes/badapple";
 
 const Scenes = {
   0: { component: Snow },
@@ -62,6 +63,7 @@ const Scenes = {
   16: { component: Pinball },
   17: { component: BallPit },
   18: { component: PID },
+  19: { component: BadApple },
 };
 
 const sceneNameToIndex = {
@@ -83,7 +85,8 @@ const sceneNameToIndex = {
   clocks: 15,
   pinball: 16,
   ballpit: 17,
-  pid: 18
+  pid: 18,
+  badapple: 19
 };
 
 export default function Title({
@@ -266,6 +269,7 @@ export default function Title({
           backgroundColor: theme.primary,
           color: theme.accent,
           fontFamily: theme.font,
+          overflow: "hidden"
         }}
       >
         {createElement(renderScene(visibleUI), { visibleUI })}
