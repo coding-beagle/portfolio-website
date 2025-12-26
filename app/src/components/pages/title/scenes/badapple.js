@@ -11,6 +11,8 @@ export default function BadApple({ visibleUI }) {
   const simulationSpeedRef = useRef(100);
   const visibleUIRef = useRef(visibleUI);
 
+  const themeRef = useRef(theme);
+
   const volumeRef = useRef(0.0);
 
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -20,7 +22,7 @@ export default function BadApple({ visibleUI }) {
   const mouseDisplacementStrengthRef = useRef(10);
 
   const scaleRef = useRef(4);
-  const colorRef = useRef(theme.accent);
+  const colorRef = useRef(themeRef.current.accent);
   const [, setRender] = useState(0);
 
   const titleShieldRadiusRef = useRef(20);
@@ -141,7 +143,7 @@ export default function BadApple({ visibleUI }) {
 
       update(color) {
         if ((inElement(rect_padded, this.x, this.y) || inElement(rect_padded2, this.x, this.y)) && visibleUIRef.current) {
-          this.color = theme.primary;
+          this.color = themeRef.current.primary;
         } else
           this.color = color;
 
@@ -290,7 +292,7 @@ export default function BadApple({ visibleUI }) {
       regenGrid()
 
       particles.forEach((particle) => {
-        const col = arr_data[index] === 0 ? theme.primary : theme.accent;
+        const col = arr_data[index] === 0 ? themeRef.current.primary : themeRef.current.accent;
         particle.update(col);
         const XSPACING = canvasRef.current.width / VIDEO_X;
         const YSPACING = canvasRef.current.height / VIDEO_Y;
@@ -381,7 +383,7 @@ export default function BadApple({ visibleUI }) {
 
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
-    colorRef.current = theme.accent;
+    themeRef.current = theme;
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (canvas._particles) {
@@ -396,6 +398,7 @@ export default function BadApple({ visibleUI }) {
       <video
         ref={videoRef}
         autoPlay={true}
+        loop={true}
         style={{
           position: "absolute",
           display: "none",
@@ -426,7 +429,6 @@ export default function BadApple({ visibleUI }) {
         }}
       />
 
-
       {
         visibleUI && (
           <div style={{ zIndex: 3000 }}>
@@ -436,7 +438,7 @@ export default function BadApple({ visibleUI }) {
                   title: "Simulation Speed:",
                   valueRef: simulationSpeedRef,
                   minValue: "1",
-                  maxValue: "200.0",
+                  maxValue: "400.0",
                   type: "slider",
                 },
                 {
