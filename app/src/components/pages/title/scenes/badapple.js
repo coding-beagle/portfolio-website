@@ -214,6 +214,9 @@ export default function BadApple({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      videoRef.current.playbackRate = simulationSpeedRef.current / 100.0;
+      videoRef.current.defaultPlaybackRate = simulationSpeedRef.current / 100.0;
+
       if (volumeRef.current > 0.0) {
         videoRef.current.volume = volumeRef.current / 100.0;
         videoRef.current.muted = false;
