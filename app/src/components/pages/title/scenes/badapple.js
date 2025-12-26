@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
+import { IconGroup } from "../utilities/popovers";
 
 export default function BadApple({ visibleUI }) {
   const { theme } = useTheme();
@@ -8,6 +9,7 @@ export default function BadApple({ visibleUI }) {
   const videoCanvasRef = useRef(null);
   const videoRef = useRef(null);
   const particleCountRef = useRef(200);
+  const restoreSpeedRef = useRef(65);
   const simulationSpeedRef = useRef(100);
   const visibleUIRef = useRef(visibleUI);
 
@@ -172,7 +174,7 @@ export default function BadApple({ visibleUI }) {
         this.x += (this.vx * simulationSpeedRef.current) / 100;
         this.y += (this.vy * simulationSpeedRef.current) / 100;
 
-        const ease = 0.5 * (simulationSpeedRef.current / 100);
+        const ease = (restoreSpeedRef.current / 100) * (simulationSpeedRef.current / 100);
         this.x += (this.targetX - this.x) * ease;
         this.y += (this.targetY - this.y) * ease;
       }
@@ -449,6 +451,13 @@ export default function BadApple({ visibleUI }) {
                   type: "slider",
                 },
                 {
+                  title: "Restore Speed:",
+                  valueRef: restoreSpeedRef,
+                  minValue: "1",
+                  maxValue: "99",
+                  type: "slider",
+                },
+                {
                   title: "Click Radius:",
                   valueRef: mouseShieldRadiusRef,
                   minValue: "10.0",
@@ -473,6 +482,10 @@ export default function BadApple({ visibleUI }) {
               ]}
               rerenderSetter={setRender}
             />
+            <IconGroup icons={
+              [{ type: 'MOUSE' },
+              ]
+            } />
           </div>
         )
       }
