@@ -124,6 +124,10 @@ export default function BadApple({ visibleUI }) {
       return opacity.toString(16).padStart(2, '0');
     };
 
+    const XSPACING = canvasRef.current.width / VIDEO_X;
+    const YSPACING = canvasRef.current.height / VIDEO_Y;
+    const startingSize = Math.min(XSPACING, YSPACING) / 2; // Half the spacing so particles don't overlap
+
     class Particle {
       constructor(x, y) {
         this.x = x;
@@ -133,9 +137,7 @@ export default function BadApple({ visibleUI }) {
         this.targetX = x;
         this.targetY = y;
         this.opacity = 255;
-        const XSPACING = canvasRef.current.width / VIDEO_X;
-        const YSPACING = canvasRef.current.height / VIDEO_Y;
-        this.size = Math.min(XSPACING, YSPACING) / 2; // Half the spacing so particles don't overlap
+        this.size = startingSize; // Half the spacing so particles don't overlap
         this.color = colorRef.current;
       }
 
@@ -192,11 +194,13 @@ export default function BadApple({ visibleUI }) {
       if (canvasRef.current) {
         const XSPACING = canvasRef.current.width / VIDEO_X;
         const YSPACING = canvasRef.current.height / VIDEO_Y;
+        const size = Math.min(XSPACING, YSPACING) / 2; // Half the spacing so particles don't overlap
+
         let index = 0;
         for (let y = 0; y < VIDEO_Y; y++) {
           for (let x = 0; x < VIDEO_X; x++) {
-            particles[index].targetX = x * XSPACING;
-            particles[index].targetY = y * YSPACING
+            particles[index].targetX = x * XSPACING + size / 2;
+            particles[index].targetY = y * YSPACING + size / 2;
             index++;
           }
         }
@@ -208,8 +212,8 @@ export default function BadApple({ visibleUI }) {
         const XSPACING = canvasRef.current.width / VIDEO_X;
         const YSPACING = canvasRef.current.height / VIDEO_Y;
         for (let y = 0; y < VIDEO_Y; y++) {
-          for (let x = 0; x < VIDEO_X; x++) {
-            particles.push(new Particle(x * XSPACING, y * YSPACING));
+          for (let x = startingSize; x < VIDEO_X; x++) {
+            particles.push(new Particle(x * XSPACING + Math.ceil(startingSize / 2), y * YSPACING + Math.ceil(startingSize / 2)));
           }
         }
       }

@@ -48,6 +48,7 @@ function AppWrapper() {
   const [pendingShowUI, setPendingShowUI] = useState("hidden");
 
   const [showHideButton, setShowHideButton] = useState(true);
+  const [canSetShowHideButton, setCanSetShowHideButton] = useState(true);
   const [visibleUI, setVisibleUI] = useState(hideUIBool);
 
   // Handler for animated theme toggle
@@ -64,6 +65,9 @@ function AppWrapper() {
   const handleVisibleToggle = () => {
     setUIShowIconAnim(true);
     setTimeout(() => {
+      if (canSetShowHideButton === true && visibleUI) {
+        setShowHideButton(false);
+      }
       setVisibleUI((prev) => !prev);
       setPendingShowUI(pendingShowUI === "hidden" ? "showing" : "hidden");
       setUIShowIconAnim(false);
@@ -168,8 +172,15 @@ function AppWrapper() {
         width: "10vw",
         height: "20vh",
       }}
-        onMouseEnter={() => setShowHideButton(true)}
-        onMouseLeave={() => setShowHideButton(false)}
+        onMouseEnter={() => {
+          setCanSetShowHideButton(false);
+          setShowHideButton(true);
+        }
+        }
+        onMouseLeave={() => {
+          setCanSetShowHideButton(true)
+          setShowHideButton(false);
+        }}
       >
         <button
           onClick={handleVisibleToggle}
