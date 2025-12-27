@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { IconGroup } from "../utilities/popovers";
-import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
+import { addColour, ElementCollisionHitbox } from "../utilities/usefulFunctions";
 
 export default function BadApple({ visibleUI }) {
   const { theme } = useTheme();
@@ -27,9 +27,6 @@ export default function BadApple({ visibleUI }) {
   const colorRef = useRef(themeRef.current.accent);
   const [, setRender] = useState(0);
 
-  const titleShieldRadiusRef = useRef(20);
-  const titleShieldRadiusRef2 = useRef(20);
-
   const VID_WIDTH = 480;
   const VID_HEIGHT = 360;
 
@@ -41,12 +38,14 @@ export default function BadApple({ visibleUI }) {
     const canvas = canvasRef.current;
     const vidCanvas = videoCanvasRef.current;
 
-    // let titleElement = document.getElementById("title") ?? null;
-    // let linkIconsElement = document.getElementById("linkIcons") ?? null;
-    const titleHitbox = new ElementCollisionHitbox("title", titleShieldRadiusRef.current)
-    const iconsHitbox = new ElementCollisionHitbox("linkIcons", titleShieldRadiusRef.current)
+    const titleHitbox = new ElementCollisionHitbox("title", 20)
+    const iconsHitbox = new ElementCollisionHitbox("linkIcons", 20)
+    const changerGroupHitbox = new ElementCollisionHitbox("changerGroup", 20)
+    const iconGroupHitbox = new ElementCollisionHitbox("iconGroup", 20)
 
-    const collisionElements = [titleHitbox, iconsHitbox];
+    console.log(changerGroupHitbox.elementObject);
+
+    const collisionElements = [titleHitbox, iconsHitbox, changerGroupHitbox, iconGroupHitbox];
 
     const recalculateRect = () => {
       collisionElements.forEach((hitbox) => { hitbox.recalculate() })
@@ -96,8 +95,7 @@ export default function BadApple({ visibleUI }) {
     const calculateTotalParticles = () => {
       VIDEO_X = Math.floor(VID_WIDTH / (8 - scaleRef.current + 2));
       VIDEO_Y = Math.floor(VID_HEIGHT / (8 - scaleRef.current + 2));
-      // console.log(VIDEO_X * VIDEO_Y);
-      // console.log(particles.length);
+
       return VIDEO_X * VIDEO_Y;
     }
 
@@ -142,16 +140,13 @@ export default function BadApple({ visibleUI }) {
             this.vx = Math.cos(angle) * mouseDisplacementStrengthRef.current;
             this.vy = Math.sin(angle) * mouseDisplacementStrengthRef.current;
           } else {
-            this.opacity = 220
+            this.color = addColour(this.color, 20, 20, 20);
             this.vx *= 0.99;
             this.vy *= 0.99;
           }
         } else {
           this.vx *= 0.99;
           this.vy *= 0.99;
-          if (this.opacity < 255) {
-            this.opacity++;
-          }
         }
 
         this.x += (this.vx * simulationSpeedRef.current) / 100;
@@ -165,7 +160,7 @@ export default function BadApple({ visibleUI }) {
       draw() {
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color + opacityToHex(this.opacity);
+        ctx.fillStyle = this.color;
         ctx.fill();
         ctx.closePath();
       }
@@ -388,7 +383,7 @@ export default function BadApple({ visibleUI }) {
 
       {
         visibleUI && (
-          <div style={{ zIndex: 3000 }}>
+          <div style={{ zIndex: 3000 }} >
             <ChangerGroup
               valueArrays={[
                 {
@@ -437,11 +432,13 @@ export default function BadApple({ visibleUI }) {
               ]}
               rerenderSetter={setRender}
             />
+
             <IconGroup icons={
               [{ type: 'MOUSE' },
               ]
             } />
           </div>
+
         )
       }
     </>

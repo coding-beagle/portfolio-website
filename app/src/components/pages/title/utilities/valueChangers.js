@@ -735,6 +735,7 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
             zIndex: 11001, // ensure above title
             boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
           }}
+          id="changerGroup"
           onClick={() => setShowMenu(true)}
         >
           Show Simulation Options
@@ -911,7 +912,7 @@ export function ChangerGroup({ rerenderSetter, valueArrays }) {
   }
   // Desktop: render inline as before
   return (
-    <div style={{ position: "absolute", top: "1em", left: "1em" }}>
+    <div style={{ position: "absolute", top: "1em", left: "1em" }} id="changerGroup">
       {valueArrays.map((element, index) => {
         if (Array.isArray(element)) {
           return (

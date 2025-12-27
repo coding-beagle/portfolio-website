@@ -374,8 +374,6 @@ export default function Title({
           </>
         )}
       </div>
-
-      {/* Remove the old modal carousel */}
     </>
   );
 }

@@ -26,6 +26,24 @@ export const getCloseColour = (colourHex, varR = 10, varG = 5, varB = 5) => {
   return `#${rHex}${gHex}${bHex}`;
 };
 
+export const addColour = (colourHex, valR = 10, valG = 10, valB = 10) => {
+  const colour = {
+    r: parseInt(colourHex.slice(1, 3), 16),
+    g: parseInt(colourHex.slice(3, 5), 16),
+    b: parseInt(colourHex.slice(5, 7), 16),
+  };
+
+  const r = Math.floor(clamp(colour.r + valR, 0, 255));
+  const g = Math.floor(clamp(colour.g + valG, 0, 255));
+  const b = Math.floor(clamp(colour.b + valB, 0, 255));
+
+  const rHex = r.toString(16).padStart(2, "0");
+  const gHex = g.toString(16).padStart(2, "0");
+  const bHex = b.toString(16).padStart(2, "0");
+
+  return `#${rHex}${gHex}${bHex}`;
+};
+
 export const getRandomColour = () => {
   return `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
     .toString(16)

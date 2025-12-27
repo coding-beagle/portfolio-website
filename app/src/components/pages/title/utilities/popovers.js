@@ -85,7 +85,7 @@ export const iconTypes = {
 // icons is an array of {type: validType, text: 'text'}
 export function IconGroup({ icons }) {
   return (
-    <div style={{ zIndex: 3000 }}>
+    <div style={{ zIndex: 3000 }} >
       <div
         style={{
           display: "flex",
@@ -95,6 +95,7 @@ export function IconGroup({ icons }) {
           right: "1em",
           gap: "0.5em",
         }}
+        id="iconGroup"
       >
         {icons.map((icon, index) => {
           const IconComponent = iconTypes[icon.type];
