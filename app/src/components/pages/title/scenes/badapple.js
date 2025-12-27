@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { IconGroup } from "../utilities/popovers";
+import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
 
 export default function BadApple({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const videoCanvasRef = useRef(null);
   const videoRef = useRef(null);
-  const particleCountRef = useRef(200);
   const restoreSpeedRef = useRef(65);
   const simulationSpeedRef = useRef(100);
   const visibleUIRef = useRef(visibleUI);
@@ -41,34 +41,15 @@ export default function BadApple({ visibleUI }) {
     const canvas = canvasRef.current;
     const vidCanvas = videoCanvasRef.current;
 
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let element2 = document.getElementById("linkIcons") ?? null;
-    let rect_padded2 = { left: 0, right: 0, top: 0, bottom: 0 };
+    // let titleElement = document.getElementById("title") ?? null;
+    // let linkIconsElement = document.getElementById("linkIcons") ?? null;
+    const titleHitbox = new ElementCollisionHitbox("title", titleShieldRadiusRef.current)
+    const iconsHitbox = new ElementCollisionHitbox("linkIcons", titleShieldRadiusRef.current)
 
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
+    const collisionElements = [titleHitbox, iconsHitbox];
 
     const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-      if (!element2) return;
-      let rect2 = element2.getBoundingClientRect();
-      rect_padded2 = {
-        left: rect2.left - titleShieldRadiusRef2.current,
-        right: rect2.right + titleShieldRadiusRef2.current,
-        top: rect2.top - titleShieldRadiusRef2.current,
-        bottom: rect2.bottom + titleShieldRadiusRef2.current,
-      };
+      collisionElements.forEach((hitbox) => { hitbox.recalculate() })
     };
 
     const resizeCanvas = () => {
@@ -146,7 +127,7 @@ export default function BadApple({ visibleUI }) {
       }
 
       update(color) {
-        if ((inElement(rect_padded, this.x, this.y) || inElement(rect_padded2, this.x, this.y)) && visibleUIRef.current) {
+        if (collisionElements.some((hitbox) => { return hitbox.inElement(this.x, this.y) }) && visibleUIRef.current) {
           this.color = themeRef.current.primary;
         } else
           this.color = color;
@@ -232,48 +213,18 @@ export default function BadApple({ visibleUI }) {
         videoRef.current.muted = true;
       }
 
-      // incase element changes location or we hide ui
-      if (visibleUIRef.current && !element) {
-        element = document.getElementById("title");
-        recalculateRect();
-      } else {
-        element = null
-      }
-
-      if (element) {
-        const rect_temp = element.getBoundingClientRect();
-        const padded_hypothetical_rect = {
-          left: rect_temp.left - titleShieldRadiusRef.current,
-          right: rect_temp.right + titleShieldRadiusRef.current,
-          top: rect_temp.top - titleShieldRadiusRef.current,
-          bottom: rect_temp.bottom + titleShieldRadiusRef.current,
-        };
-        if (rect_padded.top !== padded_hypothetical_rect.top) {
-          recalculateRect()
+      // handle updating dead elements
+      collisionElements.forEach((element) => {
+        if (visibleUIRef.current && !element.elementObject) {
+          element.tryUpdateElement(element.elementName);
+        } else {
+          element.elementObject = null;
         }
 
-      }
-
-      if (visibleUIRef.current && !element2) {
-        element2 = document.getElementById("linkIcons");
-        recalculateRect();
-      } else {
-        element2 = null
-      }
-
-      if (element2) {
-        const rect_temp = element2.getBoundingClientRect();
-        const padded_hypothetical_rect = {
-          left: rect_temp.left - titleShieldRadiusRef2.current,
-          right: rect_temp.right + titleShieldRadiusRef2.current,
-          top: rect_temp.top - titleShieldRadiusRef2.current,
-          bottom: rect_temp.bottom + titleShieldRadiusRef2.current,
-        };
-        if (rect_padded.top !== padded_hypothetical_rect.top) {
-          recalculateRect()
+        if (element) {
+          element.recalculate()
         }
-
-      }
+      })
 
       // Adjust particle count when scaling changes
       const currentParticleCount = particles.length;

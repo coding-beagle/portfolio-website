@@ -170,3 +170,61 @@ export const getIndexFromBrushSize = (gridWidth, gridHeight, index, brushSize) =
 
   return outputVals;
 }
+
+export class ElementCollisionHitbox {
+  constructor(element, defaultPad, padTop = null, padBot = null, padL = null, padR = null) {
+    this.tryUpdateElement(element);
+    if (padTop) {
+      this.recalculate(padTop, padBot, padL, padR);
+      this.defaultBounding = { top: padTop, bot: padBot, left: padL, right: padR }
+
+    } else {
+      this.recalculate(defaultPad, defaultPad, defaultPad, defaultPad);
+      this.defaultBounding = { top: defaultPad, bot: defaultPad, left: defaultPad, right: defaultPad }
+    }
+  }
+
+  tryUpdateElement(elementID) {
+    this.elementName = elementID
+    if (!this.elementObject) {
+      this.elementObject = document.getElementById(elementID) ?? null;
+    }
+  }
+
+  recalculate(padTop = null, padBot = null, padL = null, padR = null) {
+    if (!this.elementObject) {
+      this.tryUpdateElement();
+      // try update element, if still not then return
+      if (!this.elementObject) {
+        return
+      }
+    }
+    let rect = this.elementObject.getBoundingClientRect();
+    if (padTop) {
+      this.rect_padded = {
+        left: rect.left - padL,
+        right: rect.right + padR,
+        top: rect.top - padTop,
+        bottom: rect.bottom + padBot,
+      };
+    } else {
+      this.rect_padded = {
+        left: rect.left - this.defaultBounding.left,
+        right: rect.right + this.defaultBounding.right,
+        top: rect.top - this.defaultBounding.top,
+        bottom: rect.bottom + this.defaultBounding.bot,
+      };
+    }
+  }
+
+  updateElement(elementID) {
+    this.tryUpdateElement(elementID);
+    this.recalculate(this.defaultBounding.top, this.defaultBounding.bot, this.defaultBounding.left, this.defaultBounding.right)
+  }
+
+  inElement(x, y) {
+    return (
+      x >= this.rect_padded.left && x <= this.rect_padded.right && y >= this.rect_padded.top && y <= this.rect_padded.bottom
+    )
+  };
+}
