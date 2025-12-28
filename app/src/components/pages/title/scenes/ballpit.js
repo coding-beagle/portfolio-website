@@ -147,11 +147,9 @@ export default function BallPit({ visibleUI }) {
 
     recalculateRect();
 
-    const num_particle_rows = 100;
-    const num_particle_columns = 100;
-    const lifespan = 1500;
-
-
+    const num_particle_rows = 30;
+    const num_particle_columns = 30;
+    const lifespan = 1000;
 
 
     class Particle {
@@ -195,7 +193,7 @@ export default function BallPit({ visibleUI }) {
         }
         if (element && visibleUIRef.current) {
           if (inElement(rect_padded, this.x, this.y)) {
-            this.vy = 0;
+            this.vy *= -1;
           }
         }
 
@@ -220,29 +218,42 @@ export default function BallPit({ visibleUI }) {
           this.vy += Math.sin(angle2);
         }
 
-        this.vx *= 0.9;
+        // this.vx *= 0.9;
 
-        if (this.y + this.size < canvasRef.current.height && this.y - this.size > 0) {
-          this.vy += gravity_vertical;
-          this.vx += gravity_horizontal;
-        } else if (this.y - this.size < 0) { this.vy += 1 } else {
-          this.vy -= 1;
+        this.vx += gravity_horizontal;
+        this.vy += gravity_vertical;
+
+        let next_x = this.x + (this.vx * simulationSpeedRef.current) / 100;
+        let next_y = this.y + (this.vy * simulationSpeedRef.current) / 100;
+
+        if (next_x >= canvas.width - this.size) {
+          next_x = canvas.width - this.size;
+          this.vx *= -1;
         }
 
-        if (this.x < 0.0) {
-          this.vx += 10;
+        if (next_x <= 0 + this.size) {
+          next_x = this.size;
+          this.vx *= -1;
         }
 
-        if (this.x > canvasRef.current.width) {
-          this.vx -= 10;
+        if (next_y >= canvas.height - this.size) {
+          this.vy *= -1;
+          next_y = canvas.height - this.size;
         }
 
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
-
-        if (this.y + this.size * 3 > canvasRef.current.height) {
-          this.vy = 0;
+        if (next_y - this.size <= 0) {
+          this.vy *= -1;
+          next_y = 0 + this.size;
         }
+
+
+        this.x = next_x;
+        this.y = next_y;
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+
+        // this.x += (this.vx * simulationSpeedRef.current) / 100;
+        // this.y += (this.vy * simulationSpeedRef.current) / 100;
 
         this.update_grid_from_pos();
       }
