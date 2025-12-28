@@ -42,6 +42,7 @@ import Pinball from "./scenes/pinball";
 import BallPit from "./scenes/ballpit";
 import PID from "./scenes/pid";
 import BadApple from "./scenes/badapple";
+import SquishBall from "./scenes/squishball";
 
 const Scenes = {
   0: { component: Snow },
@@ -64,6 +65,7 @@ const Scenes = {
   17: { component: BallPit },
   18: { component: PID },
   19: { component: BadApple },
+  20: { component: SquishBall },
 };
 
 const sceneNameToIndex = {
@@ -86,7 +88,8 @@ const sceneNameToIndex = {
   pinball: 16,
   ballpit: 17,
   pid: 18,
-  badapple: 19
+  badapple: 19,
+  squishball: 20
 };
 
 export default function Title({

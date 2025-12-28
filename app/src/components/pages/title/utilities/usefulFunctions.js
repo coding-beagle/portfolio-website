@@ -246,3 +246,8 @@ export class ElementCollisionHitbox {
     )
   };
 }
+
+export const safeNegativeModulo = (num, denominator) => {
+  const remain = num % denominator;
+  return Math.floor(remain >= 0 ? remain : remain + denominator);
+}
