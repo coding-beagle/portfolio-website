@@ -216,6 +216,7 @@ export default function SquishBall({ visibleUI }) {
 
         // Update positions
         this.points.forEach((point) => {
+          point.checkCollisions();
           point.update()
         })
       }
@@ -304,13 +305,11 @@ export default function SquishBall({ visibleUI }) {
         collisionHitboxes.forEach(hitbox => {
           if (hitbox.inElement(this.x, this.y)) {
             const rect = hitbox.rect_padded;
-            const bounce = 0.2; // Match your edge detection bounce
+            const bounce = 1;
 
-            // Calculate velocity for bounce direction
             const vx = (this.x - this.oldX);
             const vy = (this.y - this.oldY);
 
-            // Find closest edge
             const distToLeft = this.x - rect.left;
             const distToRight = rect.right - this.x;
             const distToTop = this.y - rect.top;
@@ -318,7 +317,6 @@ export default function SquishBall({ visibleUI }) {
 
             const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
 
-            // Push out from nearest edge and set oldX/oldY for bounce
             if (minDist === distToLeft) {
               this.x = rect.left - this.size;
               this.oldX = this.x + vx * bounce;
@@ -352,7 +350,7 @@ export default function SquishBall({ visibleUI }) {
 
         if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current) && (!draggingPoint || draggingPoint === this)) {
           draggingPoint = this;
-          const dragStrength = 0.3; // Adjust this (0.1 = gentle, 0.5 = medium, 1.0 = instant)
+          const dragStrength = 0.3;
           const targetX = mousePosRef.current.x;
           const targetY = mousePosRef.current.y;
 
@@ -368,7 +366,6 @@ export default function SquishBall({ visibleUI }) {
           this.x += vx + (this.a_x * step);
           this.y += vy + (this.a_y * step);
 
-          this.checkCollisions();
 
           if (this.x > canvas.width - this.size) {
             this.x = canvas.width - this.size;
