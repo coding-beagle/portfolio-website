@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { getIndexFromBrushSize, safeNegativeModulo } from "../utilities/usefulFunctions";
+import { ElementCollisionHitbox, getIndexFromBrushSize, safeNegativeModulo } from "../utilities/usefulFunctions";
 
 export default function SquishBall({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
+  const ballSizeRef = useRef(100);
   const areaRef = useRef(0);
   const touchActiveRef = useRef(false);
   const particleCountRef = useRef(1);
@@ -18,35 +19,21 @@ export default function SquishBall({ visibleUI }) {
   const squishFactorRef = useRef(1);
   const desiredAreaRef = useRef(50);
 
-  const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
+  const titleHitbox = new ElementCollisionHitbox('title', 20);
+  const collisionHitboxes = [titleHitbox];
+
   useEffect(() => {
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
 
     let particles = [];
     const gravity = 0.5;
-    const windSpeed = 0.2;
     let animationFrameId;
-    const maxFallSpeed = 13;
-    const maxWindSpeed = (Math.random() - 0.5) * 10;
 
     const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
+      collisionHitboxes.forEach((hitbox) => { hitbox.recalculate() })
     };
 
     recalculateRectRef.current = recalculateRect;
@@ -137,23 +124,32 @@ export default function SquishBall({ visibleUI }) {
     class Body {
       constructor(pointCount, distanceFromEachSegment, x, y) {
         this.points = [];
-        // create random points around x, y
         for (let i = 0; i < pointCount; i++) {
           const angle = (i / pointCount) * Math.PI * 2;
           const rx = x + Math.cos(angle) * 10;
           const ry = y + Math.sin(angle) * 10;
           this.points.push(new Particle(rx, ry));
         }
-        let index = 0;
-        this.points.forEach((point) => {
-          point.addDistanceConstraint((this.points[++index % this.points.length]), distanceFromEachSegment)
-        })
+        this.constraints = [];
+        this.changeDistanceConstraints(distanceFromEachSegment);
+      }
+
+      changeDistanceConstraints(distance) {
+        this.constraints = [];
+        for (let i = 0; i < this.points.length; i++) {
+          this.constraints.push({
+            p1: this.points[i],
+            p2: this.points[(i + 1) % this.points.length],
+            distance: distance
+          });
+        }
       }
 
       calculateAreaOfSelf() {
         let area = 0;
         this.points.forEach((point, index) => {
-          area += (point.x - this.points[(index + 1) % this.points.length].x) * (point.y + this.points[index % this.points.length].y) / 2
+          area += (point.x - this.points[(index + 1) % this.points.length].x) *
+            (point.y + this.points[index % this.points.length].y) / 2
         })
         return Math.abs(area);
       }
@@ -161,39 +157,96 @@ export default function SquishBall({ visibleUI }) {
       getNormalOfPoint(index) {
         const adjacent1 = this.points[safeNegativeModulo((index - 1), this.points.length)]
         const adjacent2 = this.points[(index + 1) % this.points.length]
-
         const distance = vectorBetweenParticles(adjacent1, adjacent2);
         const distanceRotated = { x: -distance.y, y: distance.x };
-
         return getUnitVector(distanceRotated);
       }
 
+      shuffleArray(array) {
+        const shuffled = [...array]; // Create copy
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const temp = shuffled[i];
+          shuffled[i] = shuffled[j];
+          shuffled[j] = temp;
+        }
+        return shuffled;
+      }
+
+      solveConstraints() {
+        const shuffled = this.shuffleArray(this.constraints);
+        shuffled.forEach(constraint => {
+          const { p1, p2, distance } = constraint;
+
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const currentDist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+
+          const delta = (currentDist - distance) / currentDist;
+
+          const offsetX = dx * 0.5 * delta;
+          const offsetY = dy * 0.5 * delta;
+
+          p1.x += offsetX;
+          p1.y += offsetY;
+          p2.x -= offsetX;
+          p2.y -= offsetY;
+        });
+      }
+
       update() {
+        this.changeDistanceConstraints(ballSizeRef.current);
         const squishFactor = squishFactorRef.current / 10000;
         const area = this.calculateAreaOfSelf();
-        const areaDiff = desiredAreaRef.current * 1000 - area;
+        const areaDiff = (desiredAreaRef.current * 100 * Math.sqrt(ballSizeRef.current)) - area;
         const pressure = areaDiff * squishFactor;
 
         areaRef.current = area;
 
-        // nudge points initially
+        // Apply pressure forces ONCE
         this.points.forEach((point, index) => {
           const normal = this.getNormalOfPoint(index);
           point.applyForce(normal.x * pressure, normal.y * pressure)
-          // point.x += normal.x * pressure;
-          // point.y += normal.y * pressure;
-
         })
 
+        // Solve constraints multiple times with shuffling
+        for (let iter = 0; iter < 5; iter++) {
+          this.solveConstraints();
+        }
+
+        // Update positions
         this.points.forEach((point) => {
           point.update()
         })
       }
 
       draw() {
-        this.points.forEach((point) => {
-          point.draw()
-        })
+        if (this.points.length < 3) return;
+
+        ctx.beginPath();
+        ctx.fillStyle = theme.secondary;
+
+        // Start at the midpoint between last and first point
+        const lastPoint = this.points[this.points.length - 1];
+        const firstPoint = this.points[0];
+        const startX = (lastPoint.x + firstPoint.x) / 2;
+        const startY = (lastPoint.y + firstPoint.y) / 2;
+
+        ctx.moveTo(startX, startY);
+
+        // Draw curves through all points
+        for (let i = 0; i < this.points.length; i++) {
+          const current = this.points[i];
+          const next = this.points[(i + 1) % this.points.length];
+
+          const xc = (current.x + next.x) / 2;
+          const yc = (current.y + next.y) / 2;
+
+          ctx.quadraticCurveTo(current.x, current.y, xc, yc);
+        }
+
+        ctx.closePath();
+        ctx.fill();
       }
     }
 
@@ -246,8 +299,45 @@ export default function SquishBall({ visibleUI }) {
         this.a_y += fy;
       }
 
+      checkCollisions() {
+        if (!visibleUIRef.current) return
+        collisionHitboxes.forEach(hitbox => {
+          if (hitbox.inElement(this.x, this.y)) {
+            const rect = hitbox.rect_padded;
+            const bounce = 0.2; // Match your edge detection bounce
+
+            // Calculate velocity for bounce direction
+            const vx = (this.x - this.oldX);
+            const vy = (this.y - this.oldY);
+
+            // Find closest edge
+            const distToLeft = this.x - rect.left;
+            const distToRight = rect.right - this.x;
+            const distToTop = this.y - rect.top;
+            const distToBottom = rect.bottom - this.y;
+
+            const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
+
+            // Push out from nearest edge and set oldX/oldY for bounce
+            if (minDist === distToLeft) {
+              this.x = rect.left - this.size;
+              this.oldX = this.x + vx * bounce;
+            } else if (minDist === distToRight) {
+              this.x = rect.right + this.size;
+              this.oldX = this.x + vx * bounce;
+            } else if (minDist === distToTop) {
+              this.y = rect.top - this.size;
+              this.oldY = this.y + vy * bounce;
+            } else {
+              this.y = rect.bottom + this.size;
+              this.oldY = this.y + vy * bounce;
+            }
+          }
+        });
+      }
+
       update() {
-        const friction = 0.99;
+        const friction = 0.93;
         const bounce = 1;
 
         let vx = (this.x - this.oldX) * friction;
@@ -256,42 +346,18 @@ export default function SquishBall({ visibleUI }) {
         this.oldX = this.x;
         this.oldY = this.y;
 
-        if (this.distanceConstraints.length > 0) {
-          this.distanceConstraints.forEach((constraint) => {
-            const target = constraint.particle;
-
-            const dx = target.x - this.x;
-            const dy = target.y - this.y;
-            const currentDist = Math.sqrt(dx * dx + dy * dy) || 0.0001; // avoid division by zero
-
-            const delta = (currentDist - constraint.distance) / currentDist;
-
-            const offsetX = dx * 0.5 * delta;
-            const offsetY = dy * 0.5 * delta;
-
-            this.x += offsetX;
-            this.y += offsetY;
-            target.x -= offsetX;
-            target.y -= offsetY;
-          })
-
-          // this.x = vxFromConstraints / this.distanceConstraints.length;
-          // this.y = vyFromConstraints / this.distanceConstraints.length;
-        }
-
-
         const dx = this.x - mousePosRef.current.x;
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current) && (!draggingPoint || draggingPoint === this)) {
           draggingPoint = this;
-          this.x = mousePosRef.current.x;
-          this.y = mousePosRef.current.y;
+          const dragStrength = 0.3; // Adjust this (0.1 = gentle, 0.5 = medium, 1.0 = instant)
+          const targetX = mousePosRef.current.x;
+          const targetY = mousePosRef.current.y;
 
-          // this.oldX = this.x + (mousePosRef.current.x - this.prev_mouse_pos.x);
-          // this.oldY = this.y + (mousePosRef.current.y - this.prev_mouse_pos.y);
-          // this.prev_mouse_pos = mousePosRef.current;
+          this.x += (targetX - this.x) * dragStrength;
+          this.y += (targetY - this.y) * dragStrength;
         } else {
           if (draggingPoint === this) {
             draggingPoint = null;
@@ -301,6 +367,8 @@ export default function SquishBall({ visibleUI }) {
 
           this.x += vx + (this.a_x * step);
           this.y += vy + (this.a_y * step);
+
+          this.checkCollisions();
 
           if (this.x > canvas.width - this.size) {
             this.x = canvas.width - this.size;
@@ -323,11 +391,11 @@ export default function SquishBall({ visibleUI }) {
       }
 
       draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
+        // ctx.beginPath();
+        // ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        // ctx.fillStyle = this.color;
+        // ctx.fill();
+        // ctx.closePath();
       }
     }
 
@@ -351,23 +419,18 @@ export default function SquishBall({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (element) {
-        const rect = element.getBoundingClientRect();
-        const padded_hypothetical_rect = {
-          left: rect.left - titleShieldRadiusRef.current,
-          right: rect.right + titleShieldRadiusRef.current,
-          top: rect.top - titleShieldRadiusRef.current,
-          bottom: rect.bottom + titleShieldRadiusRef.current,
-        };
-        if (rect_padded.top !== padded_hypothetical_rect.top) {
-          recalculateRect()
+      // handle updating dead elements
+      collisionHitboxes.forEach((element) => {
+        if (visibleUIRef.current && !element.elementObject) {
+          element.tryUpdateElement(element.elementName);
+        } else {
+          element.elementObject = null;
         }
-      }
 
-      if (!element && document.getElementById("title")) {
-        element = document.getElementById("title");
-        recalculateRect();
-      }
+        if (element) {
+          element.recalculate()
+        }
+      })
 
       // Adjust particle count
       const currentParticleCount = particles.length;
@@ -380,10 +443,6 @@ export default function SquishBall({ visibleUI }) {
       } else if (currentParticleCount > particleCountRef.current) {
         particles.splice(particleCountRef.current);
       }
-
-      // const mid = midPoint(particles[0], particles[1]);
-      // trackingDot.update(mid.x, mid.y);
-      // trackingDot.draw();
 
       particles.forEach((particle) => {
         particle.update();
@@ -444,13 +503,6 @@ export default function SquishBall({ visibleUI }) {
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
             valueArrays={[
-              // {
-              //   title: "Particle Count:",
-              //   valueRef: particleCountRef,
-              //   minValue: "100",
-              //   maxValue: "10000",
-              //   type: "slider",
-              // },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,

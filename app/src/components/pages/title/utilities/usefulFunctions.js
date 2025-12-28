@@ -241,6 +241,7 @@ export class ElementCollisionHitbox {
   }
 
   inElement(x, y) {
+    if (!this.rect_padded) { return }
     return (
       x >= this.rect_padded.left && x <= this.rect_padded.right && y >= this.rect_padded.top && y <= this.rect_padded.bottom
     )
