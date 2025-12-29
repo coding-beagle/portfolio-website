@@ -203,14 +203,12 @@ export default function SquishBall({ visibleUI }) {
 
         areaRef.current = area;
 
-        // Apply pressure forces ONCE
         this.points.forEach((point, index) => {
           const normal = this.getNormalOfPoint(index);
           point.applyForce(normal.x * pressure, normal.y * pressure)
         })
 
-        // Solve constraints multiple times with shuffling
-        for (let iter = 0; iter < 5; iter++) {
+        for (let iter = 0; iter < 20; iter++) {
           this.solveConstraints();
         }
 
