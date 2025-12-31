@@ -12,6 +12,8 @@ export default function Rain({ visibleUI }) {
   const particleCountRef = useRef(2000);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
+  const windspeedRef = useRef(Math.round((Math.random() - 0.5) * 100));
+  // const maxWindSpeedRef = useRef(Math.round((Math.random()) * 20));
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
@@ -25,10 +27,9 @@ export default function Rain({ visibleUI }) {
 
     let particles = [];
     const gravity = 0.5;
-    const windSpeed = 0.2;
     let animationFrameId;
     const maxFallSpeed = 13;
-    const maxWindSpeed = (Math.random() - 0.5) * 10;
+    const maxWindSpeed = 6;
 
     const recalculateRect = () => {
       if (!element) return;
@@ -116,6 +117,13 @@ export default function Rain({ visibleUI }) {
         this.color = theme.secondary;
       }
 
+      reset() {
+        this.y = 0;
+        this.x = Math.random() * canvas.width;
+        this.vy = Math.random() * 10 + 5;
+        this.vx = Math.random() * 2 - 1;
+      }
+
       update() {
         const dx = this.x - mousePosRef.current.x;
         const dy = this.y - mousePosRef.current.y;
@@ -138,10 +146,8 @@ export default function Rain({ visibleUI }) {
           this.vy = Math.sin(angle) * 5;
         }
 
-        if (this.vx < maxWindSpeed && maxWindSpeed > 0.0) {
-          this.vx += windSpeed;
-        } else if (this.vx > maxWindSpeed && maxWindSpeed < 0.0) {
-          this.vx -= windSpeed;
+        if (Math.abs(this.vx) < maxWindSpeed) {
+          this.vx += windspeedRef.current / 50
         }
         if (this.vy < maxFallSpeed) {
           this.vy += gravity;
@@ -151,22 +157,15 @@ export default function Rain({ visibleUI }) {
         this.y += (this.vy * simulationSpeedRef.current) / 100;
 
         if (this.y > canvas.height) {
-          this.y = 0;
-          this.x = Math.random() * canvas.width;
-          this.vy = Math.random() * 10 + 5;
-          this.vx = Math.random() * 2 - 1;
+          this.reset()
         }
 
         if (this.x >= canvas.width + this.size * 3) {
-          this.x = Math.random() * canvas.width;
-          this.y = 0;
-          this.vx = 0;
+          this.reset()
         }
 
         if (this.x < 0 - this.size * 3) {
-          this.x = Math.random() * canvas.width;
-          this.y = 0;
-          this.vx = 0;
+          this.reset()
         }
       }
 
@@ -292,6 +291,13 @@ export default function Rain({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
+                type: "slider",
+              },
+              {
+                title: "Wind Speed:",
+                valueRef: windspeedRef,
+                minValue: "-100",
+                maxValue: "100.0",
                 type: "slider",
               },
               {
