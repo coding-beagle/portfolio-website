@@ -14,7 +14,7 @@ export default function SquishBall({ visibleUI }) {
   const touchActiveRef = useRef(false);
   const particleCountRef = useRef(1);
   const simulationSpeedRef = useRef(100);
-  const mouseShieldRadiusRef = useRef(300);
+  const mouseShieldRadiusRef = useRef(100);
 
   const squishFactorRef = useRef(1);
   const desiredAreaRef = useRef(50);
