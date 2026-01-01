@@ -1,29 +1,26 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { DIRECTIONS, ElementCollisionHitbox } from "../utilities/usefulFunctions";
-import { icon } from "@fortawesome/fontawesome-svg-core";
+import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
 
 export default function Rain({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
+
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
-  const touchActiveRef = useRef(false);
+
   const particleCountRef = useRef(2000);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
   const windspeedRef = useRef(Math.round((Math.random() - 0.5) * 100));
-  // const maxWindSpeedRef = useRef(Math.round((Math.random()) * 20));
   const titleShieldRadiusRef = useRef(30);
   const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   useEffect(() => {
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
 
     let particles = [];
     const gravity = 0.5;
@@ -32,10 +29,9 @@ export default function Rain({ visibleUI }) {
     const maxWindSpeed = 6;
 
     const titleHitbox = new ElementCollisionHitbox("title", 20, titleShieldRadiusRef)
-    const iconsHitbox = new ElementCollisionHitbox("linkIcons", titleShieldRadiusRef)
-    // const changerGroupHitbox = new ElementCollisionHitbox("changerGroup", 20)
-    // const iconGroupHitbox = new ElementCollisionHitbox("iconGroup", 20)
-    let collisionElements = [titleHitbox, iconsHitbox];
+    // const iconsHitbox = new ElementCollisionHitbox("linkIcons", 20, titleShieldRadiusRef)
+
+    let collisionElements = [titleHitbox];
 
     const recalculateRect = () => {
       collisionElements.forEach((hitbox) => { hitbox.recalculate() })
@@ -82,11 +78,11 @@ export default function Rain({ visibleUI }) {
     };
 
     const handleTouchStart = () => {
-      touchActiveRef.current = true;
+      mouseClickRef.current = true;
     };
 
     const handleTouchEnd = () => {
-      touchActiveRef.current = false;
+      mouseClickRef.current = false;
     };
 
     // --- Touch event handler to prevent scroll on drag ---
@@ -133,7 +129,7 @@ export default function Rain({ visibleUI }) {
 
         }
 
-        if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current)) {
+        if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current)) {
           const angle = Math.atan2(dy, dx);
           this.vx = Math.cos(angle) * 5;
           this.vy = Math.sin(angle) * 5;
