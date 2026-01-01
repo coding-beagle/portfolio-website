@@ -190,12 +190,15 @@ export const getIndexFromBrushSize = (gridWidth, gridHeight, index, brushSize) =
 }
 
 export class ElementCollisionHitbox {
-  constructor(element, defaultPad, padTop = null, padBot = null, padL = null, padR = null) {
+  constructor(element, defaultPad, padRef = null, padTop = null, padBot = null, padL = null, padR = null) {
+    if (padRef) {
+      this.padRef = padRef;
+    }
     this.tryUpdateElement(element);
+    this.center = { x: 0, y: 0 };
     if (padTop) {
       this.recalculate(padTop, padBot, padL, padR);
       this.defaultBounding = { top: padTop, bot: padBot, left: padL, right: padR }
-
     } else {
       this.recalculate(defaultPad, defaultPad, defaultPad, defaultPad);
       this.defaultBounding = { top: defaultPad, bot: defaultPad, left: defaultPad, right: defaultPad }
@@ -206,12 +209,13 @@ export class ElementCollisionHitbox {
     this.elementName = elementID
     if (!this.elementObject) {
       this.elementObject = document.getElementById(elementID) ?? null;
+      // console.log(this.elementObject);
     }
   }
 
   recalculate(padTop = null, padBot = null, padL = null, padR = null) {
     if (!this.elementObject) {
-      this.tryUpdateElement();
+      this.tryUpdateElement(this.elementName);
       // try update element, if still not then return
       if (!this.elementObject) {
         return
@@ -219,13 +223,22 @@ export class ElementCollisionHitbox {
     }
     let rect = this.elementObject.getBoundingClientRect();
     if (padTop) {
+      // console.log("Recalcing padtop")
       this.rect_padded = {
         left: rect.left - padL,
         right: rect.right + padR,
         top: rect.top - padTop,
         bottom: rect.bottom + padBot,
       };
-    } else {
+    } else if (this.padRef) {
+      this.rect_padded = {
+        left: rect.left - this.padRef.current,
+        right: rect.right + this.padRef.current,
+        top: rect.top - this.padRef.current,
+        bottom: rect.bottom + this.padRef.current,
+      };
+    }
+    else {
       this.rect_padded = {
         left: rect.left - this.defaultBounding.left,
         right: rect.right + this.defaultBounding.right,
@@ -233,6 +246,7 @@ export class ElementCollisionHitbox {
         bottom: rect.bottom + this.defaultBounding.bot,
       };
     }
+    this.center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   }
 
   updateElement(elementID) {
@@ -246,6 +260,26 @@ export class ElementCollisionHitbox {
       x >= this.rect_padded.left && x <= this.rect_padded.right && y >= this.rect_padded.top && y <= this.rect_padded.bottom
     )
   };
+
+  getClosestEdge(x, y) {
+    if (!this.rect_padded) { return }
+    const topLeftToBotRightGradient = (this.rect_padded.top - this.rect_padded.bottom) / (this.rect_padded.left - this.rect_padded.right);
+    const topRightToBotLeftGradient = -1 / topLeftToBotRightGradient;
+    const line1c = this.rect_padded.top - topLeftToBotRightGradient * this.rect_padded.left;
+    const line2c = this.rect_padded.bottom - topRightToBotLeftGradient * this.rect_padded.left;
+    const inequalityOne = (y >= topLeftToBotRightGradient * x + line1c);
+    const inequalityTwo = (y <= topRightToBotLeftGradient * x + line2c);
+    if (inequalityOne) {
+      if (inequalityTwo) {
+        return DIRECTIONS.N; // top
+      }
+      return DIRECTIONS.E; // left
+    }
+    if (inequalityTwo) {
+      return DIRECTIONS.W;
+    }
+    return DIRECTIONS.S;
+  }
 }
 
 export const safeNegativeModulo = (num, denominator) => {

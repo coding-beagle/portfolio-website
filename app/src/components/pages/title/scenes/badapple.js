@@ -43,8 +43,6 @@ export default function BadApple({ visibleUI }) {
     const changerGroupHitbox = new ElementCollisionHitbox("changerGroup", 20)
     const iconGroupHitbox = new ElementCollisionHitbox("iconGroup", 20)
 
-    // console.log(changerGroupHitbox.elementObject);
-
     const collisionElements = [titleHitbox, iconsHitbox, changerGroupHitbox, iconGroupHitbox];
 
     const recalculateRect = () => {

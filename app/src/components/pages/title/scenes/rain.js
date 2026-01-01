@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
+import { DIRECTIONS, ElementCollisionHitbox } from "../utilities/usefulFunctions";
+import { icon } from "@fortawesome/fontawesome-svg-core";
 
 export default function Rain({ visibleUI }) {
   const { theme } = useTheme();
@@ -22,8 +24,6 @@ export default function Rain({ visibleUI }) {
   useEffect(() => {
     let element = document.getElementById("title") ?? null;
     let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
 
     let particles = [];
     const gravity = 0.5;
@@ -31,17 +31,14 @@ export default function Rain({ visibleUI }) {
     const maxFallSpeed = 13;
     const maxWindSpeed = 6;
 
+    const titleHitbox = new ElementCollisionHitbox("title", 20, titleShieldRadiusRef)
+    const iconsHitbox = new ElementCollisionHitbox("linkIcons", titleShieldRadiusRef)
+    // const changerGroupHitbox = new ElementCollisionHitbox("changerGroup", 20)
+    // const iconGroupHitbox = new ElementCollisionHitbox("iconGroup", 20)
+    let collisionElements = [titleHitbox, iconsHitbox];
+
     const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
+      collisionElements.forEach((hitbox) => { hitbox.recalculate() })
     };
 
     recalculateRectRef.current = recalculateRect;
@@ -99,12 +96,6 @@ export default function Rain({ visibleUI }) {
       }
     }
 
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
-
     recalculateRect();
 
     class Particle {
@@ -129,15 +120,17 @@ export default function Rain({ visibleUI }) {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (element && visibleUIRef.current) {
-          const dxFromElementCenter = this.x - elementCenterX;
-          const dyFromElementCenter = this.y - elementCenterY;
+        if (visibleUIRef.current) {
+          collisionElements.forEach((element) => {
+            if (element.inElement(this.x, this.y)) {
+              const dxFromElementCenter = this.x - element.center.x;
+              const dyFromElementCenter = this.y - element.center.y;
+              const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
+              this.vx = Math.cos(angle2) * 5;
+              this.vy = Math.sin(angle2) * 5;
+            }
+          })
 
-          if (inElement(rect_padded, this.x, this.y)) {
-            const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-            this.vx = Math.cos(angle2) * 5;
-            this.vy = Math.sin(angle2) * 5;
-          }
         }
 
         if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current)) {
@@ -190,23 +183,17 @@ export default function Rain({ visibleUI }) {
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (element) {
-        const rect = element.getBoundingClientRect();
-        const padded_hypothetical_rect = {
-          left: rect.left - titleShieldRadiusRef.current,
-          right: rect.right + titleShieldRadiusRef.current,
-          top: rect.top - titleShieldRadiusRef.current,
-          bottom: rect.bottom + titleShieldRadiusRef.current,
-        };
-        if (rect_padded.top !== padded_hypothetical_rect.top) {
-          recalculateRect()
+      collisionElements.forEach((element) => {
+        if (visibleUIRef.current && !element.elementObject) {
+          element.tryUpdateElement(element.elementName);
+        } else {
+          element.elementObject = null;
         }
-      }
 
-      if (!element && document.getElementById("title")) {
-        element = document.getElementById("title");
-        recalculateRect();
-      }
+        if (element) {
+          element.recalculate()
+        }
+      })
 
       // Adjust particle count
       const currentParticleCount = particles.length;
