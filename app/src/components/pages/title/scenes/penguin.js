@@ -1,0 +1,210 @@
+import React, { useContext, useEffect, useRef, useState } from "react";
+import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup } from "../utilities/valueChangers";
+import { MobileContext } from "../../../../contexts/MobileContext";
+
+export default function Penguin({ visibleUI }) {
+  const { theme } = useTheme();
+  const canvasRef = useRef(null);
+  const particleCountRef = useRef(200);
+  const simulationSpeedRef = useRef(100);
+  const colorRef = useRef(theme.accent);
+  const [, setRender] = useState(0);
+
+  // useEffect(() => {
+  //   const canvas = canvasRef.current;
+  //   // const titleShieldRadius = 30;
+
+  //   const resizeCanvas = () => {
+  //     canvas.width = window.innerWidth;
+  //     canvas.height = window.innerHeight;
+  //     // recalculateRect();
+  //   };
+  //   resizeCanvas();
+  //   window.addEventListener("resize", resizeCanvas);
+  //   const ctx = canvas.getContext("2d");
+
+  //   let particles = [];
+  //   const gravity = Math.random() > 0.1 ? 0.05 : -0.05;
+  //   const maxSpeed = 1;
+  //   let animationFrameId;
+
+  //   class Particle {
+  //     constructor(x, y) {
+  //       this.x = x;
+  //       this.y = y;
+  //       this.vx = Math.random() * 2 - 1;
+  //       this.vy = Math.random() * 2 - 1;
+  //       this.size = Math.random() * 2 + 1;
+  //       this.color = colorRef.current;
+  //     }
+
+  //     reset() {
+  //       if (gravity > 0.0) {
+  //         this.y = 0;
+  //         this.vy *= -0.5;
+  //         this.x = Math.random() * canvas.width;
+  //         this.vx = Math.random() * 2 - 1;
+  //       } else {
+  //         this.y = canvas.height;
+  //         this.x = Math.random() * canvas.width;
+  //         this.vx = Math.random() * 2 - 1;
+  //       }
+  //     }
+
+  //     update() {
+  //       this.vy += gravity;
+  //       this.x += (this.vx * simulationSpeedRef.current) / 100;
+  //       this.y += (this.vy * simulationSpeedRef.current) / 100;
+
+  //       // if (element) {
+  //       //   const dxFromElementCenter = this.x - elementCenterX;
+  //       //   const dyFromElementCenter = this.y - elementCenterY;
+
+  //       //   if (inElement(rect_padded, this.x, this.y)) {
+  //       //     const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
+  //       //     this.vx = Math.cos(angle2);
+  //       //     this.vy = Math.sin(angle2);
+  //       //   }
+  //       // }
+
+  //       if (this.y + this.size > canvas.height && gravity > 0.0) {
+  //         this.reset();
+  //       }
+
+  //       if (this.y + this.size < 0.0 && gravity < 0.0) {
+  //         this.reset();
+  //       }
+
+  //       if (Math.abs(this.vy) > maxSpeed) {
+  //         this.vy *= 0.97;
+  //       }
+
+  //       if (Math.abs(this.vy) < maxSpeed) {
+  //         this.vy += Math.random(0.1, 0.5) * Math.sign(gravity);
+  //       }
+
+  //       if (this.x - this.size > canvas.width || this.x + this.size < 0) {
+  //         this.reset();
+  //       }
+  //     }
+
+  //     draw() {
+  //       ctx.beginPath();
+  //       ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+  //       ctx.fillStyle = this.color;
+  //       ctx.fill();
+  //       ctx.closePath();
+  //     }
+  //   }
+
+  //   function initParticles() {
+  //     for (let i = 0; i < particleCountRef.current; i++) {
+  //       const x = Math.random() * canvas.width;
+  //       const y = Math.random() * canvas.height;
+  //       particles.push(new Particle(x, y));
+  //     }
+  //   }
+
+  //   function animate() {
+  //     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  //     // Adjust particle count
+  //     const currentParticleCount = particles.length;
+  //     if (currentParticleCount < particleCountRef.current) {
+  //       for (let i = currentParticleCount; i < particleCountRef.current; i++) {
+  //         const x = Math.random() * canvas.width;
+  //         const y = Math.random() * canvas.height;
+  //         particles.push(new Particle(x, y));
+  //       }
+  //     } else if (currentParticleCount > particleCountRef.current) {
+  //       particles.splice(particleCountRef.current);
+  //     }
+
+  //     particles.forEach((particle) => {
+  //       particle.update();
+  //       particle.draw();
+  //     });
+  //     animationFrameId = requestAnimationFrame(animate);
+  //   }
+
+  //   initParticles();
+  //   animate();
+
+  //   // Attach particles array to canvas for theme effect access
+  //   canvas._particles = particles;
+
+  //   return () => {
+  //     cancelAnimationFrame(animationFrameId);
+  //     window.removeEventListener("resize", resizeCanvas);
+  //     particles = [];
+  //   };
+  // }, []);
+
+  // Update colorRef and all particles' colors on theme change
+  useEffect(() => {
+    colorRef.current = theme.accent;
+    // Update all existing particles' colors
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (canvas._particles) {
+      canvas._particles.forEach((particle) => {
+        particle.color = theme.accent;
+      });
+    }
+  }, [theme]);
+
+  const returnGIFJSX = (imgpath, position, size = 'cover') => {
+    return (
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        backgroundImage: `url(${imgpath})`,
+        backgroundPosition: position,
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: size,
+        overflow: 'hidden',
+        width: '100vw',
+        height: '100vh',
+        imageRendering: 'pixelated',
+      }} />
+
+    )
+  }
+
+  const mobile = useContext(MobileContext);
+
+  return (
+    <>
+      {returnGIFJSX('penguin/sky.gif', 'center top')}
+      {returnGIFJSX('penguin/mountains.gif', 'center top')}
+      {returnGIFJSX('penguin/snow.gif', 'center top')}
+      {mobile ? returnGIFJSX('penguin/penguin.gif', '40% 100%', '200%') : returnGIFJSX('penguin/penguin.gif', '40% 100%', '50%')}
+
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          {/* <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "100",
+                maxValue: "10000",
+                type: "slider",
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1",
+                maxValue: "200.0",
+                type: "slider",
+              },
+            ]}
+            rerenderSetter={setRender}
+          /> */}
+        </div>
+      )}
+    </>
+  );
+}
