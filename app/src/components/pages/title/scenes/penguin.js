@@ -19,7 +19,6 @@ export default function Penguin({ visibleUI }) {
 
   const isDark = themeName?.toLowerCase().includes('dark');
 
-  // Handle theme changes and sky transitions
   useEffect(() => {
     if (previousIsDarkRef.current === null) {
       previousIsDarkRef.current = isDark;
@@ -48,7 +47,6 @@ export default function Penguin({ visibleUI }) {
     }
   }, [isDark]);
 
-  // Update colorRef and all particles' colors on theme change
   useEffect(() => {
     colorRef.current = theme.accent;
     const canvas = canvasRef.current;
@@ -60,7 +58,6 @@ export default function Penguin({ visibleUI }) {
     }
   }, [theme]);
 
-  // For the sky - uses <img> with cache-busting to force restart
   const returnSkyGIF = (imgpath, cacheBust) => {
     const src = `${imgpath}?v=${cacheBust}`;
 
@@ -83,7 +80,6 @@ export default function Penguin({ visibleUI }) {
     )
   }
 
-  // For other GIFs - uses background-image (original approach)
   const returnGIFJSX = (imgpath, position, size = 'cover') => {
     return (
       <div style={{
