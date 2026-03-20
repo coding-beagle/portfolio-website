@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { clamp, distanceBetweenTwoPoints, ElementCollisionHitbox, getRandomColour } from "../utilities/usefulFunctions";
+import { clamp, distanceBetweenTwoPoints, ElementCollisionHitbox, getRandomColour, scaleColour } from "../utilities/usefulFunctions";
 
 export default function Runes({ visibleUI }) {
     const { theme } = useTheme();
@@ -96,18 +96,23 @@ export default function Runes({ visibleUI }) {
 
         const maxSize = 200;
         const minDistanceBetweenPoints = 30;
-        const minDistanceBetweenRunes = 100;
+        const minDistanceBetweenRunes = 200;
         const maxPoints = 10;
         const minPoints = 5;
-        const maxActiveCount = 150
+        const maxChargeCount = 150;
+        const maxActiveCount = 500;
 
         class Rune {
             constructor(x, y) {
                 this.x = x;
                 this.y = y;
+                this.vx = 0;
+                this.vy = 0;
                 this.points = this.populatePoints(clamp(Math.round(Math.random() * 10), minPoints, maxPoints))
                 this.closedRune = Math.random() > 0.5;
                 this.color = getRandomColour();
+                this.charging = false;
+                this.chargeCount = 0;
                 this.active = false;
                 this.activeCount = 0;
             }
@@ -142,15 +147,26 @@ export default function Runes({ visibleUI }) {
                 const distance = Math.sqrt(dx * dx + dy * dy);
 
                 if (distance < mouseShieldRadiusRef.current) {
-                    if (this.activeCount < maxActiveCount) {
-                        this.activeCount += 5;
+                    if (this.chargeCount < maxChargeCount) {
+                        this.chargeCount += 1;
+                    } else {
+                        this.activeCount = maxActiveCount;
                     }
-                }
-
-                if (this.activeCount > 0) {
+                } else if (this.chargeCount > 0 && !this.active) {
+                    this.chargeCount--;
+                } else if (this.activeCount > 0 && this.active) {
                     this.activeCount--;
                 }
+
+                this.charging = this.chargeCount !== 0;
                 this.active = this.activeCount !== 0;
+
+
+                this.vx = ((Math.random() - 0.5) * 2) * this.chargeCount / maxChargeCount;
+                this.vy = ((Math.random() - 0.5) * 2) * this.chargeCount / maxChargeCount;
+
+                this.x += this.vx * simulationSpeedRef.current / 100;
+                this.y += this.vy * simulationSpeedRef.current / 100;
             }
 
             draw() {
@@ -165,10 +181,21 @@ export default function Runes({ visibleUI }) {
                     const pointX = point.x + this.x;
                     const pointY = point.y + this.y;
                     ctx.lineTo(pointX, pointY);
-                    ctx.strokeStyle = this.active ? this.color : theme.accent;
-                    ctx.lineWidth = 10
+
                 }
+
+                if (this.closedRune) {
+                    ctx.lineTo(firstPointX, firstPointY);
+                }
+
+                ctx.strokeStyle = this.charging ? scaleColour(theme.accent, this.color, this.chargeCount / maxChargeCount) : theme.accent;
+                ctx.lineWidth = 10
                 ctx.stroke()
+
+                if (this.active) {
+                    ctx.shadowColor = this.color;
+                    ctx.shadowBlur = Math.round((this.active / maxActiveCount) * 13);
+                }
 
                 ctx.closePath();
             }

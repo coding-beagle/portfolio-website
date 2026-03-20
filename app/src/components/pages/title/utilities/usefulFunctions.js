@@ -1,4 +1,6 @@
 export const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+export const clampR = (num, min, max) => Math.round(Math.min(Math.max(num, min), max));
+
 
 export const colourToRGB = (colourHex) => {
   return {
@@ -53,6 +55,42 @@ export const getRandomColour = () => {
 // arduino map
 export const scaleValue = (val, input_min, input_max, output_min, output_max) => {
   return (val - input_min) * (output_max - output_min) / (input_max - input_min) + output_min;
+}
+
+export const scaleColour = (col1, col2, percent) => {
+  const colour1 = {
+    r: parseInt(col1.slice(1, 3), 16),
+    g: parseInt(col1.slice(3, 5), 16),
+    b: parseInt(col1.slice(5, 7), 16),
+  };
+
+  const colour2 = {
+    r: parseInt(col2.slice(1, 3), 16),
+    g: parseInt(col2.slice(3, 5), 16),
+    b: parseInt(col2.slice(5, 7), 16),
+  };
+
+  const rStep = colour2.r - colour1.r;
+  console.log(rStep)
+  const lowerR = colour1.r
+  console.log(lowerR)
+  console.log(lowerR + rStep * percent)
+
+  const gStep = colour2.g - colour1.g;
+  const lowerG = colour1.g;
+
+  const bStep = colour2.b - colour1.b;
+  const lowerB = colour1.b;
+
+  const r = Math.round(lowerR + rStep * percent);
+  const g = Math.round(lowerG + gStep * percent);
+  const b = Math.round(lowerB + bStep * percent);
+
+  const rHex = r.toString(16).padStart(2, "0");
+  const gHex = g.toString(16).padStart(2, "0");
+  const bHex = b.toString(16).padStart(2, "0");
+
+  return `#${rHex}${gHex}${bHex}`;
 }
 
 export const checkMouseInRadius = (pos_1, mouse_pos, check_radius) => {
@@ -289,6 +327,6 @@ export const safeNegativeModulo = (num, denominator) => {
 
 export const distanceBetweenTwoPoints = (point1, point2) => {
   const dx = point1.x - point2.x;
-  const dy = point2.y - point2.y;
+  const dy = point1.y - point2.y;
   return Math.sqrt(dx ** 2 + dy ** 2);
 }
