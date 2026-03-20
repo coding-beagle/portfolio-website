@@ -4,6 +4,43 @@ import { ChangerGroup } from "../utilities/valueChangers";
 import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
+export class FireworkChaff {
+  constructor(x, y, vx, vy, colour, initialSize, sizeFallOff, gravity) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.colour = colour;
+    this.size = initialSize;
+    this.sizeDecayRate = sizeFallOff;
+    this.gravity = gravity
+  }
+
+  update(simulationSpeedRef) {
+    this.x += (this.vx * simulationSpeedRef.current) / 100;
+    this.vy += this.gravity;
+    this.y += (this.vy * simulationSpeedRef.current) / 100;
+    this.initialSize -= this.sizeDecayRate;
+
+    if (simulationSpeedRef.current < Math.random() * 400)
+      this.colour = getCloseColour(this.colour, 0.1, 0.1, 0.1);
+  }
+
+  draw(ctx, bloom = true, bloomEffectRef = null) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    if (bloom) {
+      ctx.shadowColor = this.colour;
+      ctx.shadowBlur = Math.min(24, this.size * bloomEffectRef.current); // Glow effect
+    }
+    ctx.fillStyle = this.colour;
+    ctx.fill();
+    ctx.closePath();
+    ctx.restore();
+  }
+}
+
 export default function Fireworks({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
@@ -44,40 +81,6 @@ export default function Fireworks({ visibleUI }) {
     const maxFireworkRiseSpeed = 2;
     const fireWorkLifeSpan = 2000;
 
-    class FireworkChaff {
-      constructor(x, y, vx, vy, colour, initialSize, sizeFallOff) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = vy;
-        this.colour = colour;
-        this.size = initialSize;
-        this.sizeDecayRate = sizeFallOff;
-      }
-
-      update() {
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.vy += gravity;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
-        this.initialSize -= this.sizeDecayRate;
-
-        if (simulationSpeedRef.current < Math.random() * 400)
-          this.colour = getCloseColour(this.colour, 0.1, 0.1, 0.1);
-      }
-
-      draw() {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.shadowColor = this.colour;
-        ctx.shadowBlur = Math.min(24, this.size * bloomEffectRef.current); // Glow effect
-        ctx.fillStyle = this.colour;
-        ctx.fill();
-        ctx.closePath();
-        ctx.restore();
-      }
-    }
-
     class Firework {
       constructor() {
         // Detect if on mobile
@@ -114,7 +117,7 @@ export default function Fireworks({ visibleUI }) {
         // Randomize explosion height in the top portion (10% to 33% of screen)
         this.explodeY =
           Math.random() *
-            (canvasRef.current.height / 3 - canvasRef.current.height * 0.1) +
+          (canvasRef.current.height / 3 - canvasRef.current.height * 0.1) +
           canvasRef.current.height * 0.1;
       }
 
@@ -140,7 +143,8 @@ export default function Fireworks({ visibleUI }) {
                 vy,
                 colour,
                 initialSize,
-                sizeFallOff
+                sizeFallOff,
+                gravity
               )
             );
           }
@@ -175,7 +179,8 @@ export default function Fireworks({ visibleUI }) {
                   vy,
                   colour,
                   initialSize,
-                  sizeFallOff
+                  sizeFallOff,
+                  gravity
                 )
               );
             }
@@ -215,7 +220,8 @@ export default function Fireworks({ visibleUI }) {
                 vy,
                 colour,
                 initialSize,
-                sizeFallOff
+                sizeFallOff,
+                gravity
               )
             );
           }
@@ -250,7 +256,8 @@ export default function Fireworks({ visibleUI }) {
                   vy,
                   colour,
                   initialSize,
-                  sizeFallOff
+                  sizeFallOff,
+                  gravity
                 )
               );
             }
@@ -299,8 +306,8 @@ export default function Fireworks({ visibleUI }) {
           fireworks = fireworks.filter((f) => f !== firework);
         } else {
           firework.points.forEach((fireworkPoint) => {
-            fireworkPoint.update();
-            fireworkPoint.draw();
+            fireworkPoint.update(simulationSpeedRef);
+            fireworkPoint.draw(ctx, true, bloomEffectRef);
           });
         }
       });

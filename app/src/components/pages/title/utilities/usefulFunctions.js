@@ -71,10 +71,7 @@ export const scaleColour = (col1, col2, percent) => {
   };
 
   const rStep = colour2.r - colour1.r;
-  console.log(rStep)
   const lowerR = colour1.r
-  console.log(lowerR)
-  console.log(lowerR + rStep * percent)
 
   const gStep = colour2.g - colour1.g;
   const lowerG = colour1.g;

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { clamp, distanceBetweenTwoPoints, ElementCollisionHitbox, getRandomColour, scaleColour } from "../utilities/usefulFunctions";
+import { clamp, distanceBetweenTwoPoints, ElementCollisionHitbox, getCloseColour, getRandomColour, scaleColour } from "../utilities/usefulFunctions";
+import { FireworkChaff } from "./firework";
 
 export default function Runes({ visibleUI }) {
     const { theme } = useTheme();
@@ -13,6 +14,7 @@ export default function Runes({ visibleUI }) {
     const mouseClickRef = useRef(false);
 
     const particleCountRef = useRef(10);
+    const bloomEffectRef = useRef(6);
     const simulationSpeedRef = useRef(100);
     const mouseShieldRadiusRef = useRef(100);
     const titleShieldRadiusRef = useRef(30);
@@ -23,10 +25,7 @@ export default function Runes({ visibleUI }) {
     useEffect(() => {
 
         let particles = [];
-        const gravity = 0.5;
         let animationFrameId;
-        const maxFallSpeed = 13;
-        const maxWindSpeed = 6;
 
         const titleHitbox = new ElementCollisionHitbox("title", 20, titleShieldRadiusRef)
         // const iconsHitbox = new ElementCollisionHitbox("linkIcons", 20, titleShieldRadiusRef)
@@ -95,13 +94,15 @@ export default function Runes({ visibleUI }) {
         recalculateRect();
 
         const maxSize = 200;
-        const minDistanceBetweenPoints = 30;
+        const minDistanceBetweenPoints = 50;
         const minDistanceBetweenRunes = 200;
         const maxPoints = 10;
-        const minPoints = 5;
+        const minPoints = 4;
         const maxChargeCount = 150;
         const maxActiveCount = 500;
-
+        const shatterCount = 200;
+        const postShatterLife = 1000;
+        const gravity = 0.05;
         class Rune {
             constructor(x, y) {
                 this.x = x;
@@ -115,6 +116,11 @@ export default function Runes({ visibleUI }) {
                 this.chargeCount = 0;
                 this.active = false;
                 this.activeCount = 0;
+                this.hoveredWhileActive = 0;
+                this.shattered = false;
+                this.shatteredCount = 0;
+
+                this.childParticles = [];
             }
 
             populatePoints(numPoints) {
@@ -150,54 +156,101 @@ export default function Runes({ visibleUI }) {
                     if (this.chargeCount < maxChargeCount) {
                         this.chargeCount += 1;
                     } else {
+                        if (this.hoveredWhileActive < shatterCount) {
+                            this.hoveredWhileActive++;
+                        } else {
+                            this.createChildParticles();
+                            this.shattered = true;
+                        }
                         this.activeCount = maxActiveCount;
                     }
                 } else if (this.chargeCount > 0 && !this.active) {
-                    this.chargeCount--;
+                    this.chargeCount -= 2;
                 } else if (this.activeCount > 0 && this.active) {
-                    this.activeCount--;
+                    this.activeCount -= 2;
+                } else if (this.hoveredWhileActive > 0 && this.active) {
+                    this.hoveredWhileActive--;
                 }
 
                 this.charging = this.chargeCount !== 0;
                 this.active = this.activeCount !== 0;
-
 
                 this.vx = ((Math.random() - 0.5) * 2) * this.chargeCount / maxChargeCount;
                 this.vy = ((Math.random() - 0.5) * 2) * this.chargeCount / maxChargeCount;
 
                 this.x += this.vx * simulationSpeedRef.current / 100;
                 this.y += this.vy * simulationSpeedRef.current / 100;
+
+                if (this.shattered) {
+                    this.shatteredCount++
+                    this.childParticles.forEach((particle) => particle.update(simulationSpeedRef))
+                }
+            }
+
+            createChildParticles() {
+                if (this.shattered) {
+                    return
+                }
+                const chaffCount = Math.floor(Math.random() * 20) + 5;
+                const angleStep = (Math.PI * 2) / chaffCount;
+                const colour = getCloseColour(this.color);
+                for (let i = 0; i < chaffCount; i++) {
+                    const angle = i * angleStep;
+                    const speed = Math.random() * 2 + 1;
+                    const vx = Math.cos(angle) * speed;
+                    const vy = Math.sin(angle) * speed;
+                    const initialSize = Math.random() * 20 + 5;
+                    const sizeFallOff = Math.random() * 0.05 + 0.01;
+                    this.childParticles.push(
+                        new FireworkChaff(
+                            this.x,
+                            this.y,
+                            vx,
+                            vy,
+                            colour,
+                            initialSize,
+                            sizeFallOff,
+                            gravity
+                        )
+                    );
+                }
             }
 
             draw() {
-                ctx.beginPath()
-                const firstPoint = this.points[0]
-                const firstPointX = firstPoint.x + this.x;
-                const firstPointY = firstPoint.y + this.y;
-                ctx.moveTo(firstPointX, firstPointY)
+                if (!this.shattered) {
+                    ctx.beginPath()
+                    const firstPoint = this.points[0]
+                    const firstPointX = firstPoint.x + this.x;
+                    const firstPointY = firstPoint.y + this.y;
+                    ctx.moveTo(firstPointX, firstPointY)
 
-                for (let currentPointIndex = 1; currentPointIndex < this.points.length; currentPointIndex++) {
-                    const point = this.points[currentPointIndex]
-                    const pointX = point.x + this.x;
-                    const pointY = point.y + this.y;
-                    ctx.lineTo(pointX, pointY);
+                    for (let currentPointIndex = 1; currentPointIndex < this.points.length; currentPointIndex++) {
+                        const point = this.points[currentPointIndex]
+                        const pointX = point.x + this.x;
+                        const pointY = point.y + this.y;
+                        ctx.lineTo(pointX, pointY);
 
+                    }
+
+                    if (this.closedRune) {
+                        ctx.closePath()
+                    }
+
+                    ctx.strokeStyle = this.charging ? scaleColour(themeRef.current.accent, this.color, this.chargeCount / maxChargeCount) : themeRef.current.accent;
+                    ctx.lineWidth = 10
+                    if (this.active) {
+                        ctx.shadowColor = this.color
+                        ctx.shadowBlur = Math.round((this.activeCount / maxActiveCount) * bloomEffectRef.current); // Glow effect
+                    } else {
+                        ctx.shadowBlur = 0
+                    }
+
+                    ctx.stroke()
+                } else {
+                    this.childParticles.forEach((particle) => {
+                        particle.draw(ctx, true, bloomEffectRef)
+                    })
                 }
-
-                if (this.closedRune) {
-                    ctx.lineTo(firstPointX, firstPointY);
-                }
-
-                ctx.strokeStyle = this.charging ? scaleColour(themeRef.current.accent, this.color, this.chargeCount / maxChargeCount) : themeRef.current.accent;
-                ctx.lineWidth = 10
-                ctx.stroke()
-
-                if (this.active) {
-                    ctx.shadowColor = scaleColour(this.color, '#ffffff', 0.7);
-                    ctx.shadowBlur = Math.round((this.active / maxActiveCount) * 10);
-                }
-
-                ctx.closePath();
             }
         }
 
@@ -262,6 +315,11 @@ export default function Runes({ visibleUI }) {
                 particle.update();
                 particle.draw();
             });
+
+            particles = particles.filter(particle =>
+                !(particle.shattered && particle.shatteredCount > postShatterLife)
+            );
+
             animationFrameId = requestAnimationFrame(animate);
         }
 
@@ -333,6 +391,13 @@ export default function Runes({ visibleUI }) {
                                 valueRef: simulationSpeedRef,
                                 minValue: "1",
                                 maxValue: "200.0",
+                                type: "slider",
+                            },
+                            {
+                                title: "Glow Radius:",
+                                valueRef: bloomEffectRef,
+                                minValue: "1",
+                                maxValue: "24.0",
                                 type: "slider",
                             },
                         ]}
