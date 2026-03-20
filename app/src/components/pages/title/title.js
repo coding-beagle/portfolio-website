@@ -47,29 +47,29 @@ import Penguin from "./scenes/penguin";
 import Runes from "./scenes/runes";
 
 const Scenes = {
-  0: { component: Snow },
-  1: { component: Rain },
-  2: { component: Plants },
-  3: { component: Stars },
-  4: { component: Boids },
-  5: { component: Conway },
-  6: { component: Hexapod },
-  7: { component: Mandelbrot },
-  8: { component: Fire },
-  9: { component: Fireworks },
-  10: { component: Plinko },
-  11: { component: GravitalOrbs },
-  12: { component: Liquid },
-  13: { component: Life },
-  14: { component: Raven },
-  15: { component: Clocks },
-  16: { component: Pinball },
-  17: { component: BallPit },
-  18: { component: PID },
-  19: { component: BadApple },
-  20: { component: SquishBall },
-  21: { component: Penguin },
-  22: { component: Runes },
+  0: { component: Snow, name: "snow" },
+  1: { component: Rain, name: "rain" },
+  2: { component: Plants, name: "plants" },
+  3: { component: Stars, name: "stars" },
+  4: { component: Boids, name: "boids" },
+  5: { component: Conway, name: "conway" },
+  6: { component: Hexapod, name: "hexapod" },
+  7: { component: Mandelbrot, name: "mandelbrot" },
+  8: { component: Fire, name: "fire" },
+  9: { component: Fireworks, name: "fireworks" },
+  10: { component: Plinko, name: "plinko" },
+  11: { component: GravitalOrbs, name: "gravitalorbs" },
+  12: { component: Liquid, name: "liquid" },
+  13: { component: Life, name: "life" },
+  14: { component: Raven, name: "raven" },
+  15: { component: Clocks, name: "clocks" },
+  16: { component: Pinball, name: "pinball" },
+  17: { component: BallPit, name: "ballpit" },
+  18: { component: PID, name: "pid" },
+  19: { component: BadApple, name: "badapple" },
+  20: { component: SquishBall, name: "squishball" },
+  21: { component: Penguin, name: "penguin" },
+  22: { component: Runes, name: "runes" },
 };
 
 export default function Title({
@@ -97,7 +97,7 @@ export default function Title({
   const [showCarousel, setShowCarousel] = useState(proj ?? false);
 
   const indexToSceneName = (index) => {
-    return Scenes[index].component.name.toLowerCase()
+    return Scenes[index].name;
   }
 
   const sceneNameToIndex = (text) => {
