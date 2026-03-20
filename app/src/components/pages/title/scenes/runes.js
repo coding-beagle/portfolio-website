@@ -8,13 +8,13 @@ export default function Runes({ visibleUI }) {
     const { theme } = useTheme();
     const canvasRef = useRef(null);
 
+    const themeRef = useRef(theme);
     const mousePosRef = useRef({ x: 0, y: 0 });
     const mouseClickRef = useRef(false);
 
     const particleCountRef = useRef(10);
     const simulationSpeedRef = useRef(100);
     const mouseShieldRadiusRef = useRef(100);
-    const windspeedRef = useRef(Math.round((Math.random() - 0.5) * 100));
     const titleShieldRadiusRef = useRef(30);
     const recalculateRectRef = useRef(() => { });
     const visibleUIRef = useRef(visibleUI);
@@ -188,13 +188,13 @@ export default function Runes({ visibleUI }) {
                     ctx.lineTo(firstPointX, firstPointY);
                 }
 
-                ctx.strokeStyle = this.charging ? scaleColour(theme.accent, this.color, this.chargeCount / maxChargeCount) : theme.accent;
+                ctx.strokeStyle = this.charging ? scaleColour(themeRef.current.accent, this.color, this.chargeCount / maxChargeCount) : themeRef.current.accent;
                 ctx.lineWidth = 10
                 ctx.stroke()
 
                 if (this.active) {
-                    ctx.shadowColor = this.color;
-                    ctx.shadowBlur = Math.round((this.active / maxActiveCount) * 13);
+                    ctx.shadowColor = scaleColour(this.color, '#ffffff', 0.7);
+                    ctx.shadowBlur = Math.round((this.active / maxActiveCount) * 10);
                 }
 
                 ctx.closePath();
@@ -297,11 +297,15 @@ export default function Runes({ visibleUI }) {
             }
             particles = [];
         };
-    }, [theme.secondary]);
+    }, []);
 
     useEffect(() => {
         visibleUIRef.current = visibleUI;
     }, [visibleUI]);
+
+    useEffect(() => {
+        themeRef.current = theme;
+    }, [theme])
 
     return (
         <>
