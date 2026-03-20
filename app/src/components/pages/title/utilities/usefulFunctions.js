@@ -286,3 +286,9 @@ export const safeNegativeModulo = (num, denominator) => {
   const remain = num % denominator;
   return Math.floor(remain >= 0 ? remain : remain + denominator);
 }
+
+export const distanceBetweenTwoPoints = (point1, point2) => {
+  const dx = point1.x - point2.x;
+  const dy = point2.y - point2.y;
+  return Math.sqrt(dx ** 2 + dy ** 2);
+}

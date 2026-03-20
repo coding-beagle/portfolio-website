@@ -44,6 +44,7 @@ import PID from "./scenes/pid";
 import BadApple from "./scenes/badapple";
 import SquishBall from "./scenes/squishball";
 import Penguin from "./scenes/penguin";
+import Runes from "./scenes/runes";
 
 const Scenes = {
   0: { component: Snow },
@@ -68,31 +69,7 @@ const Scenes = {
   19: { component: BadApple },
   20: { component: SquishBall },
   21: { component: Penguin },
-};
-
-const sceneNameToIndex = {
-  snow: 0,
-  rain: 1,
-  plants: 2,
-  stars: 3,
-  boids: 4,
-  conway: 5,
-  hexapod: 6,
-  mandelbrot: 7,
-  fire: 8,
-  fireworks: 9,
-  plinko: 10,
-  gravitalorbs: 11,
-  liquid: 12,
-  life: 13,
-  raven: 14,
-  clocks: 15,
-  pinball: 16,
-  ballpit: 17,
-  pid: 18,
-  badapple: 19,
-  squishball: 20,
-  penguin: 21
+  22: { component: Runes },
 };
 
 export default function Title({
@@ -119,6 +96,21 @@ export default function Title({
   const animationNameRef = useRef("");
   const [showCarousel, setShowCarousel] = useState(proj ?? false);
 
+  const indexToSceneName = (index) => {
+    return Scenes[index].component.name.toLowerCase()
+  }
+
+  const sceneNameToIndex = (text) => {
+    let index = undefined;
+    const range = [...Array(Object.keys(Scenes).length).keys()];
+    range.forEach(sceneIndex => {
+      if (text === indexToSceneName(sceneIndex)) {
+        index = sceneIndex;
+      }
+    });
+    return index;
+  }
+
   useEffect(() => {
     setShowCarousel(proj);
   }, [proj])
@@ -134,7 +126,7 @@ export default function Title({
       const normalizedScene = decodeURIComponent(
         initialScene.trim().toLowerCase()
       );
-      const sceneIndex = sceneNameToIndex[normalizedScene];
+      const sceneIndex = sceneNameToIndex(normalizedScene);
       if (sceneIndex !== undefined) {
         setCurrentScene(sceneIndex);
       } else {
@@ -215,7 +207,7 @@ export default function Title({
 
   const getSceneName = (index) => {
     return (
-      Object.entries(sceneNameToIndex).find(([, i]) => i === index)?.[0] ||
+      indexToSceneName(index) ||
       "Unknown"
     );
   };

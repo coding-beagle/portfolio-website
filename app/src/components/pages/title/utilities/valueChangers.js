@@ -347,6 +347,12 @@ export function Slider({
           textAlign: "right",
           color: theme.secondaryAccent,
           fontWeight: 500,
+          WebkitUserSelect: "none",
+          WebkitTouchCallout: "none",
+          KhtmlUserSelect: "none",
+          MozUserSelect: "none",
+          userSelect: "none",
+          msUserSelect: "none",
         }}
       >
         {isState ? valueRef : valueRef.current}
