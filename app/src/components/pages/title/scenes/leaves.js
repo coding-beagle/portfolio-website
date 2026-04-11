@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { randomFloatBetweenTwo } from "../utilities/usefulFunctions";
+import { getCloseColour, randomFloatBetweenTwo, scaleColour } from "../utilities/usefulFunctions";
 
 export default function Leaves({ visibleUI }) {
     const { theme } = useTheme();
     const canvasRef = useRef(null);
     const particleCountRef = useRef(50);
     const simulationSpeedRef = useRef(100);
-    const autumnalRef = useRef(100);
-    const colorRef = useRef(theme.secondaryAccent);
+    const themeRef = useRef(theme);
+    const autumnalRef = useRef(0);
     const [, setRender] = useState(0);
 
     useEffect(() => {
@@ -43,11 +43,14 @@ export default function Leaves({ visibleUI }) {
                 this.vx = 0.1 * (Math.random() * 2 - 1) + 0.2 * windSpeed;
                 this.vy = Math.random() * 2 - 1;
                 this.size = Math.random() * 10 + 3;
-                this.color = colorRef.current;
+                this.normalColor = getCloseColour(themeRef.current.secondaryAccent, 40, 40, 40);
+                this.autumnalColour = getCloseColour(themeRef.current.tertiaryAccent, 40, 40, 40);
                 this.swayPhase = Math.round(Math.random() * 1000)
             }
 
             reset() {
+                this.normalColor = getCloseColour(themeRef.current.secondaryAccent, 40, 40, 40);
+                this.autumnalColour = getCloseColour(themeRef.current.tertiaryAccent, 40, 40, 40);
                 if (gravity > 0.0) {
                     if (Math.random() > 0.5) {
                         this.y = 0;
@@ -71,6 +74,7 @@ export default function Leaves({ visibleUI }) {
             }
 
             update() {
+                this.color = scaleColour(this.normalColor, this.autumnalColour, autumnalRef.current / 100);
                 this.vy += gravity;
                 this.vx += windSpeed * Math.random()
                 this.swayPhase += 1;
@@ -182,15 +186,11 @@ export default function Leaves({ visibleUI }) {
 
     // Update colorRef and all particles' colors on theme change
     useEffect(() => {
-        colorRef.current = theme.secondaryAccent;
+        // colorRef.current = theme.secondaryAccent;
         // Update all existing particles' colors
         const canvas = canvasRef.current;
         if (!canvas) return;
-        if (canvas._particles) {
-            canvas._particles.forEach((particle) => {
-                particle.color = theme.secondaryAccent;
-            });
-        }
+        themeRef.current = theme;
     }, [theme]);
 
     return (
@@ -220,6 +220,13 @@ export default function Leaves({ visibleUI }) {
                                 valueRef: simulationSpeedRef,
                                 minValue: "1",
                                 maxValue: "200.0",
+                                type: "slider",
+                            },
+                            {
+                                title: "Autumn Percentage:",
+                                valueRef: autumnalRef,
+                                minValue: "0",
+                                maxValue: "100.0",
                                 type: "slider",
                             },
                         ]}
