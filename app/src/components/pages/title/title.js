@@ -45,6 +45,7 @@ import BadApple from "./scenes/badapple";
 import SquishBall from "./scenes/squishball";
 import Penguin from "./scenes/penguin";
 import Runes from "./scenes/runes";
+import Leaves from "./scenes/leaves";
 
 const Scenes = {
   0: { component: Snow, name: "snow" },
@@ -70,6 +71,7 @@ const Scenes = {
   20: { component: SquishBall, name: "squishball" },
   21: { component: Penguin, name: "penguin" },
   22: { component: Runes, name: "runes" },
+  23: { component: Leaves, name: "leaves" },
 };
 
 export default function Title({

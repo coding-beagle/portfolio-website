@@ -327,3 +327,7 @@ export const distanceBetweenTwoPoints = (point1, point2) => {
   const dy = point1.y - point2.y;
   return Math.sqrt(dx ** 2 + dy ** 2);
 }
+
+export const randomFloatBetweenTwo = (num1, num2) => {
+  return scaleValue(Math.random(), 0, 1, num2, num1)
+}
