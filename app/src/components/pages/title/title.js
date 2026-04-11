@@ -98,6 +98,50 @@ export default function Title({
   const animationNameRef = useRef("");
   const [showCarousel, setShowCarousel] = useState(proj ?? false);
 
+  const [displayedText, setDisplayedText] = useState("");
+  const [typingDone, setTypingDone] = useState(false);
+  const [sceneLabel, setSceneLabel] = useState("click the title to change scene");
+  const [sceneLabelFaded, setSceneLabelFaded] = useState(false);
+  const [iconsVisible, setIconsVisible] = useState(false);
+  const [sceneLabelVisible, setSceneLabelVisible] = useState(false);
+
+  useEffect(() => {
+    const fullText =
+      text === "" || text === undefined
+        ? "NTeague"
+        : decodeURIComponent(text).replace(/%0A/g, "\n");
+
+    let i = 0;
+    setDisplayedText("");
+    setTypingDone(false);
+    setSceneLabel("click the title to change scene");
+    setSceneLabelFaded(false);
+    setIconsVisible(false);
+    setSceneLabelVisible(false);
+
+    const interval = setInterval(() => {
+      i++;
+      setDisplayedText(fullText.slice(0, i));
+      if (i >= fullText.length) {
+        clearInterval(interval);
+        setTypingDone(true);
+        setIconsVisible(true);
+        setSceneLabelVisible(true);
+        setTimeout(() => {
+          setSceneLabelFaded(true);
+          setTimeout(() => {
+            setSceneLabel(null);
+            setTimeout(() => {
+              setSceneLabelFaded(false);
+            }, 50);
+          }, 600);
+        }, 1200);
+      }
+    }, 60);
+
+    return () => clearInterval(interval);
+  }, [text]);
+
   const indexToSceneName = (index) => {
     return Scenes[index].name;
   }
@@ -321,9 +365,16 @@ export default function Title({
             aria-label="Next scene (left click), previous scene (right click)"
             title="Next scene (left click), previous scene (right click)"
           >
-            {text === "" || text === undefined
-              ? "NTeague"
-              : decodeURIComponent(text).replace(/%0A/g, "\n")}
+            {displayedText}
+            {!typingDone && (
+              <span
+                style={{
+                  borderRight: `0.08em solid ${isHover ? theme.secondary : theme.accent}`,
+                  animation: "blink 0.7s step-end infinite",
+                  marginLeft: "2px",
+                }}
+              />
+            )}
           </header>
         )}
         {/* Mobile: show menu button, else show scene and links inline */}
@@ -348,9 +399,11 @@ export default function Title({
                 msUserSelect: "none",
                 zIndex: 100,
                 paddingBottom: "0.5em",
+                opacity: sceneLabelVisible && !sceneLabelFaded ? 1 : 0,
+                transition: "opacity 0.6s ease",
               }}
             >
-              Current scene: {getSceneName(currentScene)}
+              {sceneLabel === null ? `Current scene: ${getSceneName(currentScene)}` : sceneLabel}
             </div>}
 
             <div
@@ -358,9 +411,13 @@ export default function Title({
               style={{
                 display: "flex",
                 justifyContent: "center",
-                gap: "1em",
+                gap: iconsVisible ? "1em" : "0em",
                 fontSize: "3em",
                 zIndex: 100,
+                overflow: "hidden",
+                maxWidth: iconsVisible ? "500px" : "0px",
+                opacity: iconsVisible ? 1 : 0,
+                transition: "max-width 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease, gap 0.5s ease",
                 // paddingBottom: "1em",
               }}
             >
@@ -390,6 +447,12 @@ export default function Title({
           </>
         )}
       </div>
+      <style>{`
+        @keyframes blink {
+          0%, 100% { border-color: transparent; }
+          50% { border-color: inherit; }
+        }
+      `}</style>
     </>
   );
 }
