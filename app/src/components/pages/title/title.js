@@ -149,7 +149,7 @@ export default function Title({
               setSceneLabelFaded(false);
             }, 100);
           }, 1000);
-        }, 1000);
+        }, 3000);
       }
     }, Math.round(1000 / fullText.length));
 
