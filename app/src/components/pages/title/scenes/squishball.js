@@ -214,13 +214,26 @@ export default function SquishBall({ visibleUI }) {
 
         // Update positions
         this.points.forEach((point) => {
-          point.checkCollisions();
-          point.update()
+          const colliding = point.checkCollisions();
+          if (!colliding) {
+            point.update()
+          }
         })
       }
 
       draw() {
         if (this.points.length < 3) return;
+
+        for (let i = 0; i < this.points.length; i++) {
+          // draw circle at each point
+          const point = this.points[i];
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = theme.accent;
+          ctx.fill();
+          ctx.closePath();
+        }
 
         ctx.beginPath();
         ctx.fillStyle = theme.secondary;
@@ -235,6 +248,9 @@ export default function SquishBall({ visibleUI }) {
 
         // Draw curves through all points
         for (let i = 0; i < this.points.length; i++) {
+
+
+
           const current = this.points[i];
           const next = this.points[(i + 1) % this.points.length];
 
@@ -299,11 +315,13 @@ export default function SquishBall({ visibleUI }) {
       }
 
       checkCollisions() {
-        if (!visibleUIRef.current) return
+        let colliding = false
+        if (!visibleUIRef.current) return colliding
         collisionHitboxes.forEach(hitbox => {
           if (hitbox.inElement(this.x, this.y)) {
+            colliding = true
             const rect = hitbox.rect_padded;
-            const bounce = 1;
+            const bounce = 0;
 
             const vx = (this.x - this.oldX);
             const vy = (this.y - this.oldY);
@@ -313,23 +331,29 @@ export default function SquishBall({ visibleUI }) {
             const distToTop = this.y - rect.top;
             const distToBottom = rect.bottom - this.y;
 
+            const deadZone = 20;
+
             const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
 
-            if (minDist === distToLeft) {
+            if (minDist === distToLeft && minDist > deadZone) {
               this.x = rect.left - this.size;
               this.oldX = this.x + vx * bounce;
-            } else if (minDist === distToRight) {
+            } else if (minDist === distToRight && minDist > deadZone) {
               this.x = rect.right + this.size;
               this.oldX = this.x + vx * bounce;
-            } else if (minDist === distToTop) {
+            } else if (minDist === distToTop && minDist > deadZone) {
               this.y = rect.top - this.size;
               this.oldY = this.y + vy * bounce;
-            } else {
+            } else if (minDist === distToBottom && minDist > deadZone) {
               this.y = rect.bottom + this.size;
               this.oldY = this.y + vy * bounce;
             }
+
+            this.a_x = 0.0
+            this.a_y = 0.0
           }
         });
+        return colliding
       }
 
       update() {
@@ -348,7 +372,7 @@ export default function SquishBall({ visibleUI }) {
 
         if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current) && (!draggingPoint || draggingPoint === this)) {
           draggingPoint = this;
-          const dragStrength = 0.3;
+          const dragStrength = 0.6;
           const targetX = mousePosRef.current.x;
           const targetY = mousePosRef.current.y;
 
@@ -387,8 +411,8 @@ export default function SquishBall({ visibleUI }) {
 
       draw() {
         // ctx.beginPath();
-        // ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        // ctx.fillStyle = this.color;
+        // ctx.arc(this.x, this.y, 50, 0, Math.PI * 2);
+        // ctx.fillStyle = "white";
         // ctx.fill();
         // ctx.closePath();
       }
