@@ -83,6 +83,7 @@ export default function Title({
   setVisibleUI = () => { },
   handleThemeToggle = () => { },
   handleVisibleToggle = () => { },
+  onIntroComplete = () => { },
 }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
@@ -104,6 +105,8 @@ export default function Title({
   const [sceneLabelFaded, setSceneLabelFaded] = useState(false);
   const [iconsVisible, setIconsVisible] = useState(false);
   const [sceneLabelVisible, setSceneLabelVisible] = useState(false);
+  const [settledUI, setSettledUI] = useState(false);
+  const typingTime = 1000
 
   useEffect(() => {
     const fullText =
@@ -118,6 +121,7 @@ export default function Title({
     setSceneLabelFaded(false);
     setIconsVisible(false);
     setSceneLabelVisible(false);
+    setSettledUI(false);
 
     const interval = setInterval(() => {
       i++;
@@ -125,19 +129,29 @@ export default function Title({
       if (i >= fullText.length) {
         clearInterval(interval);
         setTypingDone(true);
-        setIconsVisible(true);
+        // 1. Scene label fades in
         setSceneLabelVisible(true);
+        setTimeout(() => {
+          // 2. Icons expand in
+          setIconsVisible(true);
+          setTimeout(() => {
+            // 3. Side buttons + value changers appear
+            setSettledUI(true);
+            onIntroComplete();
+          }, 1000);
+        }, 1000);
+        // Scene label swaps to scene name after a pause
         setTimeout(() => {
           setSceneLabelFaded(true);
           setTimeout(() => {
             setSceneLabel(null);
             setTimeout(() => {
               setSceneLabelFaded(false);
-            }, 50);
-          }, 600);
-        }, 1200);
+            }, 100);
+          }, 1000);
+        }, 1000);
       }
-    }, 60);
+    }, Math.round(1000 / fullText.length));
 
     return () => clearInterval(interval);
   }, [text]);
@@ -332,7 +346,7 @@ export default function Title({
           overflow: "hidden"
         }}
       >
-        {createElement(renderScene(visibleUI), { visibleUI })}
+        {createElement(renderScene(visibleUI), { visibleUI: visibleUI && settledUI })}
         {visibleUI && (
           <header
             ref={headerRef}
@@ -400,7 +414,7 @@ export default function Title({
                 zIndex: 100,
                 paddingBottom: "0.5em",
                 opacity: sceneLabelVisible && !sceneLabelFaded ? 1 : 0,
-                transition: "opacity 0.6s ease",
+                transition: "opacity 1.0s ease",
               }}
             >
               {sceneLabel === null ? `Current scene: ${getSceneName(currentScene)}` : sceneLabel}

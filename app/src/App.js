@@ -50,6 +50,7 @@ function AppWrapper() {
   const [showHideButton, setShowHideButton] = useState(true);
   const [canSetShowHideButton, setCanSetShowHideButton] = useState(true);
   const [visibleUI, setVisibleUI] = useState(hideUIBool);
+  const [introComplete, setIntroComplete] = useState(false);
 
   // Handler for animated theme toggle
   const handleThemeToggle = () => {
@@ -95,6 +96,7 @@ function AppWrapper() {
         setVisibleUI={setVisibleUI}
         handleThemeToggle={handleThemeToggle}
         handleVisibleToggle={handleVisibleToggle}
+        onIntroComplete={() => setIntroComplete(true)}
       />
       {visibleUI && (
         <button
@@ -116,8 +118,9 @@ function AppWrapper() {
             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
             cursor: "pointer",
             fontSize: "1.5em",
-            transition: "background 0.3s, color 0.3s",
+            transition: "background 0.3s, color 0.3s, opacity 0.5s ease",
             overflow: "hidden",
+            opacity: introComplete ? 1 : 0,
           }}
           aria-label={
             themeName === "dark"
@@ -201,9 +204,10 @@ function AppWrapper() {
             boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
             cursor: "pointer",
             fontSize: "1.5em",
-            transition: "background 0.3s, color 0.3s, transform 0.5s ease",
+            transition: "background 0.3s, color 0.3s, transform 0.5s ease, opacity 0.5s ease",
             transform: !visibleUI && !showHideButton ? 'translateX(200%)' : 'translateX(0%)',
             overflow: "hidden",
+            opacity: introComplete ? 1 : 0,
           }}
           aria-label={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
           title={visibleUI ? "Hide UI (v)" : "Show UI (v)"}
