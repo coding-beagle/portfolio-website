@@ -207,7 +207,7 @@ export default function Title({
   }, []);
 
   useEffect(() => {
-    if (autoShake) {
+    if (autoShake && settledUI) {
       intervalRef.current = setInterval(() => {
         triggerShake();
       }, 500);
@@ -216,7 +216,7 @@ export default function Title({
       if (intervalRef.current) clearInterval(intervalRef.current);
       setIsHover(false);
     };
-  }, [autoShake, triggerShake]);
+  }, [autoShake, settledUI, triggerShake]);
 
   useEffect(() => {
     if (clicked) {
