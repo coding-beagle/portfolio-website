@@ -89,8 +89,8 @@ export default function Backrooms({ visibleUI }) {
     let fPlayerY = 8.0
     let fPlayerA = 0.0
 
-    const fBaseMoveSpeed = 0.02
-    const fBaseTurnSpeed = 0.005
+    const fBaseMoveSpeed = 0.01
+    const fBaseTurnSpeed = 0.003
 
     const maxDistToWall = 0.2
 

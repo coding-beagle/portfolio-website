@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { colourRGBtoColourRGBA } from "./usefulFunctions";
 
 export function VirtualJoypad({
     controls,
@@ -19,7 +20,7 @@ export function VirtualJoypad({
     });
 
     const knobSize =
-        typeof size === "number" ? size * 0.8 : `calc(${size} * 0.8)`;
+        typeof size === "number" ? size * 0.6 : `calc(${size} * 0.6)`;
 
     useEffect(() => {
         if (dragStateRef.current.active) return;
@@ -59,7 +60,7 @@ export function VirtualJoypad({
             const rect = joypad.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-            const maxOffset = Math.max(0, (rect.width - rect.width * 0.8) / 2);
+            const maxOffset = Math.max(0, (rect.width - rect.width * 0.6) / 2);
 
             let dx = clientX - centerX;
             let dy = clientY - centerY;
@@ -180,7 +181,7 @@ export function VirtualJoypad({
                 borderRadius: "50%",
                 width: size,
                 height: size,
-                backgroundColor: theme.accent,
+                backgroundColor: colourRGBtoColourRGBA(theme.accent, 150),
                 touchAction: "none",
                 userSelect: "none",
                 WebkitUserSelect: "none",
@@ -197,7 +198,7 @@ export function VirtualJoypad({
                     width: knobSize,
                     height: knobSize,
                     borderRadius: "50%",
-                    backgroundColor: theme.secondary,
+                    backgroundColor: colourRGBtoColourRGBA(theme.primary, 150),
                     pointerEvents: "none",
                 }}
             />

@@ -10,6 +10,11 @@ export const colourToRGB = (colourHex) => {
   };
 }
 
+export const colourRGBtoColourRGBA = (colourHex, alpha) => {
+  const aHex = alpha.toString(16).padStart(2, "0");
+  return `${colourHex}${aHex}`;
+}
+
 export const getCloseColour = (colourHex, varR = 10, varG = 5, varB = 5) => {
   const colour = {
     r: parseInt(colourHex.slice(1, 3), 16),
