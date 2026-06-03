@@ -46,6 +46,7 @@ import SquishBall from "./scenes/squishball";
 import Penguin from "./scenes/penguin";
 import Runes from "./scenes/runes";
 import Leaves from "./scenes/leaves";
+import Backrooms from "./scenes/backrooms";
 
 const Scenes = {
   0: { component: Snow, name: "snow" },
@@ -72,6 +73,7 @@ const Scenes = {
   21: { component: Penguin, name: "penguin" },
   22: { component: Runes, name: "runes" },
   23: { component: Leaves, name: "leaves" },
+  24: { component: Backrooms, name: "backrooms" },
 };
 
 export default function Title({

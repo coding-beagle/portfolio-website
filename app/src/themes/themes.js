@@ -4,6 +4,7 @@ const darkTheme = {
   accent: "#f4e9cd",
   secondaryAccent: "#5c946e",
   tertiaryAccent: "#e36588",
+  quarternaryAccent: "#F8E16C",
   font: "Roboto, sans-serif",
 };
 
@@ -13,6 +14,7 @@ const lightTheme = {
   accent: "#031926", // flipped with primary
   secondaryAccent: "#5c946e",
   tertiaryAccent: "#e36588",
+  quarternaryAccent: "#F8E16C",
   font: "Roboto, sans-serif",
 };
 
