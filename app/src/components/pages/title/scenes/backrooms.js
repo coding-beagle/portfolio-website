@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctions";
-import { floor, PI } from "three/src/nodes/math/MathNode.js";
+import { VirtualJoypad } from "../utilities/virtualJoypad";
 
 export default function Backrooms({ visibleUI }) {
   const { theme } = useTheme();
@@ -11,7 +11,59 @@ export default function Backrooms({ visibleUI }) {
   const moveSpeedRef = useRef(100);
   const turnSpeedRef = useRef(100);
   const fov = useRef(65);
+  const joystickDragRef = useRef({ active: false, touchId: null, anchorX: 0, anchorY: 0 });
+  const joystickInputRef = useRef({ x: 0, y: 0 });
+  const [joystickVisible, setJoystickVisible] = useState(false);
+  const [joystickPosition, setJoystickPosition] = useState({ x: 0, y: 0 });
+  const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
   const [, setRender] = useState(0);
+
+  const joystickSize = "10vh";
+
+  const resetJoystick = () => {
+    joystickDragRef.current = { active: false, touchId: null, anchorX: 0, anchorY: 0 };
+    joystickInputRef.current = { x: 0, y: 0 };
+    setJoystickOffset({ x: 0, y: 0 });
+    setJoystickVisible(false);
+  };
+
+  const updateJoystickFromPoint = (clientX, clientY) => {
+    const { anchorX, anchorY } = joystickDragRef.current;
+    const sizePx = window.innerHeight * 0.1;
+    const maxOffset = sizePx * 0.1;
+
+    let dx = clientX - anchorX;
+    let dy = clientY - anchorY;
+
+    const distance = Math.hypot(dx, dy);
+
+    if (distance > maxOffset && distance > 0) {
+      const scale = maxOffset / distance;
+      dx *= scale;
+      dy *= scale;
+    }
+
+    joystickInputRef.current = {
+      x: maxOffset > 0 ? dx / maxOffset : 0,
+      y: maxOffset > 0 ? dy / maxOffset : 0,
+    };
+
+    setJoystickOffset({ x: dx, y: dy });
+  };
+
+  const activateJoystick = (clientX, clientY, touchId = null) => {
+    joystickDragRef.current = {
+      active: true,
+      touchId,
+      anchorX: clientX,
+      anchorY: clientY,
+    };
+
+    joystickInputRef.current = { x: 0, y: 0 };
+    setJoystickPosition({ x: clientX, y: clientY });
+    setJoystickOffset({ x: 0, y: 0 });
+    setJoystickVisible(true);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,13 +161,13 @@ export default function Backrooms({ visibleUI }) {
     let wallShades = []
     for (let i = 0; i < maxShades; i++) {
       const percentColour = i / (maxShades - 1)
-      wallShades.push(colourToRGB(scaleColour('#000000', theme.quarternaryAccent, percentColour)))
+      wallShades.push(colourToRGB(scaleColour('#000000', themeRef.current.quarternaryAccent, percentColour)))
     }
 
     let floorShades = []
     for (let i = 0; i < maxShades; i++) {
       const percentColour = i / (maxShades - 1)
-      floorShades.push(colourToRGB(scaleColour('#000000', theme.primary, percentColour)))
+      floorShades.push(colourToRGB(scaleColour('#000000', themeRef.current.primary, percentColour)))
     }
 
 
@@ -123,12 +175,11 @@ export default function Backrooms({ visibleUI }) {
     const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
       const fFov = (fov.current * Math.PI / 180)
 
-      let distsToWall, prevDistsToWall, dxDistToWall, prevDxDistToWall, prevPrevDxDistToWall // for 'AO' on edges
+      let distsToWall, prevDistsToWall, dxDistToWall // for 'AO' on edges
 
       distsToWall = 0
       prevDistsToWall = 0
       dxDistToWall = 0
-      prevDxDistToWall = 0
 
       for (let x = -1.0; x < drawBufferWidth; x += 1.0) {
         const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
@@ -198,14 +249,13 @@ export default function Backrooms({ visibleUI }) {
           }
         }
 
-        prevDxDistToWall = dxDistToWall
         prevDistsToWall = distsToWall
 
       }
     }
 
-    const moveForward = () => {
-      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 // scale speeds to match scaling factor
+    const moveForward = (inputStrength = 1) => {
+      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 * inputStrength // scale speeds to match scaling factor
 
       fPlayerX += Math.sin(fPlayerA) * fMoveSpeed;
       fPlayerY += Math.cos(fPlayerA) * fMoveSpeed;
@@ -217,8 +267,8 @@ export default function Backrooms({ visibleUI }) {
 
     }
 
-    const moveBackward = () => {
-      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 // scale speeds to match scaling factor
+    const moveBackward = (inputStrength = 1) => {
+      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 * inputStrength // scale speeds to match scaling factor
 
       fPlayerX -= Math.sin(fPlayerA) * fMoveSpeed;
       fPlayerY -= Math.cos(fPlayerA) * fMoveSpeed;
@@ -229,13 +279,13 @@ export default function Backrooms({ visibleUI }) {
       }
     }
 
-    const turnLeft = () => {
-      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100
+    const turnLeft = (inputStrength = 1) => {
+      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100 * inputStrength
       fPlayerA -= fTurnSpeed;
     }
 
-    const turnRight = () => {
-      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100
+    const turnRight = (inputStrength = 1) => {
+      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100 * inputStrength
       fPlayerA += fTurnSpeed;
     }
 
@@ -266,6 +316,21 @@ export default function Backrooms({ visibleUI }) {
         }
       })
 
+      const joystickX = joystickInputRef.current.x
+      const joystickY = joystickInputRef.current.y
+
+      if (joystickY < -0.05) {
+        moveForward(Math.abs(joystickY))
+      } else if (joystickY > 0.05) {
+        moveBackward(Math.abs(joystickY))
+      }
+
+      if (joystickX < -0.05) {
+        turnLeft(Math.abs(joystickX))
+      } else if (joystickX > 0.05) {
+        turnRight(Math.abs(joystickX))
+      }
+
       animationFrameId = requestAnimationFrame(animate);
     }
 
@@ -290,6 +355,60 @@ export default function Backrooms({ visibleUI }) {
     };
   }, []);
 
+  useEffect(() => {
+    const handleMouseMove = (event) => {
+      if (!joystickDragRef.current.active || joystickDragRef.current.touchId !== null) return;
+      updateJoystickFromPoint(event.clientX, event.clientY);
+    };
+
+    const handleMouseUp = () => {
+      if (!joystickDragRef.current.active || joystickDragRef.current.touchId !== null) return;
+      resetJoystick();
+    };
+
+    const handleTouchMove = (event) => {
+      if (!joystickDragRef.current.active || joystickDragRef.current.touchId === null) return;
+
+      const activeTouch = Array.from(event.touches).find(
+        (touch) => touch.identifier === joystickDragRef.current.touchId
+      );
+
+      if (!activeTouch) return;
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      updateJoystickFromPoint(activeTouch.clientX, activeTouch.clientY);
+    };
+
+    const handleTouchEnd = (event) => {
+      if (!joystickDragRef.current.active || joystickDragRef.current.touchId === null) return;
+
+      const stillActive = Array.from(event.touches).some(
+        (touch) => touch.identifier === joystickDragRef.current.touchId
+      );
+
+      if (!stillActive) {
+        resetJoystick();
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd);
+    window.addEventListener("touchcancel", handleTouchEnd);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, []);
+
   // Update colorRef and all particles' colors on theme change
   useEffect(() => {
     // Update all existing particles' colors
@@ -298,14 +417,45 @@ export default function Backrooms({ visibleUI }) {
 
   return (
     <>
+      {joystickVisible && (
+        <VirtualJoypad
+          size={joystickSize}
+          knobOffsetX={joystickOffset.x}
+          knobOffsetY={joystickOffset.y}
+          style={{
+            zIndex: 3000,
+            position: "absolute",
+            left: joystickPosition.x,
+            top: joystickPosition.y,
+            transform: "translate(-50%, -50%)",
+            pointerEvents: "none",
+          }}
+        />
+      )}
       <canvas
         ref={canvasRef}
+        onMouseDown={(event) => {
+          activateJoystick(event.clientX, event.clientY)
+        }}
+        onTouchStart={(event) => {
+          const touch = event.changedTouches[0]
+
+          if (!touch) return
+
+          if (event.cancelable) {
+            event.preventDefault()
+          }
+
+          activateJoystick(touch.clientX, touch.clientY, touch.identifier)
+        }}
         style={{
           position: "absolute",
           top: 0,
           left: 0,
+          touchAction: "none",
         }}
       />
+
 
       {
         visibleUI && (
