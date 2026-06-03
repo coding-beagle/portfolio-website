@@ -154,7 +154,11 @@ export default function Backrooms({ visibleUI }) {
           }
         }
 
-        const nCeiling = (drawBufferHeight / 3.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
+        const nCeilingCurrent = (drawBufferHeight / 3.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
+        const nCeilingPrev = (drawBufferHeight / 3.0) - drawBufferHeight / (prevDistsToWall + 0.00000001) // avoid div by 0
+
+        const nCeiling = Math.min(nCeilingCurrent, nCeilingPrev)
+
         const nFloor = drawBufferHeight - nCeiling
 
         distsToWall = fDistanceToWall
@@ -164,6 +168,7 @@ export default function Backrooms({ visibleUI }) {
 
         const nShade = (fDistanceToWall) / (maxRayLength)
 
+        let topOccluded = false
         let nextAmbientOccluded = false
 
         for (let y = 0; y < drawBufferHeight; y++) {
@@ -172,8 +177,9 @@ export default function Backrooms({ visibleUI }) {
           } else if (y >= nCeiling && y <= nFloor) {
 
             // shade external edges
-            if (Math.abs(dxDistToWall) > distanceForShadingEdges) {
+            if (Math.abs(dxDistToWall) > distanceForShadingEdges || topOccluded === false) {
               setCoordsColor(x, y, AOColour.r, AOColour.g, AOColour.b)
+              topOccluded = true
             }
 
             else {
