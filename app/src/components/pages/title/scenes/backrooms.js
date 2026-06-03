@@ -10,7 +10,7 @@ export default function Backrooms({ visibleUI }) {
   const canvasRef = useRef(null);
   const moveSpeedRef = useRef(100);
   const turnSpeedRef = useRef(100);
-  const fov = useRef(90);
+  const fov = useRef(65);
   const [, setRender] = useState(0);
 
   useEffect(() => {
@@ -42,10 +42,6 @@ export default function Backrooms({ visibleUI }) {
 
     const maxDistToWall = 0.2
 
-    const nMapHeight = 16
-    const nMapWidth = 16
-
-
     const rayStep = 0.1
     const maxRayLength = 16.0
 
@@ -68,6 +64,9 @@ export default function Backrooms({ visibleUI }) {
     map += "#..............#"
     map += "#..............#"
     map += "################"
+
+    const nMapHeight = 17
+    const nMapWidth = 16
 
     const isWall = (x, y) => {
       const tileX = Math.floor(x)
@@ -101,8 +100,10 @@ export default function Backrooms({ visibleUI }) {
 
     const ceilingRGB = colourToRGB(themeRef.current.primary);
     const floorRGB = colourToRGB(scaleColour('#000000', themeRef.current.quarternaryAccent, 0.2));
+    const AOColour = colourToRGB("#000000")
 
     const maxShades = 128
+    const distanceForShadingEdges = 1.0
 
     // pre calculate possible shades of wall colour
     let wallShades = []
@@ -121,6 +122,13 @@ export default function Backrooms({ visibleUI }) {
     // take in a map string, player pos and fill sub canvas
     const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
       const fFov = (fov.current * Math.PI / 180)
+
+      let distsToWall, prevDistsToWall, dxDistToWall, prevDxDistToWall // for 'AO' on edges
+
+      distsToWall = 0
+      prevDistsToWall = 0
+      dxDistToWall = 0
+      prevDxDistToWall = 0
 
       for (let x = 0.0; x < drawBufferWidth; x += 1.0) {
         const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
@@ -149,21 +157,43 @@ export default function Backrooms({ visibleUI }) {
         const nCeiling = (drawBufferHeight / 3.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
         const nFloor = drawBufferHeight - nCeiling
 
+        distsToWall = fDistanceToWall
+        if (x > 0.0) {
+          dxDistToWall = distsToWall - prevDistsToWall
+        }
+
         const nShade = (fDistanceToWall) / (maxRayLength)
 
+        let nextAmbientOccluded = false
 
         for (let y = 0; y < drawBufferHeight; y++) {
-
           if (y < nCeiling) {
             setCoordsColor(x, y, ceilingRGB.r, ceilingRGB.g, ceilingRGB.b)
           } else if (y >= nCeiling && y <= nFloor) {
-            const colourShade = Math.floor(scaleValue(nShade, 0.0, 1.0, maxShades, 0));
-            const col = wallShades[colourShade]
-            setCoordsColor(x, y, col.r, col.g, col.b)
+
+            // shade external edges
+            if (Math.abs(dxDistToWall) > distanceForShadingEdges) {
+              setCoordsColor(x, y, AOColour.r, AOColour.g, AOColour.b)
+            }
+
+            else {
+              const colourShade = Math.floor(scaleValue(nShade, 0.0, 1.0, maxShades, 0));
+              const col = wallShades[colourShade]
+              setCoordsColor(x, y, col.r, col.g, col.b)
+            }
+            nextAmbientOccluded = true
           } else {
-            setCoordsColor(x, y, floorRGB.r, floorRGB.g, floorRGB.b)
+            if (nextAmbientOccluded) {
+              setCoordsColor(x, y, AOColour.r, AOColour.g, AOColour.b) // fake AO
+              nextAmbientOccluded = false
+            } else {
+              setCoordsColor(x, y, floorRGB.r, floorRGB.g, floorRGB.b)
+            }
           }
         }
+
+        prevDxDistToWall = dxDistToWall
+        prevDistsToWall = distsToWall
 
       }
     }

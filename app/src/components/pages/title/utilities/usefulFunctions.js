@@ -331,3 +331,7 @@ export const distanceBetweenTwoPoints = (point1, point2) => {
 export const randomFloatBetweenTwo = (num1, num2) => {
   return scaleValue(Math.random(), 0, 1, num2, num1)
 }
+
+export const averageArray = (arr) => {
+  return arr.reduce((a, b) => a + b) / arr.length;
+}
