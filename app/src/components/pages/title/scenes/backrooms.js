@@ -32,8 +32,8 @@ export default function Backrooms({ visibleUI }) {
 
     const screenBuffer = ctx.createImageData(drawBufferWidth, drawBufferHeight); // create a subcanvas to handle scaling??
 
-    let fPlayerX = 8.0  // starting positions
-    let fPlayerY = 8.0
+    let fPlayerX = 4.5  // starting positions (centred in a room cell, away from grid walls)
+    let fPlayerY = 4.5
     let fPlayerA = 0.0
 
     const fBaseMoveSpeed = 0.02
@@ -41,38 +41,42 @@ export default function Backrooms({ visibleUI }) {
 
     const maxDistToWall = 0.2
 
-    const nMapHeight = 16
-    const nMapWidth = 16
-
-
     const rayStep = 0.1
     const maxRayLength = 16.0
 
-    let map = ""
+    // deterministic hash: returns 0.0–1.0 for any integer tile coordinate
+    const tileHash = (tx, ty) => {
+      let h = Math.imul(tx, 374761393) + Math.imul(ty, 668265263)
+      h = Math.imul(h ^ (h >>> 13), 1274126177)
+      h = h ^ (h >>> 16)
+      return (h >>> 0) / 0xffffffff
+    }
 
-    map += "################"
-    map += "#..............#"
-    map += "#..###.........#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#...########...#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#.........###..#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#...####.......#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "################"
+    // room grid: walls placed on a regular room grid + random interior walls
+    const roomSize = 8          // corridor grid period
+    const wallDensity = 0.18    // probability of a random interior wall tile
 
     const isWall = (x, y) => {
-      const tileX = ((Math.floor(x) % nMapWidth) + nMapWidth) % nMapWidth
-      const tileY = ((Math.floor(y) % nMapHeight) + nMapHeight) % nMapHeight
-      if (tileX < 0 || tileX >= nMapWidth || tileY < 0 || tileY >= nMapHeight) return true
-      return map[tileY * nMapWidth + tileX] === "#"
+      const tx = Math.floor(x)
+      const ty = Math.floor(y)
+
+      // periodic room-grid walls (backrooms corridor structure)
+      if (tx % roomSize === 0 || ty % roomSize === 0) {
+        // leave doorways: open one tile per wall segment
+        const doorHash = tileHash(Math.floor(tx / roomSize), Math.floor(ty / roomSize))
+        const doorPos = Math.floor(doorHash * (roomSize - 1)) + 1
+        const localX = ((tx % roomSize) + roomSize) % roomSize
+        const localY = ((ty % roomSize) + roomSize) % roomSize
+        if (tx % roomSize === 0 && localY === doorPos) return false
+        if (ty % roomSize === 0 && localX === doorPos) return false
+        return true
+      }
+
+      // random interior walls, except near spawn
+      const spawnDist = Math.max(Math.abs(tx - Math.floor(fPlayerX)), Math.abs(ty - Math.floor(fPlayerY)))
+      if (spawnDist <= 2) return false
+
+      return tileHash(tx, ty) < wallDensity
     }
 
     // check player bubble is inside wall by generating areas around player bubble 
@@ -117,30 +121,22 @@ export default function Backrooms({ visibleUI }) {
     }
 
 
-    // take in a map string, player pos and fill sub canvas
-    const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
-      const fFov = (fov.current * Math.PI / 180) / 2
+    // fill sub canvas
+    const drawScreen = (fPlayerX, fPlayerY, fPlayerA) => {
+      const fFov = (fov.current * Math.PI / 180)
 
       for (let x = 0.0; x < drawBufferWidth; x += 1.0) {
-        const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
+        const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov
 
         let fDistanceToWall = 0.0
 
         const fEyeX = Math.sin(fRayAngle)
         const fEyeY = Math.cos(fRayAngle)
 
-        // cast ray until it reaches a wall, or goes out of bounds
+        // cast ray until it reaches a wall or max distance
         for (let deltaRay = 0.0; deltaRay < maxRayLength; deltaRay += rayStep) {
-          const nTestX = Math.floor(fPlayerX + fEyeX * fDistanceToWall)
-          const nTestY = Math.floor(fPlayerY + fEyeY * fDistanceToWall)
-
           fDistanceToWall = deltaRay
-
-          // ray has exceeded map boundary
-          if (nTestX < 0 || nTestX >= nMapWidth || nTestY < 0 || nTestY >= nMapHeight)
-            break
-          // ray has reached a wall
-          else if (map[nTestY * nMapWidth + nTestX] === "#") {
+          if (isWall(fPlayerX + fEyeX * fDistanceToWall, fPlayerY + fEyeY * fDistanceToWall)) {
             break
           }
         }
@@ -156,7 +152,7 @@ export default function Backrooms({ visibleUI }) {
           if (y < nCeiling) {
             setCoordsColor(x, y, ceilingRGB.r, ceilingRGB.g, ceilingRGB.b)
           } else if (y >= nCeiling && y <= nFloor) {
-            const colourShade = Math.floor(scaleValue(nShade, 0.0, 1.0, maxShades, 0));
+            const colourShade = Math.min(maxShades - 1, Math.floor(scaleValue(nShade, 0.0, 1.0, maxShades, 0)));
             const col = wallShades[colourShade]
             setCoordsColor(x, y, col.r, col.g, col.b)
           } else {
@@ -218,7 +214,7 @@ export default function Backrooms({ visibleUI }) {
     // redraw loop
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawScreen(map, fPlayerX, fPlayerY, fPlayerA);
+      drawScreen(fPlayerX, fPlayerY, fPlayerA);
 
       offCtx.putImageData(screenBuffer, 0, 0);
       ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
