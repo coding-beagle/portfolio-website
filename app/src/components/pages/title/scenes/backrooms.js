@@ -1,16 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
 import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 import { VirtualJoypad } from "../utilities/virtualJoypad";
+import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Backrooms({ visibleUI }) {
   const { theme } = useTheme();
+  const mobile = useContext(MobileContext);
   const themeRef = useRef(theme);
   const canvasRef = useRef(null);
   const moveSpeedRef = useRef(100);
   const turnSpeedRef = useRef(100);
-  const fov = useRef(65);
+  const fov = useRef(mobile ? 40 : 65);
   const joystickDragRef = useRef({ active: false, touchId: null, anchorX: 0, anchorY: 0 });
   const joystickInputRef = useRef({ x: 0, y: 0 });
   const [joystickVisible, setJoystickVisible] = useState(false);
@@ -80,8 +82,8 @@ export default function Backrooms({ visibleUI }) {
     window.addEventListener("resize", resizeCanvas);
     const ctx = canvas.getContext("2d");
 
-    const drawBufferWidth = 640;
-    const drawBufferHeight = 480;
+    const drawBufferWidth = mobile ? 480 : 640;
+    const drawBufferHeight = mobile ? 640 : 480;
 
     const screenBuffer = ctx.createImageData(drawBufferWidth, drawBufferHeight); // create a subcanvas to handle scaling??
 
@@ -99,6 +101,7 @@ export default function Backrooms({ visibleUI }) {
 
     let map = ""
 
+    // todo make this doomscroll
     map += "################"
     map += "#..............#"
     map += "#..###.........#"
@@ -205,8 +208,10 @@ export default function Backrooms({ visibleUI }) {
           }
         }
 
-        const nCeilingCurrent = (drawBufferHeight / 3.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
-        const nCeilingPrev = (drawBufferHeight / 3.0) - drawBufferHeight / (prevDistsToWall + 0.00000001) // avoid div by 0
+        const scaledDrawBufferHeight = mobile ? drawBufferHeight / 3.0 : drawBufferHeight / 3.0
+
+        const nCeilingCurrent = scaledDrawBufferHeight - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
+        const nCeilingPrev = scaledDrawBufferHeight - drawBufferHeight / (prevDistsToWall + 0.00000001) // avoid div by 0
 
         const nCeiling = Math.min(nCeilingCurrent, nCeilingPrev)
 
