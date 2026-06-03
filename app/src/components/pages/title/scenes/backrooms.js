@@ -45,7 +45,7 @@ export default function Backrooms({ visibleUI }) {
     const nMapWidth = 16
 
 
-    const rayStep = 0.05
+    const rayStep = 0.1
     const maxRayLength = 16.0
 
     let map = ""
@@ -69,8 +69,8 @@ export default function Backrooms({ visibleUI }) {
     map += "################"
 
     const isWall = (x, y) => {
-      const tileX = Math.floor(x)
-      const tileY = Math.floor(y)
+      const tileX = ((Math.floor(x) % nMapWidth) + nMapWidth) % nMapWidth
+      const tileY = ((Math.floor(y) % nMapHeight) + nMapHeight) % nMapHeight
       if (tileX < 0 || tileX >= nMapWidth || tileY < 0 || tileY >= nMapHeight) return true
       return map[tileY * nMapWidth + tileX] === "#"
     }
@@ -119,7 +119,7 @@ export default function Backrooms({ visibleUI }) {
 
     // take in a map string, player pos and fill sub canvas
     const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
-      const fFov = (fov.current * Math.PI / 180)
+      const fFov = (fov.current * Math.PI / 180) / 2
 
       for (let x = 0.0; x < drawBufferWidth; x += 1.0) {
         const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
