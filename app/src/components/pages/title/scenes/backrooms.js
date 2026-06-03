@@ -123,14 +123,14 @@ export default function Backrooms({ visibleUI }) {
     const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
       const fFov = (fov.current * Math.PI / 180)
 
-      let distsToWall, prevDistsToWall, dxDistToWall, prevDxDistToWall // for 'AO' on edges
+      let distsToWall, prevDistsToWall, dxDistToWall, prevDxDistToWall, prevPrevDxDistToWall // for 'AO' on edges
 
       distsToWall = 0
       prevDistsToWall = 0
       dxDistToWall = 0
       prevDxDistToWall = 0
 
-      for (let x = 0.0; x < drawBufferWidth; x += 1.0) {
+      for (let x = -1.0; x < drawBufferWidth; x += 1.0) {
         const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
 
         let fDistanceToWall = 0.0
