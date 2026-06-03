@@ -1,16 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { colourToRGB } from "../utilities/usefulFunctions";
-import { PI } from "three/src/nodes/math/MathNode.js";
+import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 
 export default function Backrooms({ visibleUI }) {
   const { theme } = useTheme();
   const themeRef = useRef(theme);
   const canvasRef = useRef(null);
-  const particleCountRef = useRef(200);
-  const simulationSpeedRef = useRef(100);
-  const colorRef = useRef(theme.accent);
+  const moveSpeedRef = useRef(100);
+  const turnSpeedRef = useRef(100);
+  const fov = useRef(90);
   const [, setRender] = useState(0);
 
   useEffect(() => {
@@ -39,16 +38,14 @@ export default function Backrooms({ visibleUI }) {
 
     const fBaseMoveSpeed = 0.02
     const fBaseTurnSpeed = 0.005
-    const fMoveSpeed = fBaseMoveSpeed // scale speeds to match scaling factor
-    const fTurnSpeed = fBaseTurnSpeed
 
     const maxDistToWall = 0.2
 
     const nMapHeight = 16
     const nMapWidth = 16
 
-    const fFov = 3.1415 / 4.0
-    const rayStep = 0.1
+
+    const rayStep = 0.05
     const maxRayLength = 16.0
 
     let map = ""
@@ -102,10 +99,28 @@ export default function Backrooms({ visibleUI }) {
     }
 
     const ceilingRGB = colourToRGB(themeRef.current.primary);
-    const floorRGB = colourToRGB(themeRef.current.secondary);
+    const floorRGB = colourToRGB(scaleColour('#000000', themeRef.current.quarternaryAccent, 0.2));
+
+    const maxShades = 128
+
+    // pre calculate possible shades of wall colour
+    let wallShades = []
+    for (let i = 0; i < maxShades; i++) {
+      const percentColour = i / (maxShades - 1)
+      wallShades.push(colourToRGB(scaleColour('#000000', theme.quarternaryAccent, percentColour)))
+    }
+
+    let floorShades = []
+    for (let i = 0; i < maxShades; i++) {
+      const percentColour = i / (maxShades - 1)
+      floorShades.push(colourToRGB(scaleColour('#000000', theme.primary, percentColour)))
+    }
+
 
     // take in a map string, player pos and fill sub canvas
     const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
+      const fFov = (fov.current * Math.PI / 180)
+
       for (let x = 0.0; x < drawBufferWidth; x += 1.0) {
         const fRayAngle = (fPlayerA - fFov / 2.0) + (x / (drawBufferWidth * 1.0)) * fFov // convert nScreenWidth to float?
 
@@ -130,10 +145,10 @@ export default function Backrooms({ visibleUI }) {
           }
         }
 
-        const nCeiling = (drawBufferHeight / 2.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
+        const nCeiling = (drawBufferHeight / 3.0) - drawBufferHeight / (fDistanceToWall + 0.00000001) // avoid div by 0
         const nFloor = drawBufferHeight - nCeiling
 
-        const nShade = (fDistanceToWall) * 255 / (maxRayLength)
+        const nShade = (fDistanceToWall) / (maxRayLength)
 
 
         for (let y = 0; y < drawBufferHeight; y++) {
@@ -141,9 +156,11 @@ export default function Backrooms({ visibleUI }) {
           if (y < nCeiling) {
             setCoordsColor(x, y, ceilingRGB.r, ceilingRGB.g, ceilingRGB.b)
           } else if (y >= nCeiling && y <= nFloor) {
-            setCoordsColor(x, y, 255 - nShade, 255 - nShade, 255 - nShade)
+            const colourShade = Math.floor(scaleValue(nShade, 0.0, 1.0, maxShades, 0));
+            const col = wallShades[colourShade]
+            setCoordsColor(x, y, col.r, col.g, col.b)
           } else {
-            setCoordsColor(x, y, 0, 0, 0)
+            setCoordsColor(x, y, floorRGB.r, floorRGB.g, floorRGB.b)
           }
         }
 
@@ -151,6 +168,8 @@ export default function Backrooms({ visibleUI }) {
     }
 
     const moveForward = () => {
+      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 // scale speeds to match scaling factor
+
       fPlayerX += Math.sin(fPlayerA) * fMoveSpeed;
       fPlayerY += Math.cos(fPlayerA) * fMoveSpeed;
 
@@ -162,6 +181,8 @@ export default function Backrooms({ visibleUI }) {
     }
 
     const moveBackward = () => {
+      const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 // scale speeds to match scaling factor
+
       fPlayerX -= Math.sin(fPlayerA) * fMoveSpeed;
       fPlayerY -= Math.cos(fPlayerA) * fMoveSpeed;
 
@@ -172,10 +193,12 @@ export default function Backrooms({ visibleUI }) {
     }
 
     const turnLeft = () => {
+      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100
       fPlayerA -= fTurnSpeed;
     }
 
     const turnRight = () => {
+      const fTurnSpeed = fBaseTurnSpeed * turnSpeedRef.current / 100
       fPlayerA += fTurnSpeed;
     }
 
@@ -253,17 +276,24 @@ export default function Backrooms({ visibleUI }) {
             <ChangerGroup
               valueArrays={[
                 {
-                  title: "Particle Count:",
-                  valueRef: particleCountRef,
-                  minValue: "100",
-                  maxValue: "10000",
+                  title: "Move speed:",
+                  valueRef: moveSpeedRef,
+                  minValue: "1",
+                  maxValue: "200.0",
                   type: "slider",
                 },
                 {
-                  title: "Simulation Speed:",
-                  valueRef: simulationSpeedRef,
+                  title: "Turn speed:",
+                  valueRef: turnSpeedRef,
                   minValue: "1",
                   maxValue: "200.0",
+                  type: "slider",
+                },
+                {
+                  title: "FoV angle:",
+                  valueRef: fov,
+                  minValue: "40",
+                  maxValue: "110.0",
                   type: "slider",
                 },
               ]}
