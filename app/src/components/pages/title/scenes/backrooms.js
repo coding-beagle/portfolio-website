@@ -4,6 +4,7 @@ import { ChangerGroup } from "../utilities/valueChangers";
 import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 import { VirtualJoypad } from "../utilities/virtualJoypad";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import { IconGroup } from "../utilities/popovers";
 
 export default function Backrooms({ visibleUI }) {
   const { theme } = useTheme();
@@ -99,35 +100,104 @@ export default function Backrooms({ visibleUI }) {
     const rayStep = 0.1
     const maxRayLength = 16.0
 
-    let map = ""
+    const CHUNK_SIZE = 16
+    const worldChunkMap = new Map()
+    const maxVisibleTiles = Math.ceil(maxRayLength)
+    const chunkLoadRadius = Math.ceil((maxVisibleTiles + 8) / CHUNK_SIZE) + 1
 
-    // todo make this doomscroll
-    map += "################"
-    map += "#..............#"
-    map += "#..###.........#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#...########...#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#.........###..#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "#...####.......#"
-    map += "#..............#"
-    map += "#..............#"
-    map += "################"
+    const getChunkKey = (chunkX, chunkY) => `${chunkX},${chunkY}`
 
-    const nMapHeight = 17
-    const nMapWidth = 16
+    const worldToChunk = (tileX, tileY) => {
+      const chunkX = Math.floor(tileX / CHUNK_SIZE)
+      const chunkY = Math.floor(tileY / CHUNK_SIZE)
+      const localX = ((tileX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE
+      const localY = ((tileY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE
+
+      return { chunkX, chunkY, localX, localY }
+    }
+
+    const generateChunk = () => {
+      const tiles = new Array(CHUNK_SIZE * CHUNK_SIZE)
+
+      for (let y = 0; y < CHUNK_SIZE; y++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          const border = x === 0 || y === 0 || x === CHUNK_SIZE - 1 || y === CHUNK_SIZE - 1
+          const borderChance = border ? 0.45 : 0.2
+          tiles[y * CHUNK_SIZE + x] = Math.random() < borderChance ? "#" : "."
+        }
+      }
+
+      // add a couple random doorways to avoid fully-sealed borders
+      const doorwayCount = 1 + Math.floor(Math.random() * 3)
+      for (let i = 0; i < doorwayCount; i++) {
+        const side = Math.floor(Math.random() * 4)
+        const offset = 1 + Math.floor(Math.random() * (CHUNK_SIZE - 2))
+        if (side === 0) tiles[offset] = "." // top
+        if (side === 1) tiles[(CHUNK_SIZE - 1) * CHUNK_SIZE + offset] = "." // bottom
+        if (side === 2) tiles[offset * CHUNK_SIZE] = "." // left
+        if (side === 3) tiles[offset * CHUNK_SIZE + (CHUNK_SIZE - 1)] = "." // right
+      }
+
+      return tiles
+    }
+
+    const ensureChunk = (chunkX, chunkY) => {
+      const key = getChunkKey(chunkX, chunkY)
+      if (!worldChunkMap.has(key)) {
+        worldChunkMap.set(key, generateChunk())
+      }
+      return worldChunkMap.get(key)
+    }
+
+    const carveOpenAreaAt = (worldX, worldY, radius = 1) => {
+      const centerTileX = Math.floor(worldX)
+      const centerTileY = Math.floor(worldY)
+
+      for (let y = centerTileY - radius; y <= centerTileY + radius; y++) {
+        for (let x = centerTileX - radius; x <= centerTileX + radius; x++) {
+          const { chunkX, chunkY, localX, localY } = worldToChunk(x, y)
+          const chunk = ensureChunk(chunkX, chunkY)
+          chunk[localY * CHUNK_SIZE + localX] = "."
+        }
+      }
+    }
+
+    const maintainLoadedChunks = (worldX, worldY) => {
+      const centerChunkX = Math.floor(worldX / CHUNK_SIZE)
+      const centerChunkY = Math.floor(worldY / CHUNK_SIZE)
+
+      for (let chunkY = centerChunkY - chunkLoadRadius; chunkY <= centerChunkY + chunkLoadRadius; chunkY++) {
+        for (let chunkX = centerChunkX - chunkLoadRadius; chunkX <= centerChunkX + chunkLoadRadius; chunkX++) {
+          ensureChunk(chunkX, chunkY)
+        }
+      }
+
+      // keep a little extra margin and drop far chunks so memory stays bounded while world appears infinite
+      const unloadRadius = chunkLoadRadius + 1
+      for (const key of worldChunkMap.keys()) {
+        const [chunkXText, chunkYText] = key.split(",")
+        const chunkX = Number(chunkXText)
+        const chunkY = Number(chunkYText)
+        if (
+          Math.abs(chunkX - centerChunkX) > unloadRadius ||
+          Math.abs(chunkY - centerChunkY) > unloadRadius
+        ) {
+          worldChunkMap.delete(key)
+        }
+      }
+
+    }
+
+    const getTile = (tileX, tileY) => {
+      const { chunkX, chunkY, localX, localY } = worldToChunk(tileX, tileY)
+      const chunk = ensureChunk(chunkX, chunkY)
+      return chunk[localY * CHUNK_SIZE + localX]
+    }
 
     const isWall = (x, y) => {
       const tileX = Math.floor(x)
       const tileY = Math.floor(y)
-      if (tileX < 0 || tileX >= nMapWidth || tileY < 0 || tileY >= nMapHeight) return true
-      return map[tileY * nMapWidth + tileX] === "#"
+      return getTile(tileX, tileY) === "#"
     }
 
     // check player bubble is inside wall by generating areas around player bubble 
@@ -153,7 +223,7 @@ export default function Backrooms({ visibleUI }) {
       screenBuffer.data[rIndex + 3] = a
     }
 
-    const ceilingRGB = colourToRGB(themeRef.current.primary);
+    const ceilingRGB = colourToRGB(scaleColour('#000000', themeRef.current.quarternaryAccent, 0.2));
     const floorRGB = colourToRGB(scaleColour('#000000', themeRef.current.quarternaryAccent, 0.2));
     const AOColour = colourToRGB("#000000")
 
@@ -175,7 +245,7 @@ export default function Backrooms({ visibleUI }) {
 
 
     // take in a map string, player pos and fill sub canvas
-    const drawScreen = (map, fPlayerX, fPlayerY, fPlayerA) => {
+    const drawScreen = (fPlayerX, fPlayerY, fPlayerA) => {
       const fFov = (fov.current * Math.PI / 180)
 
       let distsToWall, prevDistsToWall, dxDistToWall // for 'AO' on edges
@@ -199,11 +269,8 @@ export default function Backrooms({ visibleUI }) {
 
           fDistanceToWall = deltaRay
 
-          // ray has exceeded map boundary
-          if (nTestX < 0 || nTestX >= nMapWidth || nTestY < 0 || nTestY >= nMapHeight)
-            break
           // ray has reached a wall
-          else if (map[nTestY * nMapWidth + nTestX] === "#") {
+          if (getTile(nTestX, nTestY) === "#") {
             break
           }
         }
@@ -306,11 +373,16 @@ export default function Backrooms({ visibleUI }) {
     offscreen.height = drawBufferHeight;
     const offCtx = offscreen.getContext("2d");
 
+    maintainLoadedChunks(fPlayerX, fPlayerY)
+    // one-time spawn safety so the player doesn't initialize inside a wall
+    carveOpenAreaAt(fPlayerX, fPlayerY, 1)
+
     let animationFrameId;
     // redraw loop
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawScreen(map, fPlayerX, fPlayerY, fPlayerA);
+      maintainLoadedChunks(fPlayerX, fPlayerY)
+      drawScreen(fPlayerX, fPlayerY, fPlayerA);
 
       offCtx.putImageData(screenBuffer, 0, 0);
       ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
@@ -358,7 +430,7 @@ export default function Backrooms({ visibleUI }) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [mobile]);
 
   useEffect(() => {
     const handleMouseMove = (event) => {
@@ -488,9 +560,13 @@ export default function Backrooms({ visibleUI }) {
                   maxValue: "110.0",
                   type: "slider",
                 },
+
               ]}
               rerenderSetter={setRender}
             />
+            <IconGroup icons={[{ type: "MOUSE", text: "Click and drag the virtual joypad\n to move around" },
+            { type: "KEY", text: "Use I,J,K,L to move as well!" }
+            ]} />
           </div>
         )
       }

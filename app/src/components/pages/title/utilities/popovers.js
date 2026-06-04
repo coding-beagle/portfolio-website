@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   faArrowsUpDownLeftRight,
+  faKeyboard,
   faMagnifyingGlass,
   faMouse,
   faRotate,
@@ -75,11 +76,16 @@ export function GyroToolTip({ text }) {
   return GenericToolTip(text, faRotate);
 }
 
+export function KeyboardToolTip({ text }) {
+  return GenericToolTip(text, faKeyboard);
+}
+
 export const iconTypes = {
   MOUSE: MouseTooltip,
   ZOOMABLE: ZoomableToolTip,
   PANNABLE: PannableToolTip,
-  GYRO: GyroToolTip
+  GYRO: GyroToolTip,
+  KEY: KeyboardToolTip
 }
 
 // icons is an array of {type: validType, text: 'text'}
