@@ -326,6 +326,85 @@ export default function Backrooms({ visibleUI }) {
       }
     }
 
+    const drawMiniMap = (playerX, playerY, playerA) => {
+      const tileRadius = mobile ? 5 : 6
+      const tileSize = mobile ? 15 : 15
+      const miniMapPadding = mobile ? 50 : 20
+      const borderSize = 2
+
+      const tilesPerSide = tileRadius * 2 + 1
+      const mapWidth = tilesPerSide * tileSize
+      const mapHeight = tilesPerSide * tileSize
+      const panelX = (canvas.width - mapWidth) * 0.5
+      const panelY = miniMapPadding
+      const centerX = panelX + mapWidth * 0.5
+      const centerY = panelY + mapHeight * 0.5
+
+      const wallColor = `rgb(${Math.round(scaleValue(ceilingRGB.r, 0, 255, 110, 240))}, ${Math.round(scaleValue(ceilingRGB.g, 0, 255, 110, 240))}, ${Math.round(scaleValue(ceilingRGB.b, 0, 255, 110, 240))})`
+      const floorColor = `rgb(${Math.round(scaleValue(floorRGB.r, 0, 255, 15, 90))}, ${Math.round(scaleValue(floorRGB.g, 0, 255, 15, 90))}, ${Math.round(scaleValue(floorRGB.b, 0, 255, 15, 90))})`
+      const playerColor = `rgb(${Math.round(255 - ceilingRGB.r * 0.4)}, ${Math.round(240 - ceilingRGB.g * 0.35)}, ${Math.round(80 + ceilingRGB.b * 0.15)})`
+
+      ctx.save()
+      ctx.globalAlpha = 0.92
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)"
+      ctx.fillRect(panelX - borderSize, panelY - borderSize, mapWidth + borderSize * 2, mapHeight + borderSize * 2)
+      ctx.beginPath()
+      ctx.rect(panelX, panelY, mapWidth, mapHeight)
+      ctx.clip()
+
+      const startTileX = Math.floor(playerX) - tileRadius - 1
+      const endTileX = Math.floor(playerX) + tileRadius + 1
+      const startTileY = Math.floor(playerY) - tileRadius - 1
+      const endTileY = Math.floor(playerY) + tileRadius + 1
+
+      for (let worldTileY = startTileY; worldTileY <= endTileY; worldTileY++) {
+        for (let worldTileX = startTileX; worldTileX <= endTileX; worldTileX++) {
+          const tile = getTile(worldTileX, worldTileY)
+
+          const drawX = centerX + (worldTileX - playerX) * tileSize
+          const drawY = centerY + (worldTileY - playerY) * tileSize
+
+          ctx.fillStyle = tile === "#" ? wallColor : floorColor
+          ctx.fillRect(drawX, drawY, tileSize, tileSize)
+        }
+      }
+
+      const playerMapX = centerX
+      const playerMapY = centerY
+      const playerRadius = Math.max(2, Math.floor(tileSize * 0.22))
+      const coneLength = tileSize * 2.2
+      const fovRadians = (fov.current * Math.PI / 180)
+      const halfFov = fovRadians * 0.5
+
+      ctx.fillStyle = playerColor
+      ctx.beginPath()
+      ctx.arc(playerMapX, playerMapY, playerRadius, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = `rgba(${Math.round(255 - ceilingRGB.r * 0.4)}, ${Math.round(240 - ceilingRGB.g * 0.35)}, ${Math.round(80 + ceilingRGB.b * 0.15)}, 0.22)`
+      ctx.beginPath()
+      ctx.moveTo(playerMapX, playerMapY)
+      ctx.arc(playerMapX, playerMapY, coneLength, - playerA - halfFov + (Math.PI / 2), - playerA + halfFov + (Math.PI / 2))
+      ctx.closePath()
+      ctx.fill()
+
+      ctx.strokeStyle = playerColor
+      ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.16))
+      ctx.beginPath()
+      ctx.moveTo(playerMapX, playerMapY)
+      ctx.lineTo(
+        playerMapX + Math.sin(playerA - halfFov) * coneLength,
+        playerMapY + Math.cos(playerA - halfFov) * coneLength
+      )
+      ctx.moveTo(playerMapX, playerMapY)
+      ctx.lineTo(
+        playerMapX + Math.sin(playerA + halfFov) * coneLength,
+        playerMapY + Math.cos(playerA + halfFov) * coneLength
+      )
+      ctx.stroke()
+      ctx.restore()
+    }
+
     const moveForward = (inputStrength = 1) => {
       const fMoveSpeed = fBaseMoveSpeed * moveSpeedRef.current / 100 * inputStrength // scale speeds to match scaling factor
 
@@ -386,6 +465,7 @@ export default function Backrooms({ visibleUI }) {
 
       offCtx.putImageData(screenBuffer, 0, 0);
       ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+      drawMiniMap(fPlayerX, fPlayerY, fPlayerA)
 
       keyPressCallbacks.forEach((cb) => {
         if (keysPressed.has(cb.key)) {
