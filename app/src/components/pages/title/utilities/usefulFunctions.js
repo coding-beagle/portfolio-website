@@ -84,6 +84,8 @@ export const scaleColour = (col1, col2, percent) => {
   const bStep = colour2.b - colour1.b;
   const lowerB = colour1.b;
 
+  percent = clamp(percent, 0.0, 1.0);
+
   const r = Math.round(lowerR + rStep * percent);
   const g = Math.round(lowerG + gStep * percent);
   const b = Math.round(lowerB + bStep * percent);

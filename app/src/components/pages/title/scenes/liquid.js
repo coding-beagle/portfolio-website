@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
 import { ChangerGroup } from "../utilities/valueChangers";
-import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, inRect, scaleValue } from "../utilities/usefulFunctions";
+import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, inRect, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
 export default function Liquid({ visibleUI }) {
@@ -174,7 +174,6 @@ export default function Liquid({ visibleUI }) {
         this.x = x;
         this.y = y;
         this.value = 0;
-        this.pressure = 1;
         this.parent = parent;
         this.type = initType;
         this.nextValue = 0;
@@ -389,14 +388,19 @@ export default function Liquid({ visibleUI }) {
             if (Math.random() > 0.99 && (ignoreCenterX || ignoreCenterY)) {
               const setNeighbourToWallFromDirection = (direction) => {
                 const index = getNeighbourIndexFromGrid(gridWidth, gridHeight, direction, x + y * gridWidth);
-                if (index !== -1) {
+                if (index !== -1 && Math.random() > 0.5) {
                   this.grid[index].type = cellTypes.WALL;
                 }
               }
+
               setNeighbourToWallFromDirection(DIRECTIONS.N);
               setNeighbourToWallFromDirection(DIRECTIONS.W);
               setNeighbourToWallFromDirection(DIRECTIONS.E);
               setNeighbourToWallFromDirection(DIRECTIONS.S);
+              setNeighbourToWallFromDirection(DIRECTIONS.NE);
+              setNeighbourToWallFromDirection(DIRECTIONS.NW);
+              setNeighbourToWallFromDirection(DIRECTIONS.SE);
+              setNeighbourToWallFromDirection(DIRECTIONS.SW);
               this.grid[x + y * gridWidth].type = cellTypes.WALL
             }
           }
@@ -478,8 +482,8 @@ export default function Liquid({ visibleUI }) {
 
             case cellTypes.WATER:
               if (cell.value > 0.05) {
-                const waterColour = colourToRGB(themeRef.current.secondary);
-                this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g - Math.floor(cell.value * 10), waterColour.b - Math.floor(cell.value * 10));
+                const waterColour = colourToRGB(scaleColour(themeRef.current.secondary, themeRef.current.primary, ((cell.value + 0.1) / 8.0)));
+                this.setXYRGB(cell.x, cell.y, waterColour.r, waterColour.g, waterColour.b);
               }
               break;
             case cellTypes.TAP:
@@ -601,7 +605,7 @@ export default function Liquid({ visibleUI }) {
     const handleWheel = (e) => {
       e.preventDefault();
       const stepSize = 0.5; // Smaller steps for smoother control
-      const newSize = brushSizeRef.current + (Math.sign(e.deltaY) * stepSize);
+      const newSize = brushSizeRef.current - (Math.sign(e.deltaY) * stepSize);
       brushSizeRef.current = Math.max(1, Math.min(10, newSize));
     }
 
