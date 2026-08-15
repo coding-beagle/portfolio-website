@@ -1,11 +1,10 @@
 DEFAULT: help
 
-# Print available targets with descriptions
-# help: Print available targets with descriptions
+# print available targets with descriptions
 help:
 	@echo ""
-	@echo "Available targets:"
-	@awk '/^[ \t]*#/ { sub(/^[ \t]*#[ \t]?/, ""); c=$$0; next } /^[a-zA-Z_0-9\-]+:/ { n=split($$0, a, ":"); printf "  %-20s : %s\n", a[1], c; c="" }' $(MAKEFILE_LIST)
+	@echo "  Available targets:"
+	@awk '/^[ \t]*#/ { sub(/^[ \t]*#[ \t]?/, "", $$0); c=$$0; next } /^[a-zA-Z_0-9\-]+:/ { n=split($$0, a, ":"); printf "  \033[1;32m%-20s\033[0m : \033[36m%s\033[0m\n", a[1], c; c="" }' $(MAKEFILE_LIST)
 	@echo ""
 
 # run the development vesion of the app
@@ -36,7 +35,7 @@ build:
 	npm run build; \
 	cd -; \
 
-# CI only, sends the built app to the folder where the site is hosted
+# prod only, sends the built app to the folder where the site is hosted
 deploy_manual:
 	rm -rf /home/nteagvxe/public_html/*; \
 	cp -r app/build/* /home/nteagvxe/public_html/; \
