@@ -15,6 +15,7 @@ export default function SquishBall({ visibleUI }) {
   const particleCountRef = useRef(1);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
+  const showControlPointsRef = useRef(false);
 
   const squishFactorRef = useRef(1);
   const desiredAreaRef = useRef(50);
@@ -214,25 +215,24 @@ export default function SquishBall({ visibleUI }) {
 
         // Update positions
         this.points.forEach((point) => {
-          const colliding = point.checkCollisions();
-          if (!colliding) {
-            point.update()
-          }
+          point.update()
         })
       }
 
       draw() {
         if (this.points.length < 3) return;
 
-        for (let i = 0; i < this.points.length; i++) {
-          // draw circle at each point
-          const point = this.points[i];
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-          ctx.fillStyle = theme.accent;
-          ctx.fill();
-          ctx.closePath();
+        if (showControlPointsRef.current) {
+          for (let i = 0; i < this.points.length; i++) {
+            // draw circle at each point
+            const point = this.points[i];
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = theme.accent;
+            ctx.fill();
+            ctx.closePath();
+          }
         }
 
         ctx.beginPath();
@@ -314,46 +314,15 @@ export default function SquishBall({ visibleUI }) {
         this.a_y += fy;
       }
 
-      checkCollisions() {
+      checkCollisions(x, y) {
         let colliding = false
         if (!visibleUIRef.current) return colliding
         collisionHitboxes.forEach(hitbox => {
-          if (hitbox.inElement(this.x, this.y)) {
-            colliding = true
-            const rect = hitbox.rect_padded;
-            const bounce = 0;
-
-            const vx = (this.x - this.oldX);
-            const vy = (this.y - this.oldY);
-
-            const distToLeft = this.x - rect.left;
-            const distToRight = rect.right - this.x;
-            const distToTop = this.y - rect.top;
-            const distToBottom = rect.bottom - this.y;
-
-            const deadZone = 20;
-
-            const minDist = Math.min(distToLeft, distToRight, distToTop, distToBottom);
-
-            if (minDist === distToLeft && minDist > deadZone) {
-              this.x = rect.left - this.size;
-              this.oldX = this.x + vx * bounce;
-            } else if (minDist === distToRight && minDist > deadZone) {
-              this.x = rect.right + this.size;
-              this.oldX = this.x + vx * bounce;
-            } else if (minDist === distToTop && minDist > deadZone) {
-              this.y = rect.top - this.size;
-              this.oldY = this.y + vy * bounce;
-            } else if (minDist === distToBottom && minDist > deadZone) {
-              this.y = rect.bottom + this.size;
-              this.oldY = this.y + vy * bounce;
-            }
-
-            this.a_x = 0.0
-            this.a_y = 0.0
+          if (hitbox.inElement(x, y)) {
+            colliding = true; // latch
           }
         });
-        return colliding
+        return colliding;
       }
 
       update() {
@@ -370,43 +339,58 @@ export default function SquishBall({ visibleUI }) {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current || touchActiveRef.current) && (!draggingPoint || draggingPoint === this)) {
+        const inRange = distance < mouseShieldRadiusRef.current;
+        const activeTouch = (mouseClickRef.current || touchActiveRef.current);
+        const beingDragged = draggingPoint === this;
+
+        // inRange + activeTouch + no draggingPoint = this point should become the draggingPoint
+        if (inRange && activeTouch && !draggingPoint) {
           draggingPoint = this;
+        }
+
+
+        if (beingDragged) {
           const dragStrength = 0.6;
           const targetX = mousePosRef.current.x;
           const targetY = mousePosRef.current.y;
 
           this.x += (targetX - this.x) * dragStrength;
           this.y += (targetY - this.y) * dragStrength;
-        } else {
-          if (draggingPoint === this) {
-            draggingPoint = null;
-          }
-          this.a_y += gravity;
-          const step = simulationSpeedRef.current / 100;
-
-          this.x += vx + (this.a_x * step);
-          this.y += vy + (this.a_y * step);
-
-
-          if (this.x > canvas.width - this.size) {
-            this.x = canvas.width - this.size;
-            this.oldX = this.x + vx * bounce;
-          } else if (this.x < this.size) {
-            this.x = this.size;
-            this.oldX = this.x + vx * bounce;
-          }
-
-          if (this.y > canvas.height - this.size) {
-            this.y = canvas.height - this.size;
-            this.oldY = this.y + vy * bounce;
-          } else if (this.y < this.size) {
-            this.y = this.size;
-            this.oldY = this.y + vy * bounce;
-          }
-          this.a_x = 0.0
-          this.a_y = 0.0
         }
+
+
+        if (!activeTouch && draggingPoint === this) {
+          draggingPoint = null;
+        }
+        this.a_y += gravity;
+        const step = simulationSpeedRef.current / 100;
+
+
+        const next_x = vx + (this.a_x * step);
+        const next_y = vy + (this.a_y * step);
+
+        if (!this.checkCollisions(this.x + next_x, this.y + next_y)) {
+          this.x += next_x;
+          this.y += next_y;
+        }
+
+        if (this.x > canvas.width - this.size) {
+          this.x = canvas.width - this.size;
+          this.oldX = this.x + vx * bounce;
+        } else if (this.x < this.size) {
+          this.x = this.size;
+          this.oldX = this.x + vx * bounce;
+        }
+
+        if (this.y > canvas.height - this.size) {
+          this.y = canvas.height - this.size;
+          this.oldY = this.y + vy * bounce;
+        } else if (this.y < this.size) {
+          this.y = this.size;
+          this.oldY = this.y + vy * bounce;
+        }
+        this.a_x = 0.0
+        this.a_y = 0.0
       }
 
       draw() {
@@ -536,6 +520,17 @@ export default function SquishBall({ visibleUI }) {
                 maxValue: "100.0",
                 type: "slider",
               },
+              {
+                type: "button",
+                title: "",
+                buttonText: showControlPointsRef.current
+                  ? "Hide control points"
+                  : "Show control points",
+                callback: () => {
+                  showControlPointsRef.current = !showControlPointsRef.current;
+                  setRender((r) => r + 1);
+                },
+              }
             ]}
             rerenderSetter={setRender}
           />
