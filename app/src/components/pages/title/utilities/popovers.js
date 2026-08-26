@@ -15,11 +15,20 @@ function GenericToolTip(text, icon) {
 
   return (
     <span
-      style={{ position: "relative", display: "inline-block" }}
+      style={{ position: "relative", display: "inline-flex" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ fontSize: "2em", display: "inline-block" }}>
+      {/* Flex + lineHeight:1 pins the row's height to the glyph (1em = 2em here),
+          so other fixed UI can line up with it deterministically. */}
+      <div
+        style={{
+          fontSize: "2em",
+          display: "flex",
+          alignItems: "center",
+          lineHeight: 1,
+        }}
+      >
         <FontAwesomeIcon icon={icon} />
       </div>
       {hovered && text && (
@@ -97,7 +106,7 @@ export function IconGroup({ icons }) {
           display: "flex",
           flexDirection: "row",
           position: "absolute",
-          top: "1em",
+          top: "calc(1em + env(safe-area-inset-top, 0px))",
           right: "1em",
           gap: "0.5em",
         }}

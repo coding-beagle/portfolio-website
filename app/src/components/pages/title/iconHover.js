@@ -14,6 +14,12 @@ export default function IconHover({ icon, link, openNewTab = true }) {
       style={{
         color: isHover ? theme.secondary : theme.accent,
         cursor: "pointer",
+        // Matches IconButton's tap target so the row stays evenly spaced.
+        minWidth: 44,
+        minHeight: 44,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
       onMouseEnter={() => setIsHover(true)}
       onMouseLeave={() => setIsHover(false)}

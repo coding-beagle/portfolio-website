@@ -179,8 +179,11 @@ export function MobileChangerSheet({ rerenderSetter, valueArrays }) {
         id="changerGroup"
         style={{
           position: "fixed",
-          top: "max(12px, env(safe-area-inset-top))",
-          left: 12,
+          // The popover icon row sits at `top: 1em` and is exactly 32px tall
+          // (2em glyph, line-height 1). Pull the 44px-tall button up by half
+          // the difference so the two rows share a centre line.
+          top: "calc(1em - 6px + env(safe-area-inset-top, 0px))",
+          left: "1em",
           margin: 0,
           fontSize: 16,
           minHeight: 44,

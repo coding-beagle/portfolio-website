@@ -357,7 +357,10 @@ export default function Title({
             onMouseDown={handleLeftClickTitle}
             onContextMenu={handleRightClickTitle}
             style={{
-              fontSize: mobile ? "2.2em" : "5em", // Smaller on mobile
+              // Mobile scales with the viewport instead of sitting at a fixed
+              // 2.2em, so the title keeps its weight against the icon row on
+              // larger phones without overflowing small ones.
+              fontSize: mobile ? "clamp(2.2rem, 9vw, 3.6rem)" : "5em",
               textAlign: "center",
               color: isHover ? theme.secondary : theme.accent,
               fontWeight: "bold",
@@ -427,8 +430,10 @@ export default function Title({
               style={{
                 display: "flex",
                 justifyContent: "center",
-                gap: iconsVisible ? "1em" : "0em",
-                fontSize: "3em",
+                gap: iconsVisible ? (mobile ? "0.75em" : "1em") : "0em",
+                // Smaller glyphs on mobile; IconButton/IconHover keep a 44px
+                // tap target underneath them.
+                fontSize: mobile ? "2em" : "3em",
                 zIndex: 100,
                 overflow: "hidden",
                 maxWidth: iconsVisible ? "500px" : "0px",

@@ -26,6 +26,12 @@ export default function IconButton({ icon, onClick, openNewTab = true, link = nu
         background: "none",
         border: "none",
         padding: 0,
+        // Keep a comfortable tap target even when the glyph is small.
+        minWidth: 44,
+        minHeight: 44,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         color: isHover ? theme.secondary : theme.accent,
         cursor: "pointer",
         fontSize: "inherit",
