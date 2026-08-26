@@ -82,7 +82,7 @@ function AppWrapper() {
         backgroundColor: theme.primary,
         color: theme.accent,
         fontFamily: theme.font,
-        height: "100vh",
+        height: "var(--app-height)",
         margin: 0,
         position: "relative",
       }}

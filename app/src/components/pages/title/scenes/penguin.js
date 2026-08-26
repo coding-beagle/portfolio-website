@@ -70,7 +70,7 @@ export default function Penguin({ visibleUI }) {
           top: 0,
           left: 0,
           width: '100vw',
-          height: '100vh',
+          height: 'var(--app-height)',
           objectFit: 'cover',
           objectPosition: 'center top',
           imageRendering: 'pixelated',
@@ -92,7 +92,7 @@ export default function Penguin({ visibleUI }) {
         backgroundSize: size,
         overflow: 'hidden',
         width: '100vw',
-        height: '100vh',
+        height: 'var(--app-height)',
         imageRendering: 'pixelated',
       }} />
     )

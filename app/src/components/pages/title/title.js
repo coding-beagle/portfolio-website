@@ -339,7 +339,7 @@ export default function Title({
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          height: "100vh",
+          height: "var(--app-height)",
           flexDirection: "column",
           position: "relative",
           backgroundColor: theme.primary,

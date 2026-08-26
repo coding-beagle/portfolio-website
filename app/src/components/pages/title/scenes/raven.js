@@ -171,7 +171,7 @@ export default function Raven({ visibleUI }) {
         top: 0,
         left: 0,
         overflow: "hidden",
-        maxHeight: "100vh"
+        maxHeight: "var(--app-height)"
       }} />
 
       {visibleUI && (

@@ -742,9 +742,9 @@ export default function Mandelbrot({ visibleUI }) {
           top: 0,
           left: 0,
           width: "100vw", // ensure canvas fills viewport
-          height: "100vh", // ensure canvas fills viewport
+          height: "var(--app-height)", // ensure canvas fills viewport
           maxWidth: "100vw", // prevent overflow
-          maxHeight: "100vh", // prevent overflow
+          maxHeight: "var(--app-height)", // prevent overflow
           zIndex: 0,
         }}
       />

@@ -92,7 +92,7 @@ const ImageCarousel = ({ isOpen, onClose, images }) => {
         top: 0,
         left: 0,
         width: '100vw',
-        height: '100vh',
+        height: 'var(--app-height)',
         backgroundColor: 'rgba(0, 0, 0, 0.9)',
         zIndex: 10000,
         display: 'flex',

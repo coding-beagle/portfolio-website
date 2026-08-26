@@ -12,7 +12,7 @@ export default function Blog() {
         backgroundColor: theme.primary,
         color: theme.accent,
         fontFamily: theme.font,
-        height: "100vh",
+        height: "var(--app-height)",
         margin: 0,
         display: "flex",
         flexDirection: "column",
