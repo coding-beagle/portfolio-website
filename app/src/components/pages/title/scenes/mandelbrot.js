@@ -1,17 +1,38 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { IconGroup, iconTypes, PannableToolTip, ZoomableToolTip } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
+import {
+  createBigFloatLib,
+  bfZero,
+  bfFromNumber,
+  bfToNumber,
+  bfAdd,
+  bfSub,
+  bfSetPrec,
+  bfToFixed,
+  bfPrecisionForZoom,
+} from "../utilities/bigFloat";
+import {
+  BASE_MAX_ITER,
+  autoIterationMultiplier,
+  colourSpanForZoom,
+  maxIterationsForZoom,
+} from "../utilities/iterationBudget";
+import { createPalette } from "../utilities/palette";
 import {
   ChangerGroup,
   CHANGER_TYPE,
 } from "../utilities/valueChangers";
 
+// Doubles run out of exponent below ~1e-308, which is what bounds the deltas
+// the perturbed iteration works with. Everything above this is fair game.
+const MAX_ZOOM = 1e290;
+
 export default function Mandelbrot({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
-  const drawAreaRef = useRef(400);
   const drawResolutionRef = useRef(20);
   const [, setRender] = useState(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
@@ -20,21 +41,34 @@ export default function Mandelbrot({ visibleUI }) {
   const currentlyDrawingRef = useRef(false);
   const currentThemeRef = useRef(0);
 
-  const complexPosRef = useRef({ Re: 0, Im: 0 });
+  const complexPosRef = useRef({ Re: "0", Im: "0" });
+  const zoomDisplayRef = useRef("1.00e+0");
+  const iterDisplayRef = useRef(`${BASE_MAX_ITER}  (auto x1.0)`);
 
-  const maxIterColourRef = useRef("");
-  const maxColourRef = useRef("");
-  const minColourRef = useRef("");
-  const colourMaxComponentsRef = useRef("");
-  const colourMinComponentsRef = useRef("");
-  const colourStepsRef = useRef("");
+  const paletteColoursRef = useRef(null);
+  const paletteRef = useRef(null);
+  const colourSpanRef = useRef(BASE_MAX_ITER);
   const workerPoolRef = useRef([]);
+  const referenceWorkerRef = useRef(null);
   const workerPoolSize = 4; // Number of workers to use
   const drawGenerationRef = useRef(0); // Track current draw generation
-  const centerXRef = useRef(0); // Center point X in the complex plane
-  const centerYRef = useRef(0); // Center point Y in the complex plane
-  const zoomLevelRef = useRef(1); // Zoom factor
+
+  // The view centre lives in arbitrary precision; the zoom factor stays a
+  // double (it only ever needs an exponent, never 300 digits of mantissa).
+  const precisionRef = useRef(bfPrecisionForZoom(1));
+  const centerXRef = useRef(bfZero(precisionRef.current));
+  const centerYRef = useRef(bfZero(precisionRef.current));
+  const zoomLevelRef = useRef(1);
+  const iterBiasRef = useRef(1);
+  const maxIterRef = useRef(BASE_MAX_ITER);
   const startClickRef = useRef({ x: 0, y: 0 });
+
+  // Reference orbit shared by every pixel: its centre (arbitrary precision),
+  // the orbit itself as doubles, and the iteration count it was computed for.
+  const referenceRef = useRef(null);
+  const referenceGenerationRef = useRef(0);
+  const referencePendingRef = useRef(false);
+  const onReferenceReadyRef = useRef(() => { });
 
   const [customColours, setCustomColours] = useState([
     "#ff0000", // Custom max iteration colour
@@ -43,10 +77,14 @@ export default function Mandelbrot({ visibleUI }) {
   ]);
 
   useEffect(() => {
-    // Initialize worker pool
+    // Initialize worker pool. The BigFloat library is injected into each blob
+    // worker because the stringified worker body cannot carry its imports.
     for (let i = 0; i < workerPoolSize; i++) {
-      workerPoolRef.current.push(new WorkerFactory(Worker));
+      workerPoolRef.current.push(new WorkerFactory(Worker, [createBigFloatLib]));
     }
+    // A dedicated worker for the (expensive, arbitrary precision) reference
+    // orbit, so it never blocks the pixel workers or the UI.
+    referenceWorkerRef.current = new WorkerFactory(Worker, [createBigFloatLib]);
 
     return () => {
       // Terminate all workers
@@ -54,6 +92,10 @@ export default function Mandelbrot({ visibleUI }) {
         worker.terminate();
       });
       workerPoolRef.current = [];
+      if (referenceWorkerRef.current) {
+        referenceWorkerRef.current.terminate();
+        referenceWorkerRef.current = null;
+      }
     };
   }, []);
 
@@ -72,86 +114,71 @@ export default function Mandelbrot({ visibleUI }) {
     ["Custom", customColours[0], customColours[1], customColours[2]],
   ];
 
-  const maxIterCount = 2000;
+  /** Half-width / half-height of the view in the complex plane. */
+  function viewSize() {
+    const canvas = canvasRef.current;
+    if (!canvas) return { width: 4, height: 2, pixelSpacing: 0.01 };
+    const height = 2 / zoomLevelRef.current;
+    const width = (canvas.width / canvas.height) * height;
+    return { width, height, pixelSpacing: height / canvas.height };
+  }
 
+  /** Pixel -> complex plane, in arbitrary precision. */
   function mapToComplex(pixelX, pixelY) {
-    // Return early if canvasRef.current is null
-    if (!canvasRef.current) {
-      return [0, 0];
-    }
-
-    // Calculate the view dimensions in the complex plane
-    const viewWidth =
-      ((canvasRef.current.width / canvasRef.current.height) * 2) /
-      zoomLevelRef.current; // 4 units wide at zoom level 1
-    const viewHeight = 2 / zoomLevelRef.current; // 2.25 units high at zoom level 1
-
-    // Convert pixel coordinates to percentages of canvas
-    const percentX = pixelX / canvasRef.current.width;
-    const percentY = pixelY / canvasRef.current.height;
-    // Map to complex plane coordinates, centered on centerX,centerY
+    const canvas = canvasRef.current;
+    if (!canvas) return [bfZero(precisionRef.current), bfZero(precisionRef.current)];
+    const { width, height } = viewSize();
+    const p = precisionRef.current;
     return [
-      centerXRef.current + (percentX - 0.5) * viewWidth,
-      centerYRef.current + (percentY - 0.5) * viewHeight,
+      bfAdd(centerXRef.current, bfFromNumber((pixelX / canvas.width - 0.5) * width, p)),
+      bfAdd(centerYRef.current, bfFromNumber((pixelY / canvas.height - 0.5) * height, p)),
     ];
   }
 
-  function calculateMandelbrot(pixelX, pixelY) {
-    const c = mapToComplex(pixelX, pixelY); // real or fake it is what it is ykwim
-    const cX = c[0];
-    const cY = c[1];
-    let zReal = 0;
-    let zIm = 0;
-    let count = 0;
-    let nextZReal, nextZIm;
-    while (zReal ** 2 + zIm ** 2 <= 4 && count < maxIterCount) {
-      nextZReal = zReal * zReal - zIm * zIm + cX;
-      nextZIm = 2 * zReal * zIm + cY;
+  /** Deeper zooms need both more precision in the centre and more iterations. */
+  function updateZoomDerivedState() {
+    zoomLevelRef.current = Math.min(Math.max(zoomLevelRef.current, 0.05), MAX_ZOOM);
+    const zoom = zoomLevelRef.current;
 
-      zReal = nextZReal;
-      zIm = nextZIm;
-
-      count += 1;
+    const precision = bfPrecisionForZoom(zoom);
+    if (precision !== precisionRef.current) {
+      precisionRef.current = precision;
+      centerXRef.current = bfSetPrec(centerXRef.current, precision);
+      centerYRef.current = bfSetPrec(centerYRef.current, precision);
     }
 
-    return count;
+    maxIterRef.current = maxIterationsForZoom(zoom, iterBiasRef.current);
+
+    zoomDisplayRef.current = zoom.toExponential(2);
+    iterDisplayRef.current = `${maxIterRef.current}  (auto x${autoIterationMultiplier(
+      zoom
+    ).toFixed(1)})`;
+    colourSpanRef.current = colourSpanForZoom(zoom);
+    rebuildPalette();
   }
 
-  const calculateColourComponents = (
+  const setPaletteColours = (
     maxIterationColour,
     maxInterpColour,
     minInterpColour
   ) => {
-    maxIterColourRef.current = maxIterationColour;
-    maxColourRef.current = maxInterpColour;
-    minColourRef.current = minInterpColour;
-
-    colourMaxComponentsRef.current = {
-      r: parseInt(maxColourRef.current.slice(1, 3), 16),
-      g: parseInt(maxColourRef.current.slice(3, 5), 16),
-      b: parseInt(maxColourRef.current.slice(5, 7), 16),
+    paletteColoursRef.current = {
+      maxIterationColour,
+      maxInterpColour,
+      minInterpColour,
     };
-
-    colourMinComponentsRef.current = {
-      r: parseInt(minColourRef.current.slice(1, 3), 16),
-      g: parseInt(minColourRef.current.slice(3, 5), 16),
-      b: parseInt(minColourRef.current.slice(5, 7), 16),
-    };
-
-    colourStepsRef.current = {
-      r:
-        (colourMaxComponentsRef.current.r - colourMinComponentsRef.current.r) /
-        maxIterCount,
-      g:
-        (colourMaxComponentsRef.current.g - colourMinComponentsRef.current.g) /
-        maxIterCount,
-      b:
-        (colourMaxComponentsRef.current.b - colourMinComponentsRef.current.b) /
-        maxIterCount,
-    };
+    rebuildPalette();
   };
 
-  calculateColourComponents(
+  function rebuildPalette() {
+    if (!paletteColoursRef.current) return;
+    paletteRef.current = createPalette({
+      ...paletteColoursRef.current,
+      span: colourSpanRef.current,
+    });
+  }
+
+  setPaletteColours(
     themesList[currentThemeRef.current][1],
     themesList[currentThemeRef.current][2],
     themesList[currentThemeRef.current][3]
@@ -159,52 +186,37 @@ export default function Mandelbrot({ visibleUI }) {
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
 
-  function colourInterp(value) {
-    if (value === maxIterCount) {
-      return maxIterColourRef.current;
-    }
-
-    const r = Math.floor(
-      clamp(
-        colourMinComponentsRef.current.r + value * colourStepsRef.current.r,
-        0,
-        255
-      )
-    );
-    const g = Math.floor(
-      clamp(
-        colourMinComponentsRef.current.g + value * colourStepsRef.current.g,
-        0,
-        255
-      )
-    );
-    const b = Math.floor(
-      clamp(
-        colourMinComponentsRef.current.b + value * colourStepsRef.current.b,
-        0,
-        255
-      )
-    );
-
-    const rHex = r.toString(16).padStart(2, "0");
-    const gHex = g.toString(16).padStart(2, "0");
-    const bHex = b.toString(16).padStart(2, "0");
-
-    return `#${rHex}${gHex}${bHex}`;
-  }
+  const colourInterp = (iterations) =>
+    paletteRef.current.colourFor(iterations, maxIterRef.current);
 
   const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
+
+  const applyTheme = (index) => {
+    currentThemeRef.current = index;
+    setPaletteColours(
+      themesList[index][1],
+      themesList[index][2],
+      themesList[index][3]
+    );
+    setRender((prev) => prev + 1);
+    drawEverythingRef.current();
+  };
+
   const valueChangers = [
     {
       type: CHANGER_TYPE.DISPLAY,
       title: "Position:",
       valueRef: complexPosRef,
     },
-
     {
       type: CHANGER_TYPE.DISPLAY,
       title: "Zoom Intensity:",
-      valueRef: zoomLevelRef,
+      valueRef: zoomDisplayRef,
+    },
+    {
+      type: CHANGER_TYPE.DISPLAY,
+      title: "Max Iterations:",
+      valueRef: iterDisplayRef,
     },
     {
       type: CHANGER_TYPE.SLIDER,
@@ -214,81 +226,23 @@ export default function Mandelbrot({ visibleUI }) {
       maxValue: 20,
       callback: () => { },
     },
-    [
-      {
-        type: CHANGER_TYPE.BUTTON,
-        title: "Toggle Theme:",
-        buttonText: themesList[0][0],
-        callback: () => {
-          currentThemeRef.current = 0;
-          calculateColourComponents(
-            themesList[0][1],
-            themesList[0][2],
-            themesList[0][3]
-          );
-          setRender((prev) => prev + 1);
-          // Restart Mandelbrot rerendering cycle
-          if (typeof window !== "undefined") {
-            window._mandelbrotCurrentRes = 10;
-          }
-          drawEverythingRef.current();
-        },
+    {
+      type: CHANGER_TYPE.SLIDER,
+      title: "Extra Iterations:",
+      valueRef: iterBiasRef,
+      minValue: 1,
+      maxValue: 10,
+      callback: () => {
+        updateZoomDerivedState();
+        drawEverythingRef.current();
       },
-      {
-        type: CHANGER_TYPE.BUTTON,
-        title: "",
-        buttonText: themesList[1][0],
-        callback: () => {
-          currentThemeRef.current = 1;
-          calculateColourComponents(
-            themesList[1][1],
-            themesList[1][2],
-            themesList[1][3]
-          );
-          setRender((prev) => prev + 1);
-          if (typeof window !== "undefined") {
-            window._mandelbrotCurrentRes = 10;
-          }
-          drawEverythingRef.current();
-        },
-      },
-      {
-        type: CHANGER_TYPE.BUTTON,
-        title: "",
-        buttonText: themesList[2][0],
-        callback: () => {
-          currentThemeRef.current = 2;
-          calculateColourComponents(
-            themesList[2][1],
-            themesList[2][2],
-            themesList[2][3]
-          );
-          setRender((prev) => prev + 1);
-          if (typeof window !== "undefined") {
-            window._mandelbrotCurrentRes = 10;
-          }
-          drawEverythingRef.current();
-        },
-      },
-      {
-        type: CHANGER_TYPE.BUTTON,
-        title: "",
-        buttonText: themesList[3][0],
-        callback: () => {
-          currentThemeRef.current = 3;
-          calculateColourComponents(
-            themesList[3][1],
-            themesList[3][2],
-            themesList[3][3]
-          );
-          setRender((prev) => prev + 1);
-          if (typeof window !== "undefined") {
-            window._mandelbrotCurrentRes = 10;
-          }
-          drawEverythingRef.current();
-        },
-      },
-    ],
+    },
+    themesList.map((themeEntry, index) => ({
+      type: CHANGER_TYPE.BUTTON,
+      title: index === 0 ? "Toggle Theme:" : "",
+      buttonText: themeEntry[0],
+      callback: () => applyTheme(index),
+    })),
     // Add color pickers if Custom theme is selected
     ...(currentThemeRef.current === themesList.length - 1
       ? [
@@ -304,7 +258,7 @@ export default function Mandelbrot({ visibleUI }) {
                 customColours[2],
               ];
               setCustomColours(newColours);
-              calculateColourComponents(
+              setPaletteColours(
                 newColours[0],
                 newColours[1],
                 newColours[2]
@@ -325,7 +279,7 @@ export default function Mandelbrot({ visibleUI }) {
                 customColours[2],
               ];
               setCustomColours(newColours);
-              calculateColourComponents(
+              setPaletteColours(
                 newColours[0],
                 newColours[1],
                 newColours[2]
@@ -346,7 +300,7 @@ export default function Mandelbrot({ visibleUI }) {
                 newColor,
               ];
               setCustomColours(newColours);
-              calculateColourComponents(
+              setPaletteColours(
                 newColours[0],
                 newColours[1],
                 newColours[2]
@@ -362,157 +316,243 @@ export default function Mandelbrot({ visibleUI }) {
   useEffect(() => {
     const canvas = canvasRef.current;
 
-    // Helper function to process a single work unit with a specific worker
-    async function processWorkUnit(workerIdx, workUnit, drawGeneration, ctx) {
+    // StrictMode mounts, tears down and mounts again; anything latched by the
+    // previous run (a pending orbit request whose worker is now dead, a draw
+    // that will never resolve) would otherwise wedge this one permanently.
+    referenceRef.current = null;
+    referencePendingRef.current = false;
+    currentlyDrawingRef.current = false;
+
+    // Draws are async and outlive the effect; once this run is torn down its
+    // workers are gone, so anything still in flight has to stop touching them.
+    let disposed = false;
+
+    /**
+     * A reference orbit stays usable while its centre is still comfortably
+     * inside the view and it ran for at least as many iterations as we now
+     * need — panning and zooming reuse it until one of those stops holding.
+     */
+    function referenceIsUsable() {
+      const reference = referenceRef.current;
+      if (!reference) return false;
+      if (reference.maxIter < maxIterRef.current) return false;
+      const { width, height } = viewSize();
+      const offsetX = bfToNumber(bfSub(centerXRef.current, reference.cx));
+      const offsetY = bfToNumber(bfSub(centerYRef.current, reference.cy));
+      return Math.abs(offsetX) < width * 0.4 && Math.abs(offsetY) < height * 0.4;
+    }
+
+    function requestReference() {
+      if (referencePendingRef.current || disposed || !referenceWorkerRef.current) return;
+      referencePendingRef.current = true;
+      referenceGenerationRef.current += 1;
+      const generation = referenceGenerationRef.current;
+      const cx = centerXRef.current;
+      const cy = centerYRef.current;
+      const maxIter = maxIterRef.current;
+
+      referenceWorkerRef.current.postMessage({
+        type: "reference",
+        cx,
+        cy,
+        maxIter,
+        refGeneration: generation,
+      });
+
+      // Remember what we asked for so the reply can be matched up.
+      referencePendingRef.current = { generation, cx, cy, maxIter };
+    }
+
+    onReferenceReadyRef.current = (data) => {
+      if (disposed) return;
+      const pending = referencePendingRef.current;
+      referencePendingRef.current = false;
+      if (!pending || data.refGeneration !== pending.generation) return;
+
+      referenceRef.current = {
+        cx: pending.cx,
+        cy: pending.cy,
+        maxIter: pending.maxIter,
+        refLen: data.refLen,
+      };
+
+      // Each worker needs its own copy — a transferred buffer is detached.
+      workerPoolRef.current.forEach((worker) => {
+        worker.postMessage({
+          type: "orbit",
+          Zx: data.Zx.slice(),
+          Zy: data.Zy.slice(),
+          refLen: data.refLen,
+        });
+      });
+
+      drawEverythingRef.current();
+    };
+
+    referenceWorkerRef.current.onmessage = (event) => {
+      if (event.data.type === "reference") {
+        onReferenceReadyRef.current(event.data);
+      }
+    };
+
+    /** Kick off a new reference orbit if the current one no longer serves. */
+    function ensureReference() {
+      if (!referenceIsUsable()) requestReference();
+    }
+
+    // A zoom or a pan starts a new draw while the previous one still has work
+    // out with the pool, so replies are matched to the request that asked for
+    // them by id. Each worker keeps one handler for its whole life: swapping
+    // the handler per request let a later draw consume an earlier draw's
+    // reply, which stranded that earlier draw waiting for a reply that had
+    // already been delivered to someone else.
+    const pendingRequests = new Map();
+    let nextRequestId = 1;
+
+    workerPoolRef.current.forEach((worker) => {
+      worker.onmessage = (event) => {
+        const settle = pendingRequests.get(event.data.requestId);
+        if (!settle) return;
+        pendingRequests.delete(event.data.requestId);
+        settle(event.data);
+      };
+    });
+
+    function processWorkUnit(workerIdx, workUnit, drawGeneration, ctx) {
       const worker = workerPoolRef.current[workerIdx];
-      const { chunk, y } = workUnit;
+      const { chunk, y, resolution, dcx0, dcy0, pixelSpacing, maxIter } = workUnit;
 
       return new Promise((resolve) => {
-        const aspectRatio =
-          (canvasRef.current.width / canvasRef.current.height) * 2;
+        if (!worker || disposed) {
+          resolve();
+          return;
+        }
 
-        worker.postMessage({
-          rowPixels: chunk,
-          rowY: y,
-          zoomLevel: zoomLevelRef.current,
-          canvasWidth: canvasRef.current.width,
-          canvasHeight: canvasRef.current.height,
-          centerX: centerXRef.current,
-          centerY: centerYRef.current,
-          xAspectRatio: aspectRatio,
-          yAspectRatio: 2,
-          drawGeneration: drawGeneration,
+        const requestId = nextRequestId++;
+
+        pendingRequests.set(requestId, (data) => {
+          // The work is only worth painting if this draw is still the current
+          // one; either way the worker is free again, so always resolve.
+          if (
+            !disposed &&
+            data.drawGeneration === drawGeneration &&
+            drawGenerationRef.current === drawGeneration
+          ) {
+            data.results.forEach((iterations, index) => {
+              ctx.fillStyle = colourInterp(iterations);
+              ctx.fillRect(chunk[index], y, resolution, resolution);
+            });
+          }
+          resolve();
         });
 
-        worker.onmessage = (event) => {
-          // Only use the result if the drawGeneration matches
-          if (event.data.drawGeneration !== drawGeneration) {
-            resolve();
-            return;
-          }
-
-          const returned_data = event.data.results;
-
-          // Cancel if a new draw has started
-          if (drawGenerationRef.current !== drawGeneration) {
-            resolve();
-            return;
-          }
-
-          returned_data.forEach((x_data, index) => {
-            const x = chunk[index];
-            ctx.fillStyle = colourInterp(x_data);
-            ctx.fillRect(
-              x,
-              y,
-              21 - drawResolutionRef.current,
-              21 - drawResolutionRef.current
-            );
-          });
-
-          resolve();
-        };
+        worker.postMessage({
+          type: "tile",
+          rowPixels: chunk,
+          rowY: y,
+          dcx0,
+          dcy0,
+          pixelSpacing,
+          maxIter,
+          drawGeneration,
+          requestId,
+        });
       });
     }
 
-    async function drawMandelbrotArea(
-      position,
-      resolution = 21 - drawResolutionRef.current,
-      drawAll = false,
-      drawWithWebworker = false
-    ) {
+    async function drawMandelbrotArea(resolution = 21 - drawResolutionRef.current) {
+      if (disposed) return;
+      ensureReference();
+      const reference = referenceRef.current;
+      if (!reference) return; // first orbit still cooking; the reply redraws
+
       currentlyDrawingRef.current = true;
       drawGenerationRef.current += 1; // Increment generation for each new draw
       const thisDrawGeneration = drawGenerationRef.current;
       const ctx = canvas.getContext("2d");
-      let startX, startY, endX, endY;
-      if (drawAll) {
-        if (!drawWithWebworker) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Per-pixel offsets from the reference point, in plain doubles: this is
+      // the whole point of perturbation, the deltas stay small and the
+      // arbitrary precision work is confined to the single reference orbit.
+      const { width, height, pixelSpacing } = viewSize();
+      const dcx0 =
+        bfToNumber(bfSub(centerXRef.current, reference.cx)) - width / 2;
+      const dcy0 =
+        bfToNumber(bfSub(centerYRef.current, reference.cy)) - height / 2;
+      const maxIter = maxIterRef.current;
+
+      // Collect all work units first
+      const workUnits = [];
+      for (let y = 0; y < canvas.height; y += resolution) {
+        const x_array = [];
+        for (let x = 0; x < canvas.width; x += resolution) {
+          x_array.push(x);
         }
-        startX = 0;
-        startY = 0;
-        endX = canvas.width;
-        endY = canvas.height;
-      } else {
-        startX = position.x - drawAreaRef.current / 2;
-        startY = position.y - drawAreaRef.current / 2;
-        endX = position.x + drawAreaRef.current / 2;
-        endY = position.y + drawAreaRef.current / 2;
+        const chunkSize = 800; // Increased chunk size for better performance
+        for (let i = 0; i < x_array.length; i += chunkSize) {
+          workUnits.push({
+            chunk: x_array.slice(i, i + chunkSize),
+            y,
+            resolution,
+            dcx0,
+            dcy0,
+            pixelSpacing,
+            maxIter,
+          });
+        }
       }
 
-      if (drawWithWebworker) {
-        // Collect all work units first
-        const workUnits = [];
-        for (let y = startY; y < endY; y += resolution) {
-          const x_array = [];
-          for (let x = startX; x < endX; x += resolution) {
-            x_array.push(x);
-          }
-          const chunkSize = 800; // Increased chunk size for better performance
-          for (let i = 0; i < x_array.length; i += chunkSize) {
-            const chunk = x_array.slice(i, i + chunkSize);
-            workUnits.push({ chunk, y });
-          }
-        }
+      // Process work units with worker pool
+      let workIndex = 0;
+      const workerPromises = [];
 
-        // Process work units with worker pool
-        let workIndex = 0;
-        const workerPromises = [];
+      // Start initial work on all available workers
+      for (
+        let workerIdx = 0;
+        workerIdx < Math.min(workerPoolRef.current.length, workUnits.length);
+        workerIdx++
+      ) {
+        workerPromises.push(
+          processWorkUnit(
+            workerIdx,
+            workUnits[workIndex],
+            thisDrawGeneration,
+            ctx
+          )
+        );
+        workIndex++;
+      }
 
-        // Start initial work on all available workers
-        for (
-          let workerIdx = 0;
-          workerIdx < Math.min(workerPoolRef.current.length, workUnits.length);
-          workerIdx++
-        ) {
-          if (workIndex < workUnits.length) {
-            workerPromises.push(
-              processWorkUnit(
-                workerIdx,
-                workUnits[workIndex],
-                thisDrawGeneration,
-                ctx
-              )
-            );
-            workIndex++;
-          }
-        }
+      // Process remaining work units as workers become available
+      while (
+        workIndex < workUnits.length &&
+        !disposed &&
+        drawGenerationRef.current === thisDrawGeneration
+      ) {
+        // Wait for any worker to finish
+        const completedWorkerIdx = await Promise.race(
+          workerPromises.map((promise, idx) => promise.then(() => idx))
+        );
 
-        // Process remaining work units as workers become available
-        while (
-          workIndex < workUnits.length &&
-          drawGenerationRef.current === thisDrawGeneration
-        ) {
-          // Wait for any worker to finish
-          const completedWorkerIdx = await Promise.race(
-            workerPromises.map((promise, idx) => promise.then(() => idx))
+        // Start new work on the completed worker
+        if (workIndex < workUnits.length) {
+          workerPromises[completedWorkerIdx] = processWorkUnit(
+            completedWorkerIdx,
+            workUnits[workIndex],
+            thisDrawGeneration,
+            ctx
           );
-
-          // Start new work on the completed worker
-          if (workIndex < workUnits.length) {
-            workerPromises[completedWorkerIdx] = processWorkUnit(
-              completedWorkerIdx,
-              workUnits[workIndex],
-              thisDrawGeneration,
-              ctx
-            );
-            workIndex++;
-          }
-        }
-
-        // Wait for all remaining work to complete
-        await Promise.all(workerPromises);
-      } else {
-        for (let y = startY; y < endY; y += resolution) {
-          for (let x = startX; x < endX; x += resolution) {
-            ctx.fillStyle = colourInterp(calculateMandelbrot(x, y));
-            ctx.fillRect(x, y, resolution, resolution);
-          }
+          workIndex++;
         }
       }
 
-      currentlyDrawingRef.current = false;
+      // Wait for all remaining work to complete
+      await Promise.all(workerPromises);
+
+      // A newer draw is now the one in progress; leave the flag to it.
+      if (drawGenerationRef.current === thisDrawGeneration) {
+        currentlyDrawingRef.current = false;
+      }
     }
 
     const resizeCanvas = () => {
@@ -536,30 +576,64 @@ export default function Mandelbrot({ visibleUI }) {
         !currentlyDrawingRef.current
       ) {
         currentRes -= 1;
-        await drawMandelbrotArea({ x: 0, y: 0 }, currentRes, true, true);
+        await drawMandelbrotArea(currentRes);
       }
-
-      drawEverythingRef.current = async () => {
-        currentRes = 10;
-        await drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
-      };
 
       // Request the next frame
       animationFrameId = requestAnimationFrame(animate);
     }
 
-    drawMandelbrotArea({ x: 0, y: 0 }, 10, true);
+    drawEverythingRef.current = async () => {
+      currentRes = 10;
+      await drawMandelbrotArea(10);
+    };
+
+    updateZoomDerivedState();
+    drawMandelbrotArea(10);
     animate();
 
-    function handlePan(deltaX, deltaY) {
+    function handlePan(deltaX, deltaY, redraw = true) {
       currentRes = 10;
-      const viewWidth = 4 / zoomLevelRef.current;
-      const viewHeight = 3 / zoomLevelRef.current;
+      const { width, height } = viewSize();
+      const p = precisionRef.current;
 
-      centerXRef.current -= (deltaX / canvas.width) * viewWidth;
-      centerYRef.current -= (deltaY / canvas.height) * viewHeight;
+      centerXRef.current = bfSub(
+        centerXRef.current,
+        bfFromNumber((deltaX / canvas.width) * width, p)
+      );
+      centerYRef.current = bfSub(
+        centerYRef.current,
+        bfFromNumber((deltaY / canvas.height) * height, p)
+      );
 
-      drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
+      if (redraw) drawMandelbrotArea(15);
+    }
+
+    function applyZoom(factor, anchorX, anchorY) {
+      currentRes = 10;
+
+      // Keep the point under the cursor fixed: everything is done on the
+      // arbitrary precision centre so this stays exact at any depth.
+      const before = mapToComplex(anchorX, anchorY);
+      zoomLevelRef.current *= factor;
+      updateZoomDerivedState();
+      const after = mapToComplex(anchorX, anchorY);
+
+      centerXRef.current = bfAdd(
+        centerXRef.current,
+        bfSub(before[0], after[0])
+      );
+      centerYRef.current = bfAdd(
+        centerYRef.current,
+        bfSub(before[1], after[1])
+      );
+
+      drawMandelbrotArea(15);
+    }
+
+    /** Digits worth showing: enough to resolve a pixel at the current zoom. */
+    function positionDigits() {
+      return clamp(Math.ceil(Math.log10(zoomLevelRef.current)) + 4, 6, 60);
     }
 
     const handleMouseMove = (event) => {
@@ -574,8 +648,9 @@ export default function Mandelbrot({ visibleUI }) {
         mousePosRef.current.y
       );
 
-      complexPosRef.current.Re = complexMousePos[0];
-      complexPosRef.current.Im = complexMousePos[1];
+      const digits = positionDigits();
+      complexPosRef.current.Re = bfToFixed(complexMousePos[0], digits);
+      complexPosRef.current.Im = bfToFixed(complexMousePos[1], digits);
 
       if (!mouseClickRef.current) {
         return;
@@ -607,23 +682,7 @@ export default function Mandelbrot({ visibleUI }) {
     const handleWheel = (event) => {
       const mouseX = event.clientX - canvas.offsetLeft;
       const mouseY = event.clientY - canvas.offsetTop;
-      currentRes = 10;
-
-      // Get complex coordinates before zoom
-      const complexBefore = mapToComplex(mouseX, mouseY);
-
-      // Apply zoom factor (e.g., multiply by 1.1 for zoom in, 0.9 for zoom out)
-      const zoomFactor = event.deltaY < 0 ? 1.1 : 0.9;
-      zoomLevelRef.current *= zoomFactor;
-
-      // Get complex coordinates after zoom
-      const complexAfter = mapToComplex(mouseX, mouseY);
-
-      // Adjust center to keep mouse position fixed in complex plane
-      centerXRef.current += complexBefore[0] - complexAfter[0];
-      centerYRef.current += complexBefore[1] - complexAfter[1];
-
-      drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
+      applyZoom(event.deltaY < 0 ? 1.1 : 0.9, mouseX, mouseY);
     };
 
     let lastTouchDistance = null;
@@ -651,29 +710,25 @@ export default function Mandelbrot({ visibleUI }) {
         const dy = event.touches[0].clientY - event.touches[1].clientY;
         const currentDistance = Math.sqrt(dx * dx + dy * dy);
 
-        const zoomSense = 1;
-
-        const zoomFactor = (currentDistance * zoomSense) / lastTouchDistance;
-        zoomLevelRef.current *= zoomFactor;
-
         const currentCenter = {
           x: (event.touches[0].clientX + event.touches[1].clientX) / 2,
           y: (event.touches[0].clientY + event.touches[1].clientY) / 2,
         };
 
-        const complexBefore = mapToComplex(
-          lastTouchCenter.x,
-          lastTouchCenter.y
+        // Pan by however far the pinch centre travelled, then zoom about it.
+        handlePan(
+          currentCenter.x - lastTouchCenter.x,
+          currentCenter.y - lastTouchCenter.y,
+          false
         );
-        const complexAfter = mapToComplex(currentCenter.x, currentCenter.y);
-
-        centerXRef.current += complexBefore[0] - complexAfter[0];
-        centerYRef.current += complexBefore[1] - complexAfter[1];
+        applyZoom(
+          currentDistance / lastTouchDistance,
+          currentCenter.x,
+          currentCenter.y
+        );
 
         lastTouchDistance = currentDistance;
         lastTouchCenter = currentCenter;
-
-        drawMandelbrotArea({ x: 0, y: 0 }, 15, true);
       } else if (event.touches.length === 1) {
         // Single-finger pan
         const touch = event.touches[0];
@@ -687,8 +742,9 @@ export default function Mandelbrot({ visibleUI }) {
           touch.clientX - rect.left,
           touch.clientY - rect.top
         );
-        complexPosRef.current.Re = complexMousePos[0];
-        complexPosRef.current.Im = complexMousePos[1];
+        const digits = positionDigits();
+        complexPosRef.current.Re = bfToFixed(complexMousePos[0], digits);
+        complexPosRef.current.Im = bfToFixed(complexMousePos[1], digits);
 
         const panSens = 0.5;
 
@@ -716,11 +772,12 @@ export default function Mandelbrot({ visibleUI }) {
     canvas.addEventListener("touchend", handleTouchEnd);
 
     return () => {
+      disposed = true;
+      pendingRequests.forEach((settle) => settle({ results: [] }));
+      pendingRequests.clear();
       cancelAnimationFrame(animationFrameId);
-      // Terminate all workers in the pool
-      workerPoolRef.current.forEach((worker) => {
-        worker.terminate();
-      });
+      referencePendingRef.current = false;
+      currentlyDrawingRef.current = false;
       window.removeEventListener("pointermove", handleMouseMove);
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("touchmove", handleMouseMove);

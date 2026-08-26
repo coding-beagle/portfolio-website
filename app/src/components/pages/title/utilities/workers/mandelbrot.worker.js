@@ -1,117 +1,154 @@
+/**
+ * Mandelbrot worker.
+ *
+ * Two jobs, picked by `message.type`:
+ *
+ *  - "reference": iterate a single orbit at the view centre using arbitrary
+ *    precision (the BigFloat helpers are injected as globals by WorkerFactory),
+ *    and hand back the orbit as plain doubles.
+ *
+ *  - "orbit" / "tile": cache a reference orbit, then render rows of pixels by
+ *    perturbation — each pixel iterates the *difference* from the reference in
+ *    ordinary double precision, which is what lets the zoom go arbitrarily deep
+ *    without arbitrary-precision cost per pixel.
+ */
 // eslint-disable-next-line import/no-anonymous-default-export
 export default () => {
+  // Injected onto the worker's global scope by WorkerFactory; pulled off `self`
+  // explicitly rather than relied on as bare globals.
+  // eslint-disable-next-line no-restricted-globals
+  const { bfZero, bfToNumber, bfAdd, bfSub, bfMul } = self;
+
+  const BAILOUT = 4;
+
+  let refZx = new Float64Array(0);
+  let refZy = new Float64Array(0);
+  let refLen = 0;
+
   // eslint-disable-next-line no-restricted-globals
   self.addEventListener("message", (event) => {
     const data = event.data;
-    const results = calculateMandelbrotRow(
-      data.rowPixels,
-      data.rowY, // Correctly pass rowY as a separate parameter
-      data.zoomLevel,
-      data.canvasWidth,
-      data.canvasHeight,
-      data.centerX,
-      data.centerY,
-      data.xAspectRatio,
-      data.yAspectRatio
+
+    if (data.type === "reference") {
+      const orbit = calculateReferenceOrbit(data.cx, data.cy, data.maxIter);
+      // eslint-disable-next-line no-restricted-globals
+      self.postMessage(
+        {
+          type: "reference",
+          Zx: orbit.Zx,
+          Zy: orbit.Zy,
+          refLen: orbit.refLen,
+          refGeneration: data.refGeneration,
+        },
+        [orbit.Zx.buffer, orbit.Zy.buffer]
+      );
+      return;
+    }
+
+    if (data.type === "orbit") {
+      refZx = data.Zx;
+      refZy = data.Zy;
+      refLen = data.refLen;
+      return;
+    }
+
+    // "tile"
+    if (refLen === 0) {
+      // No reference orbit yet — still answer so the caller's queue drains.
+      // eslint-disable-next-line no-restricted-globals
+      self.postMessage({
+        results: [],
+        drawGeneration: data.drawGeneration,
+        requestId: data.requestId,
+      });
+      return;
+    }
+    const results = data.rowPixels.map((pixelX) =>
+      perturbedIterate(
+        data.dcx0 + pixelX * data.pixelSpacing,
+        data.dcy0 + data.rowY * data.pixelSpacing,
+        data.maxIter
+      )
     );
 
     // eslint-disable-next-line no-restricted-globals
     self.postMessage({
       results,
-      drawGeneration: data.drawGeneration, // Echo back the generation
+      drawGeneration: data.drawGeneration,
+      // Echoed so the caller can match a reply to the request that asked for
+      // it: several draws can have work outstanding on the same worker.
+      requestId: data.requestId,
     });
   });
 
-  function calculateMandelbrotRow(
-    rowPixels,
-    rowY, // Correctly pass rowY as a separate parameter
-    zoomLevel,
-    canvasWidth,
-    canvasHeight,
-    centerX,
-    centerY,
-    xAspectRatio,
-    yAspectRatio
-  ) {
-    return rowPixels.map((pixelX) =>
-      calculateMandelbrot(
-        pixelX,
-        rowY, // Use rowY here
-        zoomLevel,
-        canvasWidth,
-        canvasHeight,
-        centerX,
-        centerY,
-        xAspectRatio,
-        yAspectRatio
-      )
-    );
-  }
+  /**
+   * The high precision part: Z_{n+1} = Z_n^2 + C at the reference point, kept
+   * only as doubles since the perturbed iteration never needs more than that.
+   */
+  function calculateReferenceOrbit(cx, cy, maxIter) {
+    const Zx = new Float64Array(maxIter + 1);
+    const Zy = new Float64Array(maxIter + 1);
 
-  function calculateMandelbrot(
-    pixelX,
-    pixelY,
-    zoomLevel,
-    canvasWidth,
-    canvasHeight,
-    centerX,
-    centerY,
-    xAspectRatio,
-    yAspectRatio
-  ) {
-    const c = mapToComplex(
-      pixelX,
-      pixelY,
-      zoomLevel,
-      canvasWidth,
-      canvasHeight,
-      centerX,
-      centerY,
-      xAspectRatio,
-      yAspectRatio
-    ); // real or fake it is what it is ykwim
-    const cX = c[0];
-    const cY = c[1];
-    let zReal = 0;
-    let zIm = 0;
-    let count = 0;
-    let nextZReal, nextZIm;
-    while (zReal ** 2 + zIm ** 2 <= 4 && count < 2000) {
-      nextZReal = zReal * zReal - zIm * zIm + cX;
-      nextZIm = 2 * zReal * zIm + cY;
+    let zx = bfZero(cx.p);
+    let zy = bfZero(cy.p);
+    let n = 0;
 
-      zReal = nextZReal;
-      zIm = nextZIm;
+    while (n <= maxIter) {
+      const dzx = bfToNumber(zx);
+      const dzy = bfToNumber(zy);
+      Zx[n] = dzx;
+      Zy[n] = dzy;
+      n += 1;
+      if (dzx * dzx + dzy * dzy > BAILOUT) break; // orbit left the set
 
-      count += 1;
+      const zx2 = bfMul(zx, zx);
+      const zy2 = bfMul(zy, zy);
+      const nextZy = bfAdd(bfAdd(bfMul(zx, zy), bfMul(zx, zy)), cy);
+      zx = bfAdd(bfSub(zx2, zy2), cx);
+      zy = nextZy;
     }
 
-    return count;
+    return { Zx: Zx.slice(0, n), Zy: Zy.slice(0, n), refLen: n };
   }
 
-  function mapToComplex(
-    pixelX,
-    pixelY,
-    zoomLevel,
-    canvasWidth,
-    canvasHeight,
-    centerX,
-    centerY,
-    xAspectRatio,
-    yAspectRatio
-  ) {
-    // Calculate the view dimensions in the complex plane
-    const viewWidth = xAspectRatio / zoomLevel; // 4 units wide at zoom level 1
-    const viewHeight = yAspectRatio / zoomLevel; // 2.25 units high at zoom level 1
+  /**
+   * Perturbation with rebasing (Zhuoran's method): iterate the delta against
+   * the reference orbit, and whenever the delta grows larger than the orbit
+   * point itself — the case where the classic perturbation loses all its
+   * significant digits and glitches — restart the reference index from zero
+   * with the full value as the new delta. Exact, and no glitch detection pass.
+   */
+  function perturbedIterate(dcx, dcy, maxIter) {
+    let dzx = 0;
+    let dzy = 0;
+    let n = 0;
+    let m = 0; // index into the reference orbit
 
-    // Convert pixel coordinates to percentages of canvas
-    const percentX = pixelX / canvasWidth;
-    const percentY = pixelY / canvasHeight;
+    while (n < maxIter) {
+      const zx = refZx[m] + dzx;
+      const zy = refZy[m] + dzy;
+      const zz = zx * zx + zy * zy;
 
-    // Map to complex plane coordinates, centered on centerX,centerY
-    return [
-      centerX + (percentX - 0.5) * viewWidth,
-      centerY + (percentY - 0.5) * viewHeight,
-    ];
+      if (zz > BAILOUT) return n;
+
+      if (zz < dzx * dzx + dzy * dzy || m + 1 >= refLen) {
+        dzx = zx;
+        dzy = zy;
+        m = 0;
+      }
+
+      const Zx = refZx[m];
+      const Zy = refZy[m];
+      const nextDzx =
+        2 * (Zx * dzx - Zy * dzy) + (dzx * dzx - dzy * dzy) + dcx;
+      const nextDzy = 2 * (Zx * dzy + Zy * dzx) + 2 * dzx * dzy + dcy;
+
+      dzx = nextDzx;
+      dzy = nextDzy;
+      m += 1;
+      n += 1;
+    }
+
+    return maxIter;
   }
 };

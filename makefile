@@ -29,6 +29,18 @@ lock:
 	npm install; \
 	cd -; \
 
+# run the unit tests in app/tests
+test:
+	cd ./app; \
+	npm test; \
+	cd -; \
+
+# run the unit tests, re-running them as files change
+test_watch:
+	cd ./app; \
+	npm run test:watch; \
+	cd -; \
+
 # creates a built (HTML) version the react app
 build:
 	cd ./app; \
