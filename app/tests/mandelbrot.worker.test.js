@@ -40,11 +40,16 @@ function startWorker() {
       });
       return orbit;
     },
-    /** One row of pixels, expressed as offsets from the reference point. */
-    row(dcx0, dcy0, pixelSpacing, rowY, pixels, maxIter) {
+    /**
+     * One run of evenly spaced pixels along a row, expressed as offsets from
+     * the reference point — the same start/count/step the renderer sends.
+     */
+    row(dcx0, dcy0, pixelSpacing, rowY, count, maxIter) {
       worker.postMessage({
         type: "tile",
-        rowPixels: pixels,
+        startX: 0,
+        count,
+        step: 1,
         rowY,
         dcx0,
         dcy0,
@@ -57,7 +62,7 @@ function startWorker() {
     },
     /** Iteration count for a single point, as an offset from the reference. */
     at(dcx, dcy, maxIter) {
-      return this.row(dcx, dcy, 0, 0, [0], maxIter)[0];
+      return this.row(dcx, dcy, 0, 0, 1, maxIter)[0];
     },
   };
 }
@@ -95,6 +100,17 @@ function preciseIterate(cx, cy, maxIter) {
   return maxIter;
 }
 
+test("hands back counts in a transferable typed array", () => {
+  // Plain arrays of numbers are structured-cloned on the way out, which costs
+  // more per frame than painting it does.
+  const p = bfPrecisionForZoom(1);
+  const worker = startWorker();
+  worker.reference(bfFromNumber(-0.5, p), bfZero(p), 500);
+  const results = worker.row(-1.5, 0, 0.01, 0, 8, 500);
+  expect(results).toBeInstanceOf(Uint32Array);
+  expect(results).toHaveLength(8);
+});
+
 describe("reference orbit", () => {
   test("an orbit inside the set runs to the iteration limit", () => {
     const p = bfPrecisionForZoom(1);
@@ -124,15 +140,20 @@ describe("reference orbit", () => {
     };
     worker.postMessage({
       type: "tile",
-      rowPixels: [0, 1, 2],
+      startX: 0,
+      count: 3,
+      step: 1,
       rowY: 0,
       dcx0: 0,
       dcy0: 0,
       pixelSpacing: 0.1,
       maxIter: 100,
       drawGeneration: 9,
+      requestId: 4,
     });
-    expect(reply).toEqual({ results: [], drawGeneration: 9 });
+    expect(reply.results).toHaveLength(0);
+    expect(reply.drawGeneration).toBe(9);
+    expect(reply.requestId).toBe(4);
   });
 });
 
@@ -154,7 +175,7 @@ describe("perturbed iteration", () => {
         cy - refCy,
         spacing,
         0,
-        [...Array(60).keys()],
+        60,
         maxIter
       );
       results.forEach((got, i) => {
@@ -244,7 +265,7 @@ test("stays exact while diving to a zoom far past double precision", () => {
           (j / width - 0.5) * view,
           spacing,
           0,
-          [...Array(width).keys()],
+          width,
           maxIter
         )
       );

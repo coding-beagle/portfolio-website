@@ -55,31 +55,39 @@ export default () => {
     // "tile"
     if (refLen === 0) {
       // No reference orbit yet — still answer so the caller's queue drains.
-      // eslint-disable-next-line no-restricted-globals
-      self.postMessage({
-        results: [],
-        drawGeneration: data.drawGeneration,
-        requestId: data.requestId,
-      });
+      reply(new Uint32Array(0), data);
       return;
     }
-    const results = data.rowPixels.map((pixelX) =>
-      perturbedIterate(
-        data.dcx0 + pixelX * data.pixelSpacing,
-        data.dcy0 + data.rowY * data.pixelSpacing,
-        data.maxIter
-      )
-    );
 
-    // eslint-disable-next-line no-restricted-globals
-    self.postMessage({
-      results,
-      drawGeneration: data.drawGeneration,
-      // Echoed so the caller can match a reply to the request that asked for
-      // it: several draws can have work outstanding on the same worker.
-      requestId: data.requestId,
-    });
+    // A run of evenly spaced pixels, described rather than listed, and the
+    // counts handed back in a typed array so the reply is transferred rather
+    // than copied: a frame's worth as a plain Array costs ~60ms to clone.
+    const results = new Uint32Array(data.count);
+    const dcy = data.dcy0 + data.rowY * data.pixelSpacing;
+    for (let i = 0; i < data.count; i++) {
+      results[i] = perturbedIterate(
+        data.dcx0 + (data.startX + i * data.step) * data.pixelSpacing,
+        dcy,
+        data.maxIter
+      );
+    }
+
+    reply(results, data);
   });
+
+  function reply(results, request) {
+    // eslint-disable-next-line no-restricted-globals
+    self.postMessage(
+      {
+        results,
+        drawGeneration: request.drawGeneration,
+        // Echoed so the caller can match a reply to the request that asked for
+        // it: several draws can have work outstanding on the same worker.
+        requestId: request.requestId,
+      },
+      [results.buffer]
+    );
+  }
 
   /**
    * The high precision part: Z_{n+1} = Z_n^2 + C at the reference point, kept

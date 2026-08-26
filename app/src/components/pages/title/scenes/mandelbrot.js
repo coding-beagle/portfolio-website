@@ -30,6 +30,17 @@ import {
 // the perturbed iteration works with. Everything above this is fair game.
 const MAX_ZOOM = 1e290;
 
+// One worker per core, leaving the main thread a core of its own, and capped:
+// past a point the extra workers only add copies of the reference orbit, which
+// is megabytes apiece at depth.
+const WORKER_POOL_SIZE = Math.max(
+  2,
+  Math.min(
+    (typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4) - 1,
+    12
+  )
+);
+
 export default function Mandelbrot({ visibleUI }) {
   const { theme } = useTheme();
   const canvasRef = useRef(null);
@@ -45,12 +56,14 @@ export default function Mandelbrot({ visibleUI }) {
   const zoomDisplayRef = useRef("1.00e+0");
   const iterDisplayRef = useRef(`${BASE_MAX_ITER}  (auto x1.0)`);
 
+  const imageDataRef = useRef(null);
+  const pixelBufferRef = useRef(null);
   const paletteColoursRef = useRef(null);
   const paletteRef = useRef(null);
   const colourSpanRef = useRef(BASE_MAX_ITER);
   const workerPoolRef = useRef([]);
   const referenceWorkerRef = useRef(null);
-  const workerPoolSize = 4; // Number of workers to use
+
   const drawGenerationRef = useRef(0); // Track current draw generation
 
   // The view centre lives in arbitrary precision; the zoom factor stays a
@@ -79,7 +92,7 @@ export default function Mandelbrot({ visibleUI }) {
   useEffect(() => {
     // Initialize worker pool. The BigFloat library is injected into each blob
     // worker because the stringified worker body cannot carry its imports.
-    for (let i = 0; i < workerPoolSize; i++) {
+    for (let i = 0; i < WORKER_POOL_SIZE; i++) {
       workerPoolRef.current.push(new WorkerFactory(Worker, [createBigFloatLib]));
     }
     // A dedicated worker for the (expensive, arbitrary precision) reference
@@ -185,9 +198,6 @@ export default function Mandelbrot({ visibleUI }) {
   );
 
   const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
-
-  const colourInterp = (iterations) =>
-    paletteRef.current.colourFor(iterations, maxIterRef.current);
 
   const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
 
@@ -418,9 +428,53 @@ export default function Mandelbrot({ visibleUI }) {
       };
     });
 
+    /**
+     * Writes one work unit's counts into the pixel buffer and blits just the
+     * strip they cover. Colours come from the palette's packed lookup table
+     * and each block is a `fill` over a run of the buffer, so a full frame
+     * costs a few milliseconds instead of two million `fillRect` calls with a
+     * freshly built colour string apiece.
+     */
+    function paintWorkUnit(results, workUnit, ctx) {
+      const pixels = pixelBufferRef.current;
+      const image = imageDataRef.current;
+      if (!pixels || !image) return;
+
+      const { startX, step, y, resolution } = workUnit;
+      const palette = paletteRef.current;
+      const maxIter = maxIterRef.current;
+      const canvasWidth = image.width;
+      const rowEnd = Math.min(y + resolution, image.height);
+
+      if (resolution === 1) {
+        // The final pass is the expensive one and its blocks are single
+        // pixels, where a fill call per block costs more than the store does.
+        const offset = y * canvasWidth + startX;
+        for (let i = 0; i < results.length; i++) {
+          pixels[offset + i] = palette.packedFor(results[i], maxIter);
+        }
+      } else {
+        for (let i = 0; i < results.length; i++) {
+          const packed = palette.packedFor(results[i], maxIter);
+          const blockStart = startX + i * step;
+          const blockEnd = Math.min(blockStart + resolution, canvasWidth);
+          for (let row = y; row < rowEnd; row++) {
+            const offset = row * canvasWidth;
+            for (let x = offset + blockStart; x < offset + blockEnd; x++) {
+              pixels[x] = packed;
+            }
+          }
+        }
+      }
+
+      const dirtyWidth =
+        Math.min(startX + (results.length - 1) * step + resolution, canvasWidth) -
+        startX;
+      ctx.putImageData(image, 0, 0, startX, y, dirtyWidth, rowEnd - y);
+    }
+
     function processWorkUnit(workerIdx, workUnit, drawGeneration, ctx) {
       const worker = workerPoolRef.current[workerIdx];
-      const { chunk, y, resolution, dcx0, dcy0, pixelSpacing, maxIter } = workUnit;
 
       return new Promise((resolve) => {
         if (!worker || disposed) {
@@ -438,22 +492,21 @@ export default function Mandelbrot({ visibleUI }) {
             data.drawGeneration === drawGeneration &&
             drawGenerationRef.current === drawGeneration
           ) {
-            data.results.forEach((iterations, index) => {
-              ctx.fillStyle = colourInterp(iterations);
-              ctx.fillRect(chunk[index], y, resolution, resolution);
-            });
+            paintWorkUnit(data.results, workUnit, ctx);
           }
           resolve();
         });
 
         worker.postMessage({
           type: "tile",
-          rowPixels: chunk,
-          rowY: y,
-          dcx0,
-          dcy0,
-          pixelSpacing,
-          maxIter,
+          startX: workUnit.startX,
+          count: workUnit.count,
+          step: workUnit.step,
+          rowY: workUnit.y,
+          dcx0: workUnit.dcx0,
+          dcy0: workUnit.dcy0,
+          pixelSpacing: workUnit.pixelSpacing,
+          maxIter: workUnit.maxIter,
           drawGeneration,
           requestId,
         });
@@ -481,17 +534,18 @@ export default function Mandelbrot({ visibleUI }) {
         bfToNumber(bfSub(centerYRef.current, reference.cy)) - height / 2;
       const maxIter = maxIterRef.current;
 
-      // Collect all work units first
+      // Collect all work units first. A unit is a run of evenly spaced pixels
+      // along one row — start, count and step — rather than a list of
+      // coordinates, so nothing per-pixel crosses the worker boundary.
       const workUnits = [];
+      const columns = Math.ceil(canvas.width / resolution);
+      const chunkSize = 800; // Increased chunk size for better performance
       for (let y = 0; y < canvas.height; y += resolution) {
-        const x_array = [];
-        for (let x = 0; x < canvas.width; x += resolution) {
-          x_array.push(x);
-        }
-        const chunkSize = 800; // Increased chunk size for better performance
-        for (let i = 0; i < x_array.length; i += chunkSize) {
+        for (let first = 0; first < columns; first += chunkSize) {
           workUnits.push({
-            chunk: x_array.slice(i, i + chunkSize),
+            startX: first * resolution,
+            count: Math.min(chunkSize, columns - first),
+            step: resolution,
             y,
             resolution,
             dcx0,
@@ -558,6 +612,13 @@ export default function Mandelbrot({ visibleUI }) {
     const resizeCanvas = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+
+      // The frame is assembled in this buffer and blitted from it, so it has
+      // to be rebuilt whenever the canvas changes size.
+      const ctx = canvas.getContext("2d");
+      const image = ctx.createImageData(canvas.width, canvas.height);
+      imageDataRef.current = image;
+      pixelBufferRef.current = new Uint32Array(image.data.buffer);
     };
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
