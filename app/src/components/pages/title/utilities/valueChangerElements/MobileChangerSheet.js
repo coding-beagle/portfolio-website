@@ -179,11 +179,11 @@ export function MobileChangerSheet({ rerenderSetter, valueArrays }) {
         id="changerGroup"
         style={{
           position: "fixed",
-          // Same 24px inset as the theme / show-HUD corner buttons; the popover
-          // icon row uses it too and is padded to this button's 44px height,
-          // so both top rows line up.
-          top: "calc(24px + env(safe-area-inset-top, 0px))",
-          left: 24,
+          // 1em from the corner, like the theme / show-HUD buttons. The popover
+          // icon row uses the same inset and is padded to this button's 44px
+          // height, so the two top rows line up.
+          top: "calc(1em + env(safe-area-inset-top, 0px))",
+          left: "1em",
           margin: 0,
           fontSize: 16,
           minHeight: 44,

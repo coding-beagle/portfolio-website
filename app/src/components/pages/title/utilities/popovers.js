@@ -106,13 +106,12 @@ export function IconGroup({ icons }) {
           display: "flex",
           flexDirection: "row",
           alignItems: "center",
-          // 24px matches the inset of the theme / show-HUD corner buttons
-          // (their `1em` at `fontSize: 1.5em`). The 44px row height matches the
-          // mobile Options pill, so the two rows share a centre line.
-          minHeight: 44,
+          // Padded to the mobile Options pill's 44px height so the 2em glyphs
+          // share its centre line rather than sitting proud of it.
+          minHeight: "2.75em",
           position: "absolute",
-          top: "calc(24px + env(safe-area-inset-top, 0px))",
-          right: 24,
+          top: "calc(1em + env(safe-area-inset-top, 0px))",
+          right: "1em",
           gap: "0.5em",
         }}
         id="iconGroup"
