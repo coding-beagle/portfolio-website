@@ -179,11 +179,11 @@ export function MobileChangerSheet({ rerenderSetter, valueArrays }) {
         id="changerGroup"
         style={{
           position: "fixed",
-          // The popover icon row sits at `top: 1em` and is exactly 32px tall
-          // (2em glyph, line-height 1). Pull the 44px-tall button up by half
-          // the difference so the two rows share a centre line.
-          top: "calc(1em - 6px + env(safe-area-inset-top, 0px))",
-          left: "1em",
+          // Same 24px inset as the theme / show-HUD corner buttons; the popover
+          // icon row uses it too and is padded to this button's 44px height,
+          // so both top rows line up.
+          top: "calc(24px + env(safe-area-inset-top, 0px))",
+          left: 24,
           margin: 0,
           fontSize: 16,
           minHeight: 44,
