@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { clamp, distanceBetweenTwoPoints, ElementCollisionHitbox, getCloseColour, getRandomColour, scaleColour } from "../utilities/usefulFunctions";
 import { FireworkChaff } from "./firework";
 
@@ -384,21 +387,21 @@ export default function Runes({ visibleUI }) {
                                 valueRef: particleCountRef,
                                 minValue: "5",
                                 maxValue: "100",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                             {
                                 title: "Simulation Speed:",
                                 valueRef: simulationSpeedRef,
                                 minValue: "1",
                                 maxValue: "200.0",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                             {
                                 title: "Glow Radius:",
                                 valueRef: bloomEffectRef,
                                 minValue: "1",
                                 maxValue: "24.0",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                         ]}
                         rerenderSetter={setRender}

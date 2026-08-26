@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function Plants({ visibleUI }) {
   const { theme } = useTheme();
@@ -168,21 +171,21 @@ export default function Plants({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "1",
                 maxValue: "50",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "1000.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Length:",
                 valueRef: simulationLengthRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

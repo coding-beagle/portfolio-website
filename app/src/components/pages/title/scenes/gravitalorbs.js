@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function GravitalOrbs({ visibleUI }) {
   const { theme } = useTheme();
@@ -383,14 +386,14 @@ export default function GravitalOrbs({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "1",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "0",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
 
               // {
@@ -398,18 +401,18 @@ export default function GravitalOrbs({ visibleUI }) {
               //   valueRef: futurePredictionRef,
               //   minValue: "0.0",
               //   maxValue: "500.0",
-              //   type: "slider",
+              //   type: CHANGER_TYPE.SLIDER,
               // },
               {
                 title: "Gravitational Constant:",
                 valueRef: gravConstantRef,
                 minValue: "0.0",
                 maxValue: "10.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "",
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 buttonText: "Rerender Simulation",
                 callback: () => {
                   setRerenderSim((prev) => !prev);

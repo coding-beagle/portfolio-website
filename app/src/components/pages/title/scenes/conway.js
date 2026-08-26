@@ -5,7 +5,10 @@ import MouseTooltip, {
   PannableToolTip,
   ZoomableToolTip,
 } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleXmark,
@@ -777,12 +780,12 @@ export default function Conway({ visibleUI }) {
   const valueChangers = [
     [
       {
-        type: "display",
+        type: CHANGER_TYPE.DISPLAY,
         title: "Position:",
         valueRef: viewportRef,
       },
       {
-        type: "display",
+        type: CHANGER_TYPE.DISPLAY,
         title: "Zoom level:",
         valueRef: zoomRef,
       },
@@ -790,7 +793,7 @@ export default function Conway({ visibleUI }) {
 
     [
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: showPatternPreviewRef.current
           ? "Close Pattern Preview"
@@ -801,7 +804,7 @@ export default function Conway({ visibleUI }) {
         },
       },
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: "Clear Pattern",
         callback: () => {
@@ -811,7 +814,7 @@ export default function Conway({ visibleUI }) {
       },
     ],
     {
-      type: "slider",
+      type: CHANGER_TYPE.SLIDER,
       title: "Simulation Speed:",
       valueRef: simulationSpeedRef,
       minValue: 100,
@@ -820,7 +823,7 @@ export default function Conway({ visibleUI }) {
     },
     [
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "Stop / Start Simulation:",
         buttonText: (
           <FontAwesomeIcon icon={isPlaying.current ? faPause : faPlay} />
@@ -831,7 +834,7 @@ export default function Conway({ visibleUI }) {
         },
       },
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: <FontAwesomeIcon icon={faForwardStep} />,
         callback: () => {
@@ -840,7 +843,7 @@ export default function Conway({ visibleUI }) {
       },
     ],
     {
-      type: "button",
+      type: CHANGER_TYPE.BUTTON,
       title: "Clear All Cells:",
       buttonText: <FontAwesomeIcon icon={faCircleXmark} />,
       callback: () => {
@@ -853,7 +856,7 @@ export default function Conway({ visibleUI }) {
       },
     },
     {
-      type: "button",
+      type: CHANGER_TYPE.BUTTON,
       title: "Generate White Noise:",
       buttonText: <FontAwesomeIcon icon={faDice} />,
       callback: () => {

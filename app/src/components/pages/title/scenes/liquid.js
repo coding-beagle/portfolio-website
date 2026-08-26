@@ -1,7 +1,10 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, inRect, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
@@ -669,19 +672,19 @@ export default function Liquid({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "0.0",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Brush Size:",
                 valueRef: brushSizeRef,
                 minValue: "1.0",
                 maxValue: "10.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               [
                 {
                   title: "Tool Selection:",
-                  type: "button",
+                  type: CHANGER_TYPE.BUTTON,
                   enabled: currentToolRef.current === TOOLS.ERASE,
                   buttonText: "Erase",
                   callback: () => {
@@ -689,7 +692,7 @@ export default function Liquid({ visibleUI }) {
                   }
                 },
                 {
-                  type: "button",
+                  type: CHANGER_TYPE.BUTTON,
                   enabled: currentToolRef.current === TOOLS.SPONGE,
                   buttonText: "Sponge",
                   callback: () => {
@@ -699,7 +702,7 @@ export default function Liquid({ visibleUI }) {
               ],
               [{
                 title: "Block Selection:",
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 enabled: currentToolRef.current === TOOLS.WATER,
                 buttonText: "Water",
                 callback: () => {
@@ -707,7 +710,7 @@ export default function Liquid({ visibleUI }) {
                 }
               },
               {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 enabled: currentToolRef.current === TOOLS.WALL,
                 buttonText: "Wall",
                 callback: () => {
@@ -715,7 +718,7 @@ export default function Liquid({ visibleUI }) {
                 }
               },
               {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 enabled: currentToolRef.current === TOOLS.TAP,
                 buttonText: "Tap",
                 callback: () => {
@@ -723,7 +726,7 @@ export default function Liquid({ visibleUI }) {
                 }
               },
               {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 enabled: currentToolRef.current === TOOLS.DRAIN,
                 buttonText: "Drain",
                 callback: () => {
@@ -737,24 +740,24 @@ export default function Liquid({ visibleUI }) {
                   valueRef: tapFrequencyRef,
                   minValue: "1.0",
                   maxValue: "200.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Tap Spawn Duration:",
                   valueRef: tapOnTime,
                   minValue: "1.0",
                   maxValue: "100.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },],
               [{
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 buttonText: "Reset",
                 callback: () => {
                   setReset((prev) => { return !prev });
                 }
               },
               {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 buttonText: "Clear",
                 callback: () => {
                   if (clearRef.current) {

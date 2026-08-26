@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function Snow({ visibleUI }) {
   const { theme } = useTheme();
@@ -173,14 +176,14 @@ export default function Snow({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "100",
                 maxValue: "10000",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

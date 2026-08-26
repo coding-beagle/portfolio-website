@@ -3,7 +3,10 @@ import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup, iconTypes, PannableToolTip, ZoomableToolTip } from "../utilities/popovers";
 import Worker from "../utilities/workers/mandelbrot.worker";
 import WorkerFactory from "../utilities/workerFactory";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function Mandelbrot({ visibleUI }) {
   const { theme } = useTheme();
@@ -193,18 +196,18 @@ export default function Mandelbrot({ visibleUI }) {
   const setRerender = useState(0)[1]; // For ChangerGroup forced rerender
   const valueChangers = [
     {
-      type: "display",
+      type: CHANGER_TYPE.DISPLAY,
       title: "Position:",
       valueRef: complexPosRef,
     },
 
     {
-      type: "display",
+      type: CHANGER_TYPE.DISPLAY,
       title: "Zoom Intensity:",
       valueRef: zoomLevelRef,
     },
     {
-      type: "slider",
+      type: CHANGER_TYPE.SLIDER,
       title: "Max Draw Resolution:",
       valueRef: drawResolutionRef,
       minValue: 1,
@@ -213,7 +216,7 @@ export default function Mandelbrot({ visibleUI }) {
     },
     [
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "Toggle Theme:",
         buttonText: themesList[0][0],
         callback: () => {
@@ -232,7 +235,7 @@ export default function Mandelbrot({ visibleUI }) {
         },
       },
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: themesList[1][0],
         callback: () => {
@@ -250,7 +253,7 @@ export default function Mandelbrot({ visibleUI }) {
         },
       },
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: themesList[2][0],
         callback: () => {
@@ -268,7 +271,7 @@ export default function Mandelbrot({ visibleUI }) {
         },
       },
       {
-        type: "button",
+        type: CHANGER_TYPE.BUTTON,
         title: "",
         buttonText: themesList[3][0],
         callback: () => {
@@ -291,7 +294,7 @@ export default function Mandelbrot({ visibleUI }) {
       ? [
         [
           {
-            type: "color",
+            type: CHANGER_TYPE.COLOR,
             title: "Max Iteration Colour:",
             colorValue: customColours[0],
             onChange: (newColor) => {
@@ -312,7 +315,7 @@ export default function Mandelbrot({ visibleUI }) {
         ],
         [
           {
-            type: "color",
+            type: CHANGER_TYPE.COLOR,
             title: "Max Interp Colour:",
             colorValue: customColours[1],
             onChange: (newColor) => {
@@ -333,7 +336,7 @@ export default function Mandelbrot({ visibleUI }) {
         ],
         [
           {
-            type: "color",
+            type: CHANGER_TYPE.COLOR,
             title: "Min Interp Colour:",
             colorValue: customColours[2],
             onChange: (newColor) => {

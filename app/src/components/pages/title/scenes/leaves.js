@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { getCloseColour, randomFloatBetweenTwo, scaleColour } from "../utilities/usefulFunctions";
 
 export default function Leaves({ visibleUI }) {
@@ -213,21 +216,21 @@ export default function Leaves({ visibleUI }) {
                                 valueRef: particleCountRef,
                                 minValue: "10",
                                 maxValue: "100",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                             {
                                 title: "Simulation Speed:",
                                 valueRef: simulationSpeedRef,
                                 minValue: "1",
                                 maxValue: "200.0",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                             {
                                 title: "Autumn Percentage:",
                                 valueRef: autumnalRef,
                                 minValue: "0",
                                 maxValue: "100.0",
-                                type: "slider",
+                                type: CHANGER_TYPE.SLIDER,
                             },
                         ]}
                         rerenderSetter={setRender}

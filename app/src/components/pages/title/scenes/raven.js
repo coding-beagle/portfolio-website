@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
@@ -180,7 +183,7 @@ export default function Raven({ visibleUI }) {
               //   valueRef: simulationSpeedRef,
               //   minValue: "1",
               //   maxValue: "200.0",
-              //   type: "slider",
+              //   type: CHANGER_TYPE.SLIDER,
               // },
             ]}
             rerenderSetter={setRender}

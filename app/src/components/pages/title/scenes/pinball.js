@@ -1,7 +1,10 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { checkMouseInRadius, drawCircleAt, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
@@ -832,28 +835,28 @@ export default function Pinball({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Grid Spacing X:",
                 valueRef: gridSpacingX,
                 minValue: "100",
                 maxValue: "400",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Grid Spacing Y:",
                 valueRef: gridSpacingY,
                 minValue: "100",
                 maxValue: "400",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Ball Bounce Factor:",
                 valueRef: bouncynessRef,
                 minValue: "100",
                 maxValue: "300",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

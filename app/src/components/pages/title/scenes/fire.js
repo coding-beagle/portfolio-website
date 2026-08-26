@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
 
 export default function Fire({ visibleUI }) {
@@ -256,14 +259,14 @@ export default function Fire({ visibleUI }) {
                 valueRef: fireSizeRef,
                 minValue: "1",
                 maxValue: "800",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

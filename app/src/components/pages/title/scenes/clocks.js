@@ -1,6 +1,9 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
 
@@ -506,28 +509,28 @@ export default function Clocks({ visibleUI }) {
                 valueRef: moveSpeedModRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Click Effect Radius:",
                 valueRef: mouseShieldRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Hand Thickness:",
                 valueRef: thicknessRef,
                 minValue: "1",
                 maxValue: "30",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "NT UltraFidelity Bloom(TM):",
                 valueRef: bloomModRef,
                 minValue: "1",
                 maxValue: "200",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

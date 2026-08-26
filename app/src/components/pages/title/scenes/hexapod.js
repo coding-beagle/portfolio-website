@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function Hexapod({ visibleUI }) {
   const { theme } = useTheme();
@@ -1030,14 +1033,14 @@ export default function Hexapod({ visibleUI }) {
                 valueRef: bodyCountRef,
                 minValue: "1",
                 maxValue: "15",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Walking Speed:",
                 valueRef: gaitCountRef,
                 minValue: "45",
                 maxValue: "330",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function Boids({ visibleUI }) {
   const { theme } = useTheme();
@@ -239,28 +242,28 @@ export default function Boids({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "2",
                 maxValue: "300",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Attraction to Mouse (Main Bird):",
                 valueRef: attractionStrengthRef,
                 minValue: "1",
                 maxValue: "200",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Attraction to Main Bird (Other Birds):",
                 valueRef: secondaryAttractionStrengthRef,
                 minValue: "1",
                 maxValue: "200",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

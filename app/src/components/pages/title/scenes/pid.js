@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 
 export default function PID({ visibleUI }) {
   const { theme } = useTheme();
@@ -268,35 +271,35 @@ export default function PID({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "1",
                 maxValue: "100",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "P Gain",
                 valueRef: propGain,
                 minValue: "0.0",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "I Gain",
                 valueRef: integralGain,
                 minValue: "-100.0",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "D Gain",
                 valueRef: derivGain,
                 minValue: "0.0",
                 maxValue: "1000.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 type: 'button',

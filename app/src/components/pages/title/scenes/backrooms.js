@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState, useContext } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctions";
 import { VirtualJoypad } from "../utilities/virtualJoypad";
 import { MobileContext } from "../../../../contexts/MobileContext";
@@ -624,21 +627,21 @@ export default function Backrooms({ visibleUI }) {
                   valueRef: moveSpeedRef,
                   minValue: "1",
                   maxValue: "200.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Turn speed:",
                   valueRef: turnSpeedRef,
                   minValue: "1",
                   maxValue: "200.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "FoV angle:",
                   valueRef: fov,
                   minValue: "40",
                   maxValue: "110.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
 
               ]}

@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { ElementCollisionHitbox, getIndexFromBrushSize, safeNegativeModulo } from "../utilities/usefulFunctions";
 
 export default function SquishBall({ visibleUI }) {
@@ -511,17 +514,17 @@ export default function SquishBall({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Ball pressure",
                 valueRef: desiredAreaRef,
                 minValue: "1.0",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 title: "",
                 buttonText: showControlPointsRef.current
                   ? "Hide control points"

@@ -1,6 +1,9 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 import { IconGroup } from "../utilities/popovers";
 
@@ -164,7 +167,7 @@ export default function Life({ visibleUI }) {
             valueArrays={[
               {
                 title: "Life expectancy:",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
                 valueRef: lifeExpectancy,
                 valueSetter: setLifeExpectancy,
                 minValue: 1,
@@ -173,19 +176,19 @@ export default function Life({ visibleUI }) {
               },
               {
                 title: "Birthday:",
-                type: "date",
+                type: CHANGER_TYPE.DATE,
                 callback: setBirthdate,
                 defaultVal: "2004-07-12",
               },
               {
                 title: "Percent of life lived:",
                 valueRef: lifeRef,
-                type: "display",
+                type: CHANGER_TYPE.DISPLAY,
               },
               {
                 title: "Hovered Date",
                 valueRef: selectedDate,
-                type: "display",
+                type: CHANGER_TYPE.DISPLAY,
               },
             ]}
             rerenderSetter={setRender}

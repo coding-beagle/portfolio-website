@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { IconGroup } from "../utilities/popovers";
 import { addColour, ElementCollisionHitbox } from "../utilities/usefulFunctions";
 
@@ -389,42 +392,42 @@ export default function BadApple({ visibleUI }) {
                   valueRef: simulationSpeedRef,
                   minValue: "1",
                   maxValue: "400.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Scaling:",
                   valueRef: scaleRef,
                   minValue: "2",
                   maxValue: "8",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Restore Speed:",
                   valueRef: restoreSpeedRef,
                   minValue: "1",
                   maxValue: "99",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Click Radius:",
                   valueRef: mouseShieldRadiusRef,
                   minValue: "10.0",
                   maxValue: "300.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Click Strength:",
                   valueRef: mouseDisplacementStrengthRef,
                   minValue: "1.0",
                   maxValue: "100.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
                 {
                   title: "Volume:",
                   valueRef: volumeRef,
                   minValue: "0.0",
                   maxValue: "100.0",
-                  type: "slider",
+                  type: CHANGER_TYPE.SLIDER,
                 },
 
               ]}

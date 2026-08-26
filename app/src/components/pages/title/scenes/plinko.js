@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { drawCircleAt } from "../utilities/usefulFunctions";
 
 export default function Plinko({ visibleUI }) {
@@ -267,30 +270,30 @@ export default function Plinko({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "10",
                 maxValue: "3000",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Ball Bounce Factor:",
                 valueRef: bouncynessRef,
                 minValue: "100",
                 maxValue: "300",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               [{
                 title: 'Grid Type:',
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 buttonText: "Classic",
                 enabled: gridTypeRef.current === gridTypes.GRID,
                 callback: () => { gridTypeRef.current = gridTypes.GRID }
               }, {
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 buttonText: "Triangle",
                 enabled: gridTypeRef.current === gridTypes.TRIANGLE,
                 callback: () => { gridTypeRef.current = gridTypes.TRIANGLE }
@@ -300,14 +303,14 @@ export default function Plinko({ visibleUI }) {
                 valueRef: gridSpacingX,
                 minValue: "20",
                 maxValue: "200",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Grid Spacing Y:",
                 valueRef: gridSpacingY,
                 minValue: "20",
                 maxValue: "200",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

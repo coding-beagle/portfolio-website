@@ -1,6 +1,9 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
@@ -360,14 +363,14 @@ export default function Fireworks({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Glow Radius:",
                 valueRef: bloomEffectRef,
                 minValue: "1",
                 maxValue: "24.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

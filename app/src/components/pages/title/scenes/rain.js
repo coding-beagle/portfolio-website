@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
 
 export default function Rain({ visibleUI }) {
@@ -267,28 +270,28 @@ export default function Rain({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "100",
                 maxValue: "10000",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Wind Speed:",
                 valueRef: windspeedRef,
                 minValue: "-100",
                 maxValue: "100.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Click Umbrella Radius:",
                 valueRef: mouseShieldRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Title Umbrella Radius:",
@@ -296,7 +299,7 @@ export default function Rain({ visibleUI }) {
                 minValue: "1.0",
                 maxValue: "100.0",
                 callback: recalculateRectRef.current,
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
             ]}
             rerenderSetter={setRender}

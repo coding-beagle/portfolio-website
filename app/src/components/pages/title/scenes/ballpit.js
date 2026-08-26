@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import MouseTooltip, { GyroToolTip, IconGroup } from "../utilities/popovers";
-import { ChangerGroup } from "../utilities/valueChangers";
+import {
+  ChangerGroup,
+  CHANGER_TYPE,
+} from "../utilities/valueChangers";
 import { getCloseColour, getRandomColour, scaleValue } from "../utilities/usefulFunctions";
 
 export default function BallPit({ visibleUI }) {
@@ -404,39 +407,39 @@ export default function BallPit({ visibleUI }) {
                 valueRef: particleCountRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "display",
+                type: CHANGER_TYPE.DISPLAY,
               },
               {
                 title: "Simulation Speed:",
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Right Click Umbrella Radius:",
                 valueRef: mouseShieldRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Brush Radius:",
                 valueRef: brushRadiusRef,
                 minValue: "10.0",
                 maxValue: "300.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "Gravity Direction:",
                 valueRef: gravityDirectionRef,
                 minValue: "-180.0",
                 maxValue: "180.0",
-                type: "slider",
+                type: CHANGER_TYPE.SLIDER,
               },
               {
                 title: "",
-                type: "button",
+                type: CHANGER_TYPE.BUTTON,
                 callback: () => {
                   clearParticles.current();
                 },
