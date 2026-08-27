@@ -10,7 +10,10 @@ import {
 import {
   useCanvasScene,
   SceneCanvas,
+  Particle,
+  ParticleSystem,
   createPointerTracker,
+  repelWithinRadius,
   clearCanvas,
 } from "../utilities/engine";
 
@@ -34,31 +37,118 @@ export default function BallPit({ visibleUI }) {
   const [, setRender] = useState(0);
 
   const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
-    let particles = [];
     const gravity = 0.2;
+    const numParticleRows = 30;
+    const numParticleColumns = 30;
+    const lifespan = 1000;
 
-    const titleHitbox = new ElementCollisionHitbox(
-      "title",
-      0,
-      titleShieldRadiusRef
-    );
+    // The title acts as a shelf — balls that reach it are bounced back down.
+    const hitboxes = [
+      new ElementCollisionHitbox("title", 0, titleShieldRadiusRef),
+    ];
 
-    const recalculateRect = () => titleHitbox.recalculate();
+    const recalculateRect = () =>
+      hitboxes.forEach((hitbox) => hitbox.recalculate());
     recalculateRectRef.current = recalculateRect;
+    recalculateRect();
 
-    let lastGravity, gravity_horizontal, gravity_vertical;
+    let lastGravity, gravityHorizontal, gravityVertical;
 
     const recalcGravity = () => {
       const radians = gravityDirectionRef.current * (Math.PI / 180);
-      gravity_vertical = gravity * Math.cos(radians);
-      gravity_horizontal = gravity * Math.sin(radians);
+      gravityVertical = gravity * Math.cos(radians);
+      gravityHorizontal = gravity * Math.sin(radians);
     };
+
+    class Ball extends Particle {
+      constructor(x, y) {
+        const radians = gravityDirectionRef.current * (Math.PI / 180);
+        super(x, y, {
+          vx: 2 * gravity * Math.sin(radians),
+          vy: 2 * gravity * Math.cos(radians),
+          size: Math.random() * 10 + 5,
+          color: getRandomColour(),
+        });
+        this.grid = { x: 0, y: 0 };
+        this.timeAlive = 0;
+      }
+
+      /**
+       * The first ball overlapping this one. The grid check keeps the scan
+       * local — only balls within a cell of this one are measured properly.
+       */
+      colliding() {
+        return system.particles.find((particle) => {
+          if (particle === this) return false;
+          if (
+            Math.abs(particle.grid.x - this.grid.x) < 2 &&
+            Math.abs(particle.grid.y - this.grid.y) < 2
+          ) {
+            const dx = (this.x - particle.x) ** 2;
+            const dy = (this.y - particle.y) ** 2;
+            return dx + dy < (particle.size + this.size) ** 2;
+          }
+          return false;
+        });
+      }
+
+      update() {
+        this.timeAlive += 1;
+
+        hitboxes.forEach((hitbox) => {
+          if (visibleUIRef.current && hitbox.inElement(this.x, this.y)) {
+            this.vy *= -1;
+          }
+        });
+
+        if (rightClickRef.current) {
+          repelWithinRadius(
+            this,
+            mousePosRef.current,
+            mouseShieldRadiusRef.current
+          );
+        }
+
+        const collidingParticle = this.colliding();
+        if (collidingParticle) {
+          const angle = Math.atan2(
+            this.y - collidingParticle.y,
+            this.x - collidingParticle.x
+          );
+          this.vx += Math.cos(angle);
+          this.vy += Math.sin(angle);
+        }
+
+        this.vx += gravityHorizontal;
+        this.vy += gravityVertical;
+
+        this.integrate(simulationSpeedRef.current / 100);
+        this.bounce(canvas);
+
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+
+        this.updateGridFromPos();
+      }
+
+      updateGridFromPos() {
+        this.grid = {
+          x: scaleValue(this.x, 0, canvas.width, 0, numParticleColumns),
+          y: scaleValue(this.y, 0, canvas.height, 0, numParticleRows),
+        };
+      }
+    }
+
+    // Balls are painted and cleared by hand rather than by `step`: the pool has
+    // no target count to sync to, it grows under the brush and shrinks as balls
+    // age out.
+    const system = new ParticleSystem({ spawn: () => new Ball(0, 0) });
 
     /** Paint a burst of balls around a point, brush-style. */
     const spawnBrush = (position, count) => {
       for (let i = 0; i < count; i++) {
-        particles.push(
-          new Particle(
+        system.add(
+          new Ball(
             (Math.random() - 0.5) * brushRadiusRef.current + position.x,
             (Math.random() - 0.5) * brushRadiusRef.current + position.y
           )
@@ -88,136 +178,7 @@ export default function BallPit({ visibleUI }) {
       window.removeEventListener("deviceorientation", handleOrientation)
     );
 
-    recalculateRect();
-
-    const num_particle_rows = 30;
-    const num_particle_columns = 30;
-    const lifespan = 1000;
-
-
-    class Particle {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.vx = 2 * gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));;
-        this.vy = 2 * gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));;
-        this.size = Math.random() * 10 + 5;
-        this.color = getRandomColour();
-        this.grid = { x: 0, y: 0 };
-        this.timeAlive = 0;
-      }
-
-      colliding() {
-        return particles.find((particle) => {
-          if (particle === this) return false;
-          if (
-            Math.abs(particle.grid.x - this.grid.x) < 2 &&
-            Math.abs(particle.grid.y - this.grid.y) < 2
-          ) {
-            const dx = (this.x - particle.x) ** 2;
-            const dy = (this.y - particle.y) ** 2;
-            if (dx + dy < (particle.size + this.size) ** 2) {
-              return true;
-            }
-          }
-          return false;
-        });
-      }
-
-      update() {
-        this.timeAlive += 1;
-        if (this.timeAlive > lifespan) {
-          const me = particles.findIndex((particle) => {
-            return particle === this;
-          });
-          if (me !== -1) {
-            particles.splice(me, 1);
-          }
-        }
-        if (visibleUIRef.current && titleHitbox.inElement(this.x, this.y)) {
-          this.vy *= -1;
-        }
-
-        const dx = this.x - mousePosRef.current.x;
-        const dy = this.y - mousePosRef.current.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < mouseShieldRadiusRef.current && rightClickRef.current) {
-          const angle = Math.atan2(dy, dx);
-          this.vx = Math.cos(angle) * 5;
-          this.vy = Math.sin(angle) * 5;
-        }
-
-        const colliding_particle = this.colliding();
-        if (colliding_particle) {
-          const dx = this.x - colliding_particle.x;
-          const dy = this.y - colliding_particle.y;
-
-          const angle2 = Math.atan2(dy, dx);
-
-          this.vx += Math.cos(angle2);
-          this.vy += Math.sin(angle2);
-        }
-
-        // this.vx *= 0.9;
-
-        this.vx += gravity_horizontal;
-        this.vy += gravity_vertical;
-
-        let next_x = this.x + (this.vx * simulationSpeedRef.current) / 100;
-        let next_y = this.y + (this.vy * simulationSpeedRef.current) / 100;
-
-        if (next_x >= canvas.width - this.size) {
-          next_x = canvas.width - this.size;
-          this.vx *= -1;
-        }
-
-        if (next_x <= 0 + this.size) {
-          next_x = this.size;
-          this.vx *= -1;
-        }
-
-        if (next_y >= canvas.height - this.size) {
-          this.vy *= -1;
-          next_y = canvas.height - this.size;
-        }
-
-        if (next_y - this.size <= 0) {
-          this.vy *= -1;
-          next_y = 0 + this.size;
-        }
-
-
-        this.x = next_x;
-        this.y = next_y;
-        this.vx *= 0.98;
-        this.vy *= 0.98;
-
-        // this.x += (this.vx * simulationSpeedRef.current) / 100;
-        // this.y += (this.vy * simulationSpeedRef.current) / 100;
-
-        this.update_grid_from_pos();
-      }
-
-      update_grid_from_pos() {
-        this.grid = {
-          x: scaleValue(this.x, 0, canvasRef.current.width, 0, num_particle_columns),
-          y: scaleValue(this.y, 0, canvasRef.current.height, 0, num_particle_rows),
-        };
-      }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
-    }
-
-    clearParticles.current = () => {
-      particles = [];
-    };
+    clearParticles.current = () => system.clear();
 
     return {
       onResize: recalculateRect,
@@ -227,28 +188,27 @@ export default function BallPit({ visibleUI }) {
         if (lastGravity !== gravityDirectionRef.current) recalcGravity();
         lastGravity = gravityDirectionRef.current;
 
-        particleCountRef.current = particles.length;
+        particleCountRef.current = system.length;
 
         // The title only deflects balls while it is actually on screen.
-        if (visibleUIRef.current && !titleHitbox.elementObject) {
-          titleHitbox.tryUpdateElement(titleHitbox.elementName);
-        } else if (!visibleUIRef.current) {
-          titleHitbox.elementObject = null;
-        }
-        recalculateRect();
+        hitboxes.forEach((hitbox) => {
+          if (visibleUIRef.current && !hitbox.elementObject) {
+            hitbox.tryUpdateElement(hitbox.elementName);
+          } else if (!visibleUIRef.current) {
+            hitbox.elementObject = null;
+          }
+          hitbox.recalculate();
+        });
 
         if (mouseClickRef.current) {
           spawnBrush(mousePosRef.current, Math.floor(Math.random() * 10));
         }
 
-        particles.forEach((particle) => {
-          particle.update();
-          particle.draw();
-        });
+        system.prune((particle) => particle.timeAlive > lifespan);
+        system.update();
+        system.draw(ctx);
       },
-      cleanup: () => {
-        particles = [];
-      },
+      cleanup: () => system.clear(),
     };
   }, [theme.secondary]);
 
@@ -310,11 +270,9 @@ export default function BallPit({ visibleUI }) {
             rerenderSetter={setRender}
           />
 
-          <IconGroup icons={
-            [{ type: 'MOUSE' },
-            { type: 'GYRO', text: "Tilt your phone!" }
-            ]
-          } />
+          <IconGroup
+            icons={[{ type: "MOUSE" }, { type: "GYRO", text: "Tilt your phone!" }]}
+          />
         </div>
       )}
     </>
