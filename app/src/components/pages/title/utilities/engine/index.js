@@ -24,4 +24,5 @@ export {
   confineToCanvas,
   scatterWithMinDistance,
 } from "./particles";
+export { isGpuRenderingAvailable } from "./gpuParticles";
 export { Spark } from "./spark";

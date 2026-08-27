@@ -149,7 +149,7 @@ export default function Runes({ visibleUI }) {
           this.shatteredCount++;
           const speedScale = simulationSpeedRef.current / 100;
           this.childParticles.forEach((spark) =>
-            spark.update(speedScale, simulationSpeedRef.current)
+            spark.update(speedScale)
           );
         }
       }

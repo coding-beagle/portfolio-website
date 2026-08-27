@@ -15,6 +15,7 @@ const FIREWORK_TYPES = ["Circle", "Star", "Spiral", "Trailer"];
 export default function Fireworks({ visibleUI }) {
   const { theme } = useTheme();
   const simulationSpeedRef = useRef(100);
+  const launchRateRef = useRef(36);
   const bloomEffectRef = useRef(6);
   const colorRef = useRef(theme.accent);
   const fireworksRef = useRef([]);
@@ -27,6 +28,9 @@ export default function Fireworks({ visibleUI }) {
     const maxFireworkSpeed = 10;
     const maxFireworkRiseSpeed = 2;
     const fireWorkLifeSpan = 2000;
+    // The loop is a plain rAF with no delta, so rates are expressed in frames
+    // and this is what turns the per-minute slider into a per-frame chance.
+    const framesPerMinute = 60 * 60;
 
     /** Every burst pattern builds its sparks the same way; only the aim differs. */
     const makeSpark = (x, y, vx, vy, color) =>
@@ -162,21 +166,27 @@ export default function Fireworks({ visibleUI }) {
       }
 
       update() {
+        const speedScale = simulationSpeedRef.current / 100;
+
         if (this.exploded) {
-          this.postExplodeCount += 1;
+          // Age in simulation time, not frames, so slow motion gives the
+          // sparks longer to spread out rather than killing them early.
+          this.postExplodeCount += speedScale;
           return;
         }
 
-        const speedScale = simulationSpeedRef.current / 100;
         this.y += this.vy * speedScale;
-        this.vy += gravity * 0.2;
+        this.vy += gravity * 0.2 * speedScale;
         this.x += this.vx * speedScale;
 
         // Bounce off the sides rather than drifting out of frame.
         if (this.x >= canvas.width || this.x <= 0) this.vx *= -1;
 
-        // A trailer never bursts; it just sheds sparks the whole way up.
-        if (this.type === "Trailer" && Math.random() > this.sparklingIntensity) {
+        // A trailer never bursts; it just sheds sparks the whole way up. The
+        // shed chance is per unit of simulation time, so slow motion doesn't
+        // pack the trail into a solid line.
+        const shedChance = (1 - this.sparklingIntensity) * speedScale;
+        if (this.type === "Trailer" && Math.random() < shedChance) {
           this.points.push(
             makeSpark(
               this.x,
@@ -211,11 +221,15 @@ export default function Fireworks({ visibleUI }) {
       frame: () => {
         clearCanvas(ctx, canvas);
 
-        if (Math.random() > 0.99) {
+        const speedScale = simulationSpeedRef.current / 100;
+
+        // Launches are counted in simulation time too, so slow motion stretches
+        // the gaps between shells instead of crowding the sky with them.
+        const launchChance =
+          (launchRateRef.current / framesPerMinute) * speedScale;
+        if (Math.random() < launchChance) {
           fireworksRef.current.push(new Firework());
         }
-
-        const speedScale = simulationSpeedRef.current / 100;
 
         fireworksRef.current = fireworksRef.current.filter(
           (firework) => firework.postExplodeCount <= fireWorkLifeSpan
@@ -226,7 +240,7 @@ export default function Fireworks({ visibleUI }) {
           firework.draw(ctx);
 
           firework.points.forEach((spark) => {
-            spark.update(speedScale, simulationSpeedRef.current);
+            spark.update(speedScale);
             spark.draw(ctx, bloomEffectRef.current);
           });
         });
@@ -257,6 +271,13 @@ export default function Fireworks({ visibleUI }) {
                 valueRef: simulationSpeedRef,
                 minValue: "1",
                 maxValue: "200.0",
+                type: CHANGER_TYPE.SLIDER,
+              },
+              {
+                title: "Launches / Min:",
+                valueRef: launchRateRef,
+                minValue: "1",
+                maxValue: "240",
                 type: CHANGER_TYPE.SLIDER,
               },
               {

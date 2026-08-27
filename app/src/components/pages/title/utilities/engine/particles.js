@@ -11,6 +11,7 @@
  */
 
 import { clamp, distanceBetweenTwoPoints } from "../usefulFunctions";
+import { drawParticlesOnGpu } from "./gpuParticles";
 
 /** What a particle does when it leaves the canvas. */
 export const EDGE = {
@@ -145,11 +146,26 @@ export class ParticleSystem {
    * @param {() => Particle} options.spawn   makes one new particle
    * @param {{current: number}} [options.countRef]  target size, read each sync
    * @param {number} [options.count]  fixed target size when there is no slider
+   * @param {boolean} [options.gpu]  false pins the pool to the 2d context.
+   *   The default lets `draw` take the GPU path whenever the pool is big
+   *   enough, the particles are still plain circles, and the machine has
+   *   WebGL2 — see `gpuParticles.js`.
+   * @param {string} [options.blend]  the `globalCompositeOperation` the pool
+   *   is painted under. `"lighter"` makes overlapping particles accumulate,
+   *   which is what turns a crowd of embers into a bright core.
    */
-  constructor({ spawn, countRef = null, count = 0 }) {
+  constructor({
+    spawn,
+    countRef = null,
+    count = 0,
+    gpu = true,
+    blend = "source-over",
+  }) {
     this.spawn = spawn;
     this.countRef = countRef;
     this.fixedCount = count;
+    this.gpu = gpu;
+    this.blend = blend;
     this.particles = [];
   }
 
@@ -186,8 +202,26 @@ export class ParticleSystem {
     this.particles.forEach((particle) => particle.update(...args));
   }
 
+  /**
+   * Paint the pool.
+   *
+   * A pool of plain circles goes to the GPU in one draw call; anything else —
+   * a scene that overrode `draw`, a machine without WebGL2, a pool too small
+   * to be worth the composite — falls through to the 2d context, one arc at a
+   * time, exactly as it always did.
+   */
   draw(ctx) {
+    if (
+      this.gpu &&
+      drawParticlesOnGpu(ctx, this.particles, isPlainCircle, this.blend)
+    ) {
+      return;
+    }
+
+    const previousBlend = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = this.blend;
     this.particles.forEach((particle) => particle.draw(ctx));
+    ctx.globalCompositeOperation = previousBlend;
   }
 
   /** `sync`, `update`, `draw` — the whole frame for a plain particle scene. */
@@ -220,6 +254,14 @@ export class ParticleSystem {
     this.particles = [];
   }
 }
+
+/**
+ * True when `particle` still draws itself the way `Particle` does — a filled
+ * circle of `size` in `color`, and so something the GPU path can reproduce
+ * pixel for pixel. A subclass that wrote its own `draw` fails this and keeps
+ * the 2d context.
+ */
+const isPlainCircle = (particle) => particle.draw === Particle.prototype.draw;
 
 /**
  * Push `particle` away from `point` when it comes within `radius`, but only

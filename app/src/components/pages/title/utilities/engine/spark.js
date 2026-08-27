@@ -20,28 +20,39 @@ export class Spark extends Particle {
    * @param {number} options.size
    * @param {number} [options.sizeDecayRate]
    * @param {number} [options.gravity]
+   * @param {number} [options.shimmerRate] colour-drift chance per frame at 100%
+   *   simulation speed; 0 disables the shimmer
    */
-  constructor(x, y, { vx, vy, color, size, sizeDecayRate = 0, gravity = 0 }) {
+  constructor(
+    x,
+    y,
+    { vx, vy, color, size, sizeDecayRate = 0, gravity = 0, shimmerRate = 0.75 }
+  ) {
     super(x, y, { vx, vy, size, color });
     this.sizeDecayRate = sizeDecayRate;
     this.gravity = gravity;
+    this.shimmerRate = shimmerRate;
   }
 
   /**
    * @param {number} speedScale simulation speed as a multiplier
-   * @param {number} [shimmer] higher values shimmer less; pass the raw
-   *   simulation-speed slider to keep slow motion sparkling.
    */
-  update(speedScale, shimmer = Infinity) {
+  update(speedScale) {
     this.x += this.vx * speedScale;
-    this.vy += this.gravity;
+    // Gravity is an acceleration per unit of simulation time, so it has to be
+    // scaled too — otherwise slow motion pulls sparks down just as hard per
+    // frame while their sideways motion crawls, squashing the burst.
+    this.vy += this.gravity * speedScale;
     this.y += this.vy * speedScale;
 
     // NOTE: the original decremented an `initialSize` field that was never
     // assigned, so sparks have never actually shrunk. Preserved as-is —
     // applying the decay changes how every firework looks.
 
-    if (shimmer < Math.random() * 400) {
+    // Shimmer is a rate per unit of simulation time. Reading the speed slider
+    // directly used to invert this — the slower the sim, the faster the colour
+    // churned — so it is scaled like everything else instead.
+    if (Math.random() < this.shimmerRate * speedScale) {
       this.color = getCloseColour(this.color, 0.1, 0.1, 0.1);
     }
   }
