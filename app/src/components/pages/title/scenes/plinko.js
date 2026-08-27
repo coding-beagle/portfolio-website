@@ -1,265 +1,171 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
+import { drawCircleAt, getRandomColour } from "../utilities/usefulFunctions";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
-import { drawCircleAt } from "../utilities/usefulFunctions";
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
+
+const GRID_TYPES = { GRID: 0, TRIANGLE: 1 };
 
 export default function Plinko({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const particleCountRef = useRef(100);
   const gridSpacingX = useRef(100);
   const gridSpacingY = useRef(100);
   const bouncynessRef = useRef(100);
-
-  const gridTypes = { GRID: 0, TRIANGLE: 1 };
-
-  const gridTypeRef = useRef(gridTypes.GRID);
-
+  const gridTypeRef = useRef(GRID_TYPES.GRID);
   const colorRef = useRef(theme.accent);
   const simulationSpeedRef = useRef(100);
   const [, setRender] = useState(0);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
-    const resizeCanvas = () => {
-      canvas.width = window?.innerWidth;
-      canvas.height = window?.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    let particles = [];
+  const canvasRef = useCanvasScene(({ canvas, ctx }) => {
     const gravity = 0.05;
-    const maxSpeed = 1;
-    let animationFrameId;
+    const pegRadius = 5;
 
-
-    const hitbox = 5;
-
-    class PlinkoGrid {
+    /**
+     * The field of pegs. It is rebuilt every frame because the spacing and the
+     * layout are both live sliders — cheap enough at these counts, and it keeps
+     * the peg positions and what is drawn from ever disagreeing.
+     */
+    class PegField {
       constructor() {
-        this.gridType = gridTypes.grid;
-        this.gridPositions = [];
+        this.pegs = [];
       }
 
-      inGrid(x, y, size) {
-        return this.gridPositions.find((val) => {
-          let dx, dy;
-          dx = (x - val[0]) ** 2;
-          dy = (y - val[1]) ** 2;
-          if (dx + dy < (hitbox + size) ** 2) {
-            return val;
-          }
-        });
+      /** The peg a ball of `size` at (x, y) is currently overlapping, if any. */
+      pegAt(x, y, size) {
+        return this.pegs.find(
+          ([pegX, pegY]) =>
+            (x - pegX) ** 2 + (y - pegY) ** 2 < (pegRadius + size) ** 2
+        );
+      }
+
+      addPeg(x, y) {
+        this.pegs.push([x, y]);
+        drawCircleAt(ctx, x, y, pegRadius, colorRef.current);
       }
 
       draw() {
-        if (!canvas) { return }
-        this.gridPositions = [];
+        this.pegs = [];
+
+        const midX = canvas.width / 2;
+        const midY = canvas.height / 2;
         let offsetRow = false;
 
-        switch (gridTypeRef.current) {
-          case gridTypes.GRID:
-            for (
-              let y = 0;
-              y < canvasRef.current.height / 2.0;
-              y += gridSpacingY.current
-            ) {
-              offsetRow = !offsetRow;
-              for (
-                let x = 0;
-                x < canvasRef.current.width / 2;
-                x += gridSpacingX.current
-              ) {
-                let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
-                const x1 = canvasRef.current.width / 2 + xVal;
-                const x2 = canvasRef.current.width / 2 - xVal;
-
-                const y1 = canvasRef.current.height / 2 + y;
-                const y2 = canvasRef.current.height / 2 - y;
-
-
-                this.gridPositions.push([x2, y1]);
-                this.gridPositions.push([x1, y1]);
-                this.gridPositions.push([x2, y2]);
-                this.gridPositions.push([x1, y2]);
-
-                drawCircleAt(ctx, x1, y1, hitbox, colorRef.current);
-                drawCircleAt(ctx, x2, y1, hitbox, colorRef.current);
-                drawCircleAt(ctx, x1, y2, hitbox, colorRef.current);
-                drawCircleAt(ctx, x2, y2, hitbox, colorRef.current);
-
-              }
+        if (gridTypeRef.current === GRID_TYPES.TRIANGLE) {
+          // A widening wedge: each row is one spacing broader than the last.
+          for (let y = 0; y < canvas.height; y += gridSpacingY.current) {
+            offsetRow = !offsetRow;
+            for (let x = 0; x < y; x += gridSpacingX.current) {
+              const xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
+              this.addPeg(midX + xVal, y);
+              this.addPeg(midX - xVal, y);
             }
+          }
+          return;
+        }
 
-            break;
-
-          case gridTypes.TRIANGLE:
-            for (
-              let y = 0;
-              y < canvasRef.current.height;
-              y += gridSpacingY.current
-            ) {
-              offsetRow = !offsetRow;
-              for (
-                let x = 0;
-                x < y;
-                x += gridSpacingX.current
-              ) {
-                let xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
-                const x1 = canvasRef.current.width / 2 + xVal;
-                const x2 = canvasRef.current.width / 2 - xVal;
-
-                const y2 = y;
-
-                this.gridPositions.push([x2, y2]);
-                this.gridPositions.push([x1, y2]);
-
-                drawCircleAt(ctx, x1, y2, hitbox, colorRef.current);
-                drawCircleAt(ctx, x2, y2, hitbox, colorRef.current);
-
-              }
-
-            }
-            break;
-
-          default: {
+        // Mirrored about both axes, so the lattice stays centred as it grows.
+        for (let y = 0; y < midY; y += gridSpacingY.current) {
+          offsetRow = !offsetRow;
+          for (let x = 0; x < midX; x += gridSpacingX.current) {
+            const xVal = offsetRow ? x + gridSpacingX.current / 2 : x;
+            this.addPeg(midX + xVal, midY + y);
+            this.addPeg(midX - xVal, midY + y);
+            this.addPeg(midX + xVal, midY - y);
+            this.addPeg(midX - xVal, midY - y);
           }
         }
       }
     }
 
-    class Particle {
+    const pegField = new PegField();
+
+    class Ball extends Particle {
       constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.vx = Math.random() * 2 - 4;
-        this.vy = Math.random() * 10 + 5;
-        this.size = Math.random() * 10 + 5;
-        this.color = `#${Math.floor((Math.random() * 0.5 + 0.5) * 16777215)
-          .toString(16)
-          .padStart(6, "0")}`;
+        super(x, y, {
+          vx: Math.random() * 2 - 4,
+          vy: Math.random() * 10 + 5,
+          size: Math.random() * 10 + 5,
+          color: getRandomColour(),
+        });
       }
 
       reset() {
+        this.vx = Math.random() * 4 - 2;
+
+        // The wedge is fed from a narrow spout above its apex; the lattice
+        // takes drops from anywhere along the top.
+        if (gridTypeRef.current === GRID_TYPES.TRIANGLE) {
+          this.x =
+            canvas.width / 2 +
+            ((Math.random() - 0.5) * canvas.width) / 10.0;
+        } else {
+          this.x = Math.random() * canvas.width;
+        }
+
         if (gravity > 0.0) {
           this.y = 0;
           this.vy = 0.5;
-          this.x = gridTypeRef.current === gridTypes.TRIANGLE ? canvasRef.current.width / 2.0 + (Math.random() - 0.5) * canvasRef.current.width / 10.0 : Math.random() * canvas.width;
-          this.vx = Math.random() * 4 - 2;
         } else {
           this.y = canvas.height;
-          this.x = gridTypeRef.current === gridTypes.TRIANGLE ? canvasRef.current.width / 2.0 : Math.random() * canvas.width;
-          this.vx = Math.random() * 4 - 2;
         }
       }
 
       update() {
         this.vy += gravity;
-        const inGridVal = grid.inGrid(this.x, this.y, this.size);
-        if (inGridVal) {
-          const dx = this.x - inGridVal[0];
-          const dy = this.y - inGridVal[1];
-          const angle2 = Math.atan2(dy, dx);
 
+        const peg = pegField.pegAt(this.x, this.y, this.size);
+        if (peg) {
+          const angle = Math.atan2(this.y - peg[1], this.x - peg[0]);
           this.vx =
-            (Math.cos(angle2) * bouncynessRef.current) / 100 + this.vx / 2;
-          this.vy = (Math.sin(angle2) * bouncynessRef.current) / 100;
+            (Math.cos(angle) * bouncynessRef.current) / 100 + this.vx / 2;
+          this.vy = (Math.sin(angle) * bouncynessRef.current) / 100;
         }
 
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
+        this.integrate(simulationSpeedRef.current / 100);
 
-        if (this.y > canvas.height) {
-          this.reset();
-        }
-
-        if (this.x >= canvas.width + this.size * 3) {
-          this.reset();
-        }
-
-        if (this.x < 0 - this.size * 3) {
+        if (
+          this.y > canvas.height ||
+          this.x >= canvas.width + this.size * 3 ||
+          this.x < 0 - this.size * 3
+        ) {
           this.reset();
         }
       }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
     }
 
-    const grid = new PlinkoGrid();
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new Ball(x, y);
+      },
+    }).fill();
 
-    function initParticles() {
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Particle(x, y));
-      }
-    }
-
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      grid.draw();
-
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Particle(x, y));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    // Attach particles array to canvas for theme effect access
-    canvas._particles = particles;
-
-    return () => {
-      // Cleanup function to cancel the animation frame
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      particles = [];
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        pegField.draw();
+        system.step(ctx);
+      },
+      cleanup: () => system.clear(),
     };
   }, []);
 
-  // Update colorRef and all particles' colors on theme change
   useEffect(() => {
     colorRef.current = theme.accent;
   }, [theme]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
@@ -286,18 +192,25 @@ export default function Plinko({ visibleUI }) {
                 maxValue: "300",
                 type: CHANGER_TYPE.SLIDER,
               },
-              [{
-                title: 'Grid Type:',
-                type: CHANGER_TYPE.BUTTON,
-                buttonText: "Classic",
-                enabled: gridTypeRef.current === gridTypes.GRID,
-                callback: () => { gridTypeRef.current = gridTypes.GRID }
-              }, {
-                type: CHANGER_TYPE.BUTTON,
-                buttonText: "Triangle",
-                enabled: gridTypeRef.current === gridTypes.TRIANGLE,
-                callback: () => { gridTypeRef.current = gridTypes.TRIANGLE }
-              }],
+              [
+                {
+                  title: "Grid Type:",
+                  type: CHANGER_TYPE.BUTTON,
+                  buttonText: "Classic",
+                  enabled: gridTypeRef.current === GRID_TYPES.GRID,
+                  callback: () => {
+                    gridTypeRef.current = GRID_TYPES.GRID;
+                  },
+                },
+                {
+                  type: CHANGER_TYPE.BUTTON,
+                  buttonText: "Triangle",
+                  enabled: gridTypeRef.current === GRID_TYPES.TRIANGLE,
+                  callback: () => {
+                    gridTypeRef.current = GRID_TYPES.TRIANGLE;
+                  },
+                },
+              ],
               {
                 title: "Grid Spacing X:",
                 valueRef: gridSpacingX,

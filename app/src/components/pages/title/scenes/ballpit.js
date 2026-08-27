@@ -1,15 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { GyroToolTip, IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
-import { getCloseColour, getRandomColour, scaleValue } from "../utilities/usefulFunctions";
+  ElementCollisionHitbox,
+  getRandomColour,
+  scaleValue,
+} from "../utilities/usefulFunctions";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function BallPit({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const rightClickRef = useRef(false);
@@ -21,132 +27,66 @@ export default function BallPit({ visibleUI }) {
   // zero is straight down
   const gravityDirectionRef = useRef(0);
 
-  // Touch/swipe gesture refs
-  const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
-  const isSwipingRef = useRef(false);
-
   const simulationSpeedRef = useRef(100);
   const brushRadiusRef = useRef(100);
   const titleShieldRadiusRef = useRef(0);
-  const recalculateRectRef = useRef(() => { });
-  const [, setRender] = useState(0); // Dummy state to force re-render
+  const recalculateRectRef = useRef(() => {});
+  const [, setRender] = useState(0);
 
-  useEffect(() => {
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     let particles = [];
     const gravity = 0.2;
-    let animationFrameId;
 
-    const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-    };
+    const titleHitbox = new ElementCollisionHitbox(
+      "title",
+      0,
+      titleShieldRadiusRef
+    );
 
+    const recalculateRect = () => titleHitbox.recalculate();
     recalculateRectRef.current = recalculateRect;
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("popstate", recalculateRect);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = (e) => {
-      if (e.buttons === 2) {
-        rightClickRef.current = true;
-      } else {
-        mouseClickRef.current = true;
-      }
-    };
-
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-      rightClickRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
-    // --- Touch/swipe gesture handlers for spawning particles ---
-    const handleTouchStart = (e) => {
-      if (e.touches && e.touches.length === 1) {
-        const touch = e.touches[0];
-        const rect = canvas.getBoundingClientRect();
-        touchStartRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-          time: Date.now()
-        };
-        isSwipingRef.current = true;
-      }
-    };
-
-    const handleTouchMove = (e) => {
-      if (e.touches && e.touches.length === 1 && isSwipingRef.current) {
-        const touch = e.touches[0];
-        const rect = canvas.getBoundingClientRect();
-        const currentPos = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top
-        };
-
-        // Spawn particles along the swipe path
-        const numParticles = Math.floor(Math.random() * 5) + 2; // 2-6 particles per touch move
-        for (let i = 0; i < numParticles; i++) {
-          const x = (Math.random() - 0.5) * brushRadiusRef.current + currentPos.x;
-          const y = (Math.random() - 0.5) * brushRadiusRef.current + currentPos.y;
-          particles.push(new Particle(x, y));
-        }
-
-        // Update mouse position for other systems that might use it
-        mousePosRef.current = currentPos;
-      }
-    };
-
-    const handleTouchEnd = (e) => {
-      isSwipingRef.current = false;
-    };
 
     let lastGravity, gravity_horizontal, gravity_vertical;
 
     const recalcGravity = () => {
-      gravity_vertical = gravity * Math.cos(gravityDirectionRef.current * (Math.PI / 180));
-      gravity_horizontal = gravity * Math.sin(gravityDirectionRef.current * (Math.PI / 180));
-    }
-
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
+      const radians = gravityDirectionRef.current * (Math.PI / 180);
+      gravity_vertical = gravity * Math.cos(radians);
+      gravity_horizontal = gravity * Math.sin(radians);
     };
+
+    /** Paint a burst of balls around a point, brush-style. */
+    const spawnBrush = (position, count) => {
+      for (let i = 0; i < count; i++) {
+        particles.push(
+          new Particle(
+            (Math.random() - 0.5) * brushRadiusRef.current + position.x,
+            (Math.random() - 0.5) * brushRadiusRef.current + position.y
+          )
+        );
+      }
+    };
+
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        rightDownRef: rightClickRef,
+        blockContextMenu: true,
+        // Swiping paints balls along the path of the finger.
+        onTouchMove: (position) =>
+          spawnBrush(position, Math.floor(Math.random() * 5) + 2),
+      })
+    );
+
+    // Tilting the phone tips the whole pit.
+    const handleOrientation = (event) => {
+      gravityDirectionRef.current = event.gamma;
+      recalcGravity();
+    };
+    window.addEventListener("deviceorientation", handleOrientation, true);
+    onCleanup(() =>
+      window.removeEventListener("deviceorientation", handleOrientation)
+    );
 
     recalculateRect();
 
@@ -194,10 +134,8 @@ export default function BallPit({ visibleUI }) {
             particles.splice(me, 1);
           }
         }
-        if (element && visibleUIRef.current) {
-          if (inElement(rect_padded, this.x, this.y)) {
-            this.vy *= -1;
-          }
+        if (visibleUIRef.current && titleHitbox.inElement(this.x, this.y)) {
+          this.vy *= -1;
         }
 
         const dx = this.x - mousePosRef.current.x;
@@ -281,106 +219,36 @@ export default function BallPit({ visibleUI }) {
       particles = [];
     };
 
+    return {
+      onResize: recalculateRect,
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (lastGravity !== gravityDirectionRef.current) recalcGravity();
+        lastGravity = gravityDirectionRef.current;
 
-      if (lastGravity !== gravityDirectionRef.current) {
-        recalcGravity();
-      }
+        particleCountRef.current = particles.length;
 
-      particleCountRef.current = particles.length;
-
-      if (visibleUIRef.current && !element) {
-        element = document.getElementById("title");
+        // The title only deflects balls while it is actually on screen.
+        if (visibleUIRef.current && !titleHitbox.elementObject) {
+          titleHitbox.tryUpdateElement(titleHitbox.elementName);
+        } else if (!visibleUIRef.current) {
+          titleHitbox.elementObject = null;
+        }
         recalculateRect();
-      } else {
-        element = null
-      }
 
-      if (element) {
-        const rect_temp = element.getBoundingClientRect();
-        const padded_hypothetical_rect = {
-          left: rect_temp.left - titleShieldRadiusRef.current,
-          right: rect_temp.right + titleShieldRadiusRef.current,
-          top: rect_temp.top - titleShieldRadiusRef.current,
-          bottom: rect_temp.bottom + titleShieldRadiusRef.current,
-        };
-        if (rect_padded.top !== padded_hypothetical_rect.top) {
-          recalculateRect()
+        if (mouseClickRef.current) {
+          spawnBrush(mousePosRef.current, Math.floor(Math.random() * 10));
         }
 
-      }
-
-      if (mouseClickRef.current) {
-        for (let i = 0; i < Math.floor(Math.random() * 10); i++) {
-          const x =
-            (Math.random() - 0.5) * brushRadiusRef.current +
-            mousePosRef.current.x;
-          const y =
-            (Math.random() - 0.5) * brushRadiusRef.current +
-            mousePosRef.current.y;
-          particles.push(new Particle(x, y));
-        }
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-
-      lastGravity = gravityDirectionRef.current;
-
-
-    }
-
-    const handleOrientation = (event) => {
-      gravityDirectionRef.current = event.gamma;
-      recalcGravity();
-    }
-
-    // initParticles();
-    animate();
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("contextmenu", handleContextMenu);
-
-    window.addEventListener("deviceorientation", handleOrientation, true);
-
-    // Touch event listeners for swipe gestures to spawn particles
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchmove", handleTouchMove, { passive: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true });
-
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("deviceorientation", handleOrientation);
-      window.removeEventListener("contextmenu", handleContextMenu);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("popstate", recalculateRect);
-      if (canvas) {
-        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
-      }
-      particles = [];
+        particles.forEach((particle) => {
+          particle.update();
+          particle.draw();
+        });
+      },
+      cleanup: () => {
+        particles = [];
+      },
     };
   }, [theme.secondary]);
 
@@ -390,14 +258,7 @@ export default function BallPit({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

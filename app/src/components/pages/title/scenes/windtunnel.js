@@ -1,101 +1,51 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
+import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  createPointerTracker,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
-export default function WindTunnel() {
+export default function WindTunnel({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const particleCountRef = useRef(2000);
   const simulationSpeedRef = useRef(100);
   const mouseShieldRadiusRef = useRef(100);
-  const [, setRender] = useState(0); // Dummy state to force re-render
+  const [, setRender] = useState(0);
 
-  useEffect(() => {
-    const element = document.getElementById("title");
-    const element2 = document.getElementById("linkIcons");
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let rect2_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
-    let element2CenterX = 0;
-    let element2CenterY = 0;
-
-    let particles = [];
-    const gravity = 0.0;
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const windSpeed = 0.2;
-    const titleShieldRadiusVertical = 10;
-    const titleShieldRadiusHorizontal = 200;
-
-    const linksShieldRadiusVertical = 10;
-    const linksShieldRadiusHorizontal = 120;
-    let animationFrameId;
-    const maxFallSpeed = 13;
     const maxWindSpeed = 5;
 
-    const recalculateRect = () => {
-      const rect = element.getBoundingClientRect();
-      const rect2 = element2.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusHorizontal,
-        right: rect.right + titleShieldRadiusHorizontal,
-        top: rect.top - titleShieldRadiusVertical,
-        bottom: rect.bottom + titleShieldRadiusVertical,
-      };
-      rect2_padded = {
-        left: rect2.left - linksShieldRadiusHorizontal,
-        right: rect2.right + linksShieldRadiusHorizontal,
-        top: rect2.top - linksShieldRadiusVertical,
-        bottom: rect2.bottom + linksShieldRadiusVertical,
-      };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
-      element2CenterX = rect2.left + rect2.width / 2;
-      element2CenterY = rect2.top + rect2.height / 2;
-    };
+    // The page furniture deflects the airflow; wide horizontally, tight
+    // vertically, so the stream parts around it rather than over it.
+    const hitboxes = [
+      new ElementCollisionHitbox("title", 0, null, 10, 10, 200, 200),
+      new ElementCollisionHitbox("linkIcons", 0, null, 10, 10, 120, 120),
+    ];
 
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
-
+    const recalculateRect = () => hitboxes.forEach((box) => box.recalculate());
     recalculateRect();
 
-    class Particle {
-      constructor(x, y, vx = Math.random() * 2 - 1) {
-        this.x = x;
-        this.y = y;
-        this.vx = vx;
-        this.vy = 0;
-        this.size = 1;
-        this.color = theme.accent;
+    onCleanup(
+      createPointerTracker(canvas, {
+        target: canvas,
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+      })
+    );
+
+    class Mote extends Particle {
+      constructor(x, y) {
+        super(x, y, { vy: 0, size: 1, color: theme.accent });
       }
 
       update(densityMap) {
@@ -103,61 +53,51 @@ export default function WindTunnel() {
         const dy = this.y - mousePosRef.current.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (element) {
-          const dxFromElementCenter = this.x - elementCenterX;
-          const dyFromElementCenter = this.y - elementCenterY;
+        // Deflect around the page furniture, and settle back down outside it.
+        hitboxes.forEach((hitbox, index) => {
+          if (!hitbox.elementObject) return;
 
-          if (inElement(rect_padded, this.x, this.y)) {
-            const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-            this.vx = this.vx * 0.99 + Math.cos(angle2) * 0.2;
-            this.vy = this.vy + Math.sin(angle2) * 0.55;
+          if (hitbox.inElement(this.x, this.y)) {
+            const angle = Math.atan2(
+              this.y - hitbox.center.y,
+              this.x - hitbox.center.x
+            );
+            if (index === 0) {
+              this.vx = this.vx * 0.99 + Math.cos(angle) * 0.2;
+              this.vy = this.vy + Math.sin(angle) * 0.55;
+            } else {
+              this.vx = this.vx + Math.cos(angle) * 0.2;
+              this.vy = this.vy + Math.sin(angle) * 0.6 + Math.random();
+            }
           } else {
             this.vy *= 0.9;
           }
-        }
-
-        if (element2) {
-          const dxFromElementCenter = this.x - element2CenterX;
-          const dyFromElementCenter = this.y - element2CenterY;
-
-          if (inElement(rect2_padded, this.x, this.y)) {
-            const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-            this.vx = this.vx + Math.cos(angle2) * 0.2;
-            this.vy = this.vy + Math.sin(angle2) * 0.6 + Math.random();
-          } else {
-            this.vy *= 0.9;
-          }
-        }
+        });
 
         if (distance < mouseShieldRadiusRef.current && mouseClickRef.current) {
           const angle = Math.atan2(dy, dx);
           this.vx = this.vx + Math.cos(angle) * 0.3;
           this.vy = this.vy + Math.sin(angle) * 0.55;
-        } else {
-          if (this.vx < maxWindSpeed) {
-            this.vx += windSpeed;
-          }
+        } else if (this.vx < maxWindSpeed) {
+          this.vx += windSpeed;
         }
 
-        // Move towards areas of low particle density
-        const gridX = Math.floor(this.x / 10);
-        const gridY = Math.floor(this.y / 10);
-        const density = densityMap[gridY]?.[gridX] || 0;
-
+        // Drift towards thinner air so the stream spreads out.
+        const density = densityMap[Math.floor(this.y / 10)]?.[
+          Math.floor(this.x / 10)
+        ] || 0;
         if (density < 1) {
-          // Threshold for low density
           const angle = Math.atan2(dy, dx);
           this.vx += Math.cos(angle) * 0.05;
           this.vy += Math.sin(angle) * 0.05;
         }
 
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        if (this.vx > maxWindSpeed) {
-          this.vx *= 0.99;
-        }
-        this.y +=
-          ((this.vy + Math.random() - 0.5) * simulationSpeedRef.current) / 100;
+        const speedScale = simulationSpeedRef.current / 100;
+        this.x += this.vx * speedScale;
+        if (this.vx > maxWindSpeed) this.vx *= 0.99;
+        this.y += (this.vy + Math.random() - 0.5) * speedScale;
 
+        // Off the right-hand edge, back in on the left.
         if (this.x >= canvas.width + this.size * 3) {
           this.x = 0;
           this.y = Math.random() * canvas.height;
@@ -165,21 +105,21 @@ export default function WindTunnel() {
           this.vx = Math.random() * maxWindSpeed - maxWindSpeed / 2;
         }
       }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
     }
 
-    function calculateDensityMap(particles) {
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new Mote(x, y);
+      },
+    }).fill();
+
+    const calculateDensityMap = () => {
       const densityMap = [];
       const gridSize = 30;
 
-      particles.forEach((particle) => {
+      system.forEach((particle) => {
         const gridX = Math.floor(particle.x / gridSize);
         const gridY = Math.floor(particle.y / gridSize);
 
@@ -190,138 +130,54 @@ export default function WindTunnel() {
       });
 
       return densityMap;
-    }
+    };
 
-    function initParticles() {
-      particles = [];
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Particle(x, y));
-      }
-    }
-
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Particle(x, y));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      const densityMap = calculateDensityMap(particles);
-
-      particles.forEach((particle) => {
-        particle.update(densityMap);
-        particle.draw();
-      });
-
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("touchmove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("touchmove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("resize", resizeCanvas);
-
-      // Clear particles array to free memory
-      particles = [];
+    return {
+      onResize: recalculateRect,
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        system.sync();
+        system.update(calculateDensityMap());
+        system.draw(ctx);
+      },
+      cleanup: () => system.clear(),
     };
   }, []);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
-      <div style={{ zIndex: 3000 }}>
-        <div style={{ position: "absolute", top: "1em", left: "1em" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Particle Count:
-            <input
-              type="range"
-              min="10"
-              max="20000"
-              value={particleCountRef.current}
-              onChange={(e) => {
-                particleCountRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Simulation Speed:
-            <input
-              type="range"
-              min="1.0"
-              max="200.0"
-              value={simulationSpeedRef.current}
-              onChange={(e) => {
-                simulationSpeedRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: "0.5em",
-            }}
-          >
-            Click Shield Radius:
-            <input
-              type="range"
-              min="10.0"
-              max="300.0"
-              value={mouseShieldRadiusRef.current}
-              onChange={(e) => {
-                mouseShieldRadiusRef.current = Number(e.target.value);
-                setRender((prev) => prev + 1); // Force re-render to update slider UI
-              }}
-              style={{ marginLeft: "0.5em" }}
-            />
-          </div>
+      <SceneCanvas ref={canvasRef} />
+
+      {visibleUI && (
+        <div style={{ zIndex: 3000 }}>
+          <ChangerGroup
+            valueArrays={[
+              {
+                title: "Particle Count:",
+                valueRef: particleCountRef,
+                minValue: "10",
+                maxValue: "20000",
+                type: CHANGER_TYPE.SLIDER,
+              },
+              {
+                title: "Simulation Speed:",
+                valueRef: simulationSpeedRef,
+                minValue: "1.0",
+                maxValue: "200.0",
+                type: CHANGER_TYPE.SLIDER,
+              },
+              {
+                title: "Click Shield Radius:",
+                valueRef: mouseShieldRadiusRef,
+                minValue: "10.0",
+                maxValue: "300.0",
+                type: CHANGER_TYPE.SLIDER,
+              },
+            ]}
+            rerenderSetter={setRender}
+          />
         </div>
-      </div>
+      )}
     </>
   );
 }

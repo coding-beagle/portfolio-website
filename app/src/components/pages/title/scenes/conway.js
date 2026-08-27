@@ -1,14 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, {
-  IconGroup,
-  PannableToolTip,
-  ZoomableToolTip,
-} from "../utilities/popovers";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleXmark,
@@ -17,6 +10,11 @@ import {
   faPause,
   faPlay,
 } from "@fortawesome/free-solid-svg-icons";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  attachListeners,
+} from "../utilities/engine";
 
 const names = {
   SKIPCHECK: true,
@@ -24,7 +22,6 @@ const names = {
 
 export default function Conway({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const simulationSpeedRef = useRef(175);
@@ -173,18 +170,13 @@ export default function Conway({ visibleUI }) {
     }
   };
 
-  useEffect(() => {
-    let animationFrameId;
-
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const handleContextMenu = (e) => {
       // prevent the right-click menu from appearing
       e.preventDefault();
     };
 
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    const redrawGrid = () => {
       try {
         gridManagerRef.current.draw();
       } catch (e) { }
@@ -318,10 +310,6 @@ export default function Conway({ visibleUI }) {
     const checkMobile = () => {
       return canvas.width < canvas.height;
     };
-
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
 
     // Update getGridFromMousePos to use viewport and zoom
     const getGridFromMousePos = () => {
@@ -725,38 +713,24 @@ export default function Conway({ visibleUI }) {
     const gridDrawer = new Grid();
     gridManagerRef.current = gridDrawer;
 
-    function animate() {
-      gridDrawer.update();
-      animationFrameId = requestAnimationFrame(animate);
-    }
+    // Panning, pinch-zoom and brushing are all bespoke here, so the bindings
+    // are declared once and torn down from that same list.
+    onCleanup(
+      attachListeners([
+        [canvas, "pointermove", handlePointerMove],
+        [canvas, "pointerdown", handlePointerDown],
+        [canvas, "pointerup", handlePointerUp],
+        [canvas, "wheel", handleWheel, { passive: false }],
+        [canvas, "touchstart", handleTouchStart, { passive: false }],
+        [canvas, "touchmove", handleTouchMove, { passive: false }],
+        [canvas, "touchend", handleTouchEnd, { passive: false }],
+        [document, "contextmenu", handleContextMenu],
+      ])
+    );
 
-    animate();
-
-    canvas.addEventListener("pointermove", handlePointerMove);
-    canvas.addEventListener("pointerdown", handlePointerDown);
-    canvas.addEventListener("pointerup", handlePointerUp);
-    document.addEventListener("contextmenu", handleContextMenu);
-    canvas.addEventListener("wheel", handleWheel, { passive: false });
-    // --- Add touch listeners ---
-    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handlePointerDown);
-      canvas.removeEventListener("pointerup", handlePointerUp);
-      canvas.removeEventListener("wheel", handleWheel);
-      canvas.removeEventListener("pointerdown", handlePointerDown);
-      canvas.removeEventListener("pointermove", handlePointerMove);
-      canvas.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("resize", resizeCanvas);
-      document.removeEventListener("contextmenu", handleContextMenu);
-      // --- Remove touch listeners ---
-      canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchend", handleTouchEnd);
+    return {
+      onResize: redrawGrid,
+      frame: () => gridDrawer.update(),
     };
   }, []);
 
@@ -764,8 +738,6 @@ export default function Conway({ visibleUI }) {
   useEffect(() => {
     primaryColorRef.current = theme.primary;
     secondaryColorRef.current = theme.secondary;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
     // Redraw grid with new colors
     if (
       gridManagerRef.current &&
@@ -873,14 +845,7 @@ export default function Conway({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

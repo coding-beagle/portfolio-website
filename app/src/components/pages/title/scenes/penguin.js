@@ -2,13 +2,8 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../contexts/MobileContext";
 
-export default function Penguin({ visibleUI }) {
-  const { theme, themeName } = useTheme();
-  const canvasRef = useRef(null);
-  const particleCountRef = useRef(200);
-  const simulationSpeedRef = useRef(100);
-  const colorRef = useRef(theme.accent);
-  const [, setRender] = useState(0);
+export default function Penguin() {
+  const { themeName } = useTheme();
 
   const [skyImage, setSkyImage] = useState(() => {
     const isDark = themeName?.toLowerCase().includes('dark');
@@ -46,17 +41,6 @@ export default function Penguin({ visibleUI }) {
       return () => clearTimeout(timer);
     }
   }, [isDark]);
-
-  useEffect(() => {
-    colorRef.current = theme.accent;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._particles) {
-      canvas._particles.forEach((particle) => {
-        particle.color = theme.accent;
-      });
-    }
-  }, [theme]);
 
   const returnSkyGIF = (imgpath, cacheBust) => {
     const src = `${imgpath}?v=${cacheBust}`;

@@ -1,15 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
-import { ElementCollisionHitbox, getIndexFromBrushSize, safeNegativeModulo } from "../utilities/usefulFunctions";
+  ElementCollisionHitbox,
+  safeNegativeModulo,
+} from "../utilities/usefulFunctions";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  ParticleSystem,
+  createPointerTracker,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
 export default function SquishBall({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const ballSizeRef = useRef(100);
@@ -30,82 +37,22 @@ export default function SquishBall({ visibleUI }) {
   const titleHitbox = new ElementCollisionHitbox('title', 20);
   const collisionHitboxes = [titleHitbox];
 
-  useEffect(() => {
-
-    let particles = [];
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const gravity = 0.5;
-    let animationFrameId;
 
     const recalculateRect = () => {
       collisionHitboxes.forEach((hitbox) => { hitbox.recalculate() })
     };
-
     recalculateRectRef.current = recalculateRect;
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("popstate", recalculateRect);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      touchActiveRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      touchActiveRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
-
     recalculateRect();
 
-    const midPoint = (particle1, particle2) => {
-      return ({ x: (particle1.x + particle2.x) / 2, y: (particle1.y + particle2.y) / 2 })
-    }
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef,
+      })
+    );
 
     const vectorBetweenParticles = (particle1, particle2) => {
       return { x: particle1.x - particle2.x, y: particle1.y - particle2.y }
@@ -119,10 +66,6 @@ export default function SquishBall({ visibleUI }) {
       const length = vectorLength(vector);
 
       return { x: vector.x / length, y: vector.y / length }
-    }
-
-    const scaleVector = (vector, scale) => {
-      return { x: vector.x * scale, y: vector.y * scale }
     }
 
     class Body {
@@ -268,26 +211,6 @@ export default function SquishBall({ visibleUI }) {
       }
     }
 
-    class TrackingDot {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.size = 10;
-        this.color = theme.accent;
-      }
-      update(x, y) {
-        this.x = x;
-        this.y = y;
-      }
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
-    }
-
     let draggingPoint = null; // so we can only drag one point
 
     class Particle {
@@ -405,89 +328,32 @@ export default function SquishBall({ visibleUI }) {
       }
     }
 
-    // const trackingDot = new TrackingDot(0, 0);
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new Body(8, 100, x, y);
+      },
+    }).fill();
 
-    function initParticles() {
-      particles = [];
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Body(8, 100, x, y));
-      }
+    return {
+      onResize: recalculateRect,
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-      // particles[0].addDistanceConstraint(particles[1], 200);
-      // particles[0].addDistanceConstraint(particles[2], 150);
-      // particles[1].addDistanceConstraint(particles[2], 100);
-      // particles.push(new ConstrainedSegment(300, { x: x, y: y }))
+        // The title only pushes back while it is actually on screen.
+        collisionHitboxes.forEach((hitbox) => {
+          if (visibleUIRef.current && !hitbox.elementObject) {
+            hitbox.tryUpdateElement(hitbox.elementName);
+          } else if (!visibleUIRef.current) {
+            hitbox.elementObject = null;
+          }
+          hitbox.recalculate();
+        });
 
-    }
-
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // handle updating dead elements
-      collisionHitboxes.forEach((element) => {
-        if (visibleUIRef.current && !element.elementObject) {
-          element.tryUpdateElement(element.elementName);
-        } else {
-          element.elementObject = null;
-        }
-
-        if (element) {
-          element.recalculate()
-        }
-      })
-
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Particle(x, y));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("popstate", recalculateRect);
-      if (canvas) {
-        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
-      }
-      particles = [];
+        system.step(ctx);
+      },
+      cleanup: () => system.clear(),
     };
   }, [theme.secondary]);
 
@@ -497,14 +363,7 @@ export default function SquishBall({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

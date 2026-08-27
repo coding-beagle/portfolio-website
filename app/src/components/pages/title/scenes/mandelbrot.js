@@ -25,6 +25,10 @@ import {
   ChangerGroup,
   CHANGER_TYPE,
 } from "../utilities/valueChangers";
+import {
+  fitCanvasToWindow,
+  attachListeners,
+} from "../utilities/engine";
 
 // Doubles run out of exponent below ~1e-308, which is what bounds the deltas
 // the perturbed iteration works with. Everything above this is fair game.
@@ -609,19 +613,21 @@ export default function Mandelbrot({ visibleUI }) {
       }
     }
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-
-      // The frame is assembled in this buffer and blitted from it, so it has
-      // to be rebuilt whenever the canvas changes size.
+    // The frame is assembled in this buffer and blitted from it, so it has to
+    // be rebuilt whenever the canvas changes size, and a resize also has to
+    // kick off a fresh draw.
+    const rebuildFrameBuffer = () => {
       const ctx = canvas.getContext("2d");
       const image = ctx.createImageData(canvas.width, canvas.height);
       imageDataRef.current = image;
       pixelBufferRef.current = new Uint32Array(image.data.buffer);
     };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
+
+    const fitted = fitCanvasToWindow(canvas, () => {
+      rebuildFrameBuffer();
+      if (drawEverythingRef.current) drawEverythingRef.current();
+    });
+    rebuildFrameBuffer();
 
     let animationFrameId;
     let currentRes = 10;
@@ -818,19 +824,17 @@ export default function Mandelbrot({ visibleUI }) {
       lastTouchCenter = null;
     };
 
-    const handleResize = () => {
-      resizeCanvas();
-      drawEverythingRef.current();
-    };
-
-    window.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("wheel", handleWheel);
-    window.addEventListener("resize", handleResize);
-    canvas.addEventListener("touchstart", handleTouchStart);
-    canvas.addEventListener("touchmove", handleTouchMove);
-    canvas.addEventListener("touchend", handleTouchEnd);
+    // Panning, pinch-zoom and the wheel are all bespoke here, so the bindings
+    // are declared once and torn down from that same list.
+    const disposeListeners = attachListeners([
+      [window, "pointermove", handleMouseMove],
+      [window, "wheel", handleWheel],
+      [canvas, "pointerdown", handleMouseDown],
+      [canvas, "pointerup", handleMouseUp],
+      [canvas, "touchstart", handleTouchStart],
+      [canvas, "touchmove", handleTouchMove],
+      [canvas, "touchend", handleTouchEnd],
+    ]);
 
     return () => {
       disposed = true;
@@ -839,15 +843,8 @@ export default function Mandelbrot({ visibleUI }) {
       cancelAnimationFrame(animationFrameId);
       referencePendingRef.current = false;
       currentlyDrawingRef.current = false;
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("touchmove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("wheel", handleWheel);
-      canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchend", handleTouchEnd);
+      disposeListeners();
+      fitted.dispose();
     };
   }, []);
 

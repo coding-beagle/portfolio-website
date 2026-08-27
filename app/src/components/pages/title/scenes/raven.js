@@ -1,29 +1,20 @@
 import React, { useEffect, useRef, useState, useContext } from "react";
-import { useTheme } from "../../../../themes/ThemeProvider";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup } from "../utilities/valueChangers";
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { scaleValue } from "../utilities/usefulFunctions";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import { createPointerTracker } from "../utilities/engine";
 
 export default function Raven({ visibleUI }) {
-  const { theme } = useTheme();
   const mobile = useContext(MobileContext)
   const refContainer = useRef(null);
   const mounted = useRef(false);
 
   const crowRef = useRef(null);
   const mouseposref = useRef({ x: 0, y: 0 })
-
-  const mountCount = useRef(0);
-
-  const simulationSpeedRef = useRef(100);
-  const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
 
 
@@ -54,19 +45,6 @@ export default function Raven({ visibleUI }) {
     const light = new THREE.AmbientLight(color, intensity);
     scene.add(light);
 
-
-    var geometry = new THREE.BoxGeometry(1, 1, 1);
-    var material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    var cube = new THREE.Mesh(geometry, material);
-
-    // scene.add(cube)
-    // cube.position.x = -0.5;
-    // cube.position.y = 0.5;
-    // cube.position.z = -1;
-
-    // camera.position.z = 100;
-    // camera.position.x = 50;
-    // camera.position.y = 100;
 
     const objLoader = new OBJLoader();
     const mtlLoader = new MTLLoader();
@@ -119,50 +97,23 @@ export default function Raven({ visibleUI }) {
     };
     animate();
 
-    const handleMouseMove = (event) => {
-      let rect;
-      try {
-        rect = refContainer.current.getBoundingClientRect();
-      } catch (e) {
-        cancelAnimationFrame(animationFrameId);
-      }
-
-      mouseposref.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        let rect;
-
-        try {
-          rect = refContainer.current.getBoundingClientRect();
-        } catch (e) {
-          cancelAnimationFrame(animationFrameId);
-        }
-        const touch = event.touches[0];
-        mouseposref.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleTouchMove);
+    // The container is not a canvas, but it is what the pointer is measured
+    // against, so the shared tracker works here just the same.
+    const disposePointer = createPointerTracker(refContainer.current, {
+      posRef: mouseposref,
+      preventScroll: false,
+    });
 
     return () => {
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleTouchMove);
+      cancelAnimationFrame(animationFrameId);
+      disposePointer();
 
       if (refContainer.current && renderer.domElement) {
         refContainer.current.removeChild(renderer.domElement);
       }
       renderer.dispose();
     };
-  }, []);
+  }, [mobile]);
 
   return (
     <>

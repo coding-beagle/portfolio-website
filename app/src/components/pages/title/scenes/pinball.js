@@ -1,16 +1,21 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
 import {
   ChangerGroup,
   CHANGER_TYPE,
 } from "../utilities/valueChangers";
 import { checkMouseInRadius, drawCircleAt, getMiddleOfRectangle, getRandomColour, inRect, padRect } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Pinball({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
   const touchActiveRef = useRef(false);
@@ -22,91 +27,22 @@ export default function Pinball({ visibleUI }) {
   const ballRef = useRef(null);
   const controllables = useRef([]);
   const simulationSpeedRef = useRef(100);
-  const recalculateRectRef = useRef(() => { });
   const visibleUIRef = useRef(visibleUI);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   const mobile = useContext(MobileContext)
 
-  useEffect(() => {
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
-
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const gravity = 0.02;
-    let animationFrameId;
     const maxFallSpeed = 13;
 
-    const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
-    };
-
-    recalculateRectRef.current = recalculateRect;
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("popstate", recalculateRect);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      touchActiveRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      touchActiveRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
-
-    recalculateRect();
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef,
+      })
+    );
 
     const BALL_MAX_VX = 15.0
     const BALL_MAX_VY = 15.0
@@ -753,7 +689,7 @@ export default function Pinball({ visibleUI }) {
 
 
     function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      clearCanvas(ctx, canvas);
 
       if (ballRef.current) {
         ballRef.current.update()
@@ -771,44 +707,16 @@ export default function Pinball({ visibleUI }) {
       })
 
       dingerMan.update_and_draw();
-
-      animationFrameId = requestAnimationFrame(animate);
     }
 
     initScene();
-    animate();
 
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("popstate", recalculateRect);
-
-      controllables.current = [];
-      ballRef.current = null;
-
-      if (canvas) {
-        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
-      }
+    return {
+      frame: animate,
+      cleanup: () => {
+        controllables.current = [];
+        ballRef.current = null;
+      },
     };
   }, [theme.primary, theme.secondary]);
 
@@ -818,14 +726,7 @@ export default function Pinball({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

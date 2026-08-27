@@ -1,11 +1,14 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 // named enum for convenience innit
 const NAMED_ANGLE = {
@@ -101,7 +104,6 @@ const clock_angle_dict = {
 
 export default function Clocks({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const clockRef = useRef(null);
   const moveSpeedModRef = useRef(100);
   const bloomModRef = useRef(100);
@@ -114,9 +116,14 @@ export default function Clocks({ visibleUI }) {
 
   const mobile = useContext(MobileContext);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    // const titleShieldRadius = 30;
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef,
+      })
+    );
 
     class ClockUnit {
       constructor(x, y, min_hand, hr_hand, radius, speed_factor = 1.0) {
@@ -388,117 +395,46 @@ export default function Clocks({ visibleUI }) {
       return { start_x: clock_start_x, start_y: clock_start_y, width: clock_width }
     }
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-
-      if (clockRef.current) {
-        const size = calculate_clock_position()
-        clockRef.current.update_position_and_size(size.start_x, size.start_y, size.width);
-      }
+    /** Re-lay the clock out for the new canvas size. */
+    const relayoutClock = () => {
+      if (!clockRef.current) return;
+      const size = calculate_clock_position();
+      clockRef.current.update_position_and_size(
+        size.start_x,
+        size.start_y,
+        size.width
+      );
     };
 
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    let animationFrameId;
-
-    function initParticles() {
-      const size = calculate_clock_position()
-      clockRef.current = new DigitalAnalogClock(size.start_x, size.start_y, size.width);
-    }
-
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      clockRef.current.update_num();
-
-      clockRef.current.update();
-      clockRef.current.draw();
-
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    // Attach particles array to canvas for theme effect access
-    // canvas._particles = particles;
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      touchActiveRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      touchActiveRef.current = false;
-    };
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      clockRef.current = null;
-
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
+    const size = calculate_clock_position();
+    clockRef.current = new DigitalAnalogClock(
+      size.start_x,
+      size.start_y,
+      size.width
+    );
+    return {
+      onResize: relayoutClock,
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        clockRef.current.update_num();
+        clockRef.current.update();
+        clockRef.current.draw();
+      },
+      cleanup: () => {
+        clockRef.current = null;
+      },
     };
   }, [mobile]);
 
-  // Update colorRef and all particles' colors on theme change
+  // Recolour the clock face in place on a theme change.
   useEffect(() => {
-    // Update all existing particles' colors
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!clockRef.current) return;
     clockRef.current.update_clock_themes(theme.secondaryAccent, theme.secondary);
   }, [theme]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>

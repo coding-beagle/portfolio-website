@@ -1,14 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
+import { getCloseColour as closeColour } from "../utilities/usefulFunctions";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+} from "../utilities/engine";
 
 export default function Stars({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [particleCount, setParticleCount] = useState(120);
   const simulationSpeedRef = useRef(100);
@@ -17,35 +19,9 @@ export default function Stars({ visibleUI }) {
 
   const mouseClickRef = useRef(false);
 
-  const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    const getCloseColour = (colourHex) => closeColour(colourHex, 20, 10, 10);
 
-  useEffect(() => {
-    const getCloseColour = (colourHex) => {
-      const colour = {
-        r: parseInt(colourHex.slice(1, 3), 16),
-        g: parseInt(colourHex.slice(3, 5), 16),
-        b: parseInt(colourHex.slice(5, 7), 16),
-      };
-
-      const r = Math.floor(clamp(colour.r + Math.random() * 20 - 10, 0, 255));
-      const g = Math.floor(clamp(colour.g + Math.random() * 10 - 5, 0, 255));
-      const b = Math.floor(clamp(colour.b + Math.random() * 10 - 5, 0, 255));
-
-      const rHex = r.toString(16).padStart(2, "0");
-      const gHex = g.toString(16).padStart(2, "0");
-      const bHex = b.toString(16).padStart(2, "0");
-
-      return `#${rHex}${gHex}${bHex}`;
-    };
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
     const twinkleChance = 1.1;
     const maxTwinkleCounter = 100;
     const mouseTriggerDistance = 300;
@@ -55,7 +31,6 @@ export default function Stars({ visibleUI }) {
     const maxShootingStarCounter = 1000;
 
     let stars = [];
-    let animationFrameId;
     let blackHoles = [];
     const BLACK_HOLE_SIZE = 20;
     const BLACK_HOLE_LIFETIME = 2000; // frames
@@ -65,21 +40,13 @@ export default function Stars({ visibleUI }) {
     // Store explosion effects
     let explosions = [];
 
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
+    onCleanup(
+      createPointerTracker(canvas, {
+        target: canvas,
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+      })
+    );
 
     class Star {
       constructor(x, y, size) {
@@ -375,7 +342,6 @@ export default function Stars({ visibleUI }) {
 
         const mouseDx = mousePosRef.current.x - this.x;
         const mouseDy = mousePosRef.current.y - this.y;
-        const distance = Math.sqrt(mouseDx ** 2 + mouseDy ** 2);
 
         if (this.isActive) {
           // Check for collisions with stars
@@ -599,35 +565,23 @@ export default function Stars({ visibleUI }) {
         shootingStar.update();
         shootingStar.draw();
       });
-      animationFrameId = requestAnimationFrame(animate);
     }
 
     initBlocks();
-    animate();
 
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerup", handleMouseUp);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("pointerup", handleMouseUp);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("resize", resizeCanvas);
+    return {
+      frame: animate,
+      cleanup: () => {
+        stars = [];
+        blackHoles = [];
+        explosions = [];
+      },
     };
   }, [particleCount, theme, rerenderSim]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

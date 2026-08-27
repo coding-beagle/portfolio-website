@@ -1,238 +1,154 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  createPointerTracker,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
 export default function Boids({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
-  const mouseClickRef = useRef(false);
   const particleCountRef = useRef(10);
   const simulationSpeedRef = useRef(100);
   const primaryColorRef = useRef(theme.accent);
   const secondaryColorRef = useRef(theme.secondaryAccent);
   const attractionStrengthRef = useRef(100);
   const secondaryAttractionStrengthRef = useRef(100);
-  const speedLim = 5;
-  const [, setRender] = useState(0); // Dummy state to force re-render
+  const flockRef = useRef(null);
+  const [, setRender] = useState(0);
 
-  useEffect(() => {
-    let animationFrameId;
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    const speedLim = 5;
 
-    let particles = [];
+    onCleanup(
+      createPointerTracker(canvas, { target: canvas, posRef: mousePosRef })
+    );
 
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
+    class Bird extends Particle {
+      constructor(x, y, color) {
+        super(x, y, { size: Math.random() * 8 + 6, color });
+      }
 
-    class PrimaryBird {
+      /** Bleed speed off once over the limit, rather than clipping it. */
+      limitSpeed(damping) {
+        if (Math.sqrt(this.vx ** 2 + this.vy ** 2) > speedLim) {
+          this.vx *= damping;
+          this.vy *= damping;
+        }
+      }
+
+      /** Steer towards `target` at a strength the slider scales. */
+      seek(target, strength) {
+        this.vx += ((target.x - this.x) * strength) / 100000;
+        this.vy += ((target.y - this.y) * strength) / 100000;
+      }
+    }
+
+    /** The one bird that chases the cursor; everyone else chases it. */
+    class LeadBird extends Bird {
       constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.dx = Math.random() * 2 - 1;
-        this.dy = Math.random() * 2 - 1;
-        this.size = Math.random() * 8 + 6; // random size between 6 and 14
-        this.colour = primaryColorRef.current;
-      }
-
-      draw() {
-        ctx.fillStyle = this.colour;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, 2 * Math.PI);
-        ctx.fill();
+        super(x, y, primaryColorRef.current);
       }
 
       update() {
-        this.dx_to_mouse = mousePosRef.current.x - this.x;
-        this.dy_to_mouse = mousePosRef.current.y - this.y;
-
-        // Attraction is now directly proportional to the slider value
-        this.dx += (this.dx_to_mouse * attractionStrengthRef.current) / 100000;
-        this.dy += (this.dy_to_mouse * attractionStrengthRef.current) / 100000;
-
-        const currentSpeed = Math.sqrt(this.dx ** 2 + this.dy ** 2);
-        if (currentSpeed > speedLim) {
-          this.dx = this.dx * 0.95;
-          this.dy = this.dy * 0.95;
-        }
-
-        this.x += this.dx * (simulationSpeedRef.current / 100);
-        this.y += this.dy * (simulationSpeedRef.current / 100);
+        this.seek(mousePosRef.current, attractionStrengthRef.current);
+        this.limitSpeed(0.95);
+        this.integrate(simulationSpeedRef.current / 100);
       }
     }
 
-    class SecondaryBird {
-      constructor(x, y, PrimaryBird, particles) {
-        this.PrimaryBird = PrimaryBird;
-        this.particles = particles;
-        this.x = x;
-        this.y = y;
-        this.dx = Math.random();
-        this.dy = Math.random();
-        this.size = Math.random() * 8 + 6; // random size between 6 and 14
-        this.colour = secondaryColorRef.current;
+    class FlockBird extends Bird {
+      constructor(x, y, leader, flock) {
+        super(x, y, secondaryColorRef.current);
+        this.vx = Math.random();
+        this.vy = Math.random();
+        this.leader = leader;
+        this.flock = flock;
       }
 
-      draw() {
-        ctx.fillStyle = this.colour;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-
-      insideOtherBird() {
-        const distance = 50;
-        for (let particle of this.particles) {
-          if (particle !== this) {
-            const dx = this.x - particle.x;
-            const dy = this.y - particle.y;
-            const dist = Math.sqrt(dx ** 2 + dy ** 2);
-            if (dist < distance) {
-              return { dx: dx, dy: dy };
-            }
-          }
+      /** Offset to the first neighbour inside the separation radius. */
+      nearestCrowding() {
+        const separation = 50;
+        for (const other of this.flock.particles) {
+          if (other === this) continue;
+          const dx = this.x - other.x;
+          const dy = this.y - other.y;
+          if (Math.sqrt(dx ** 2 + dy ** 2) < separation) return { dx, dy };
         }
-        return false;
+        return null;
       }
 
       update() {
-        this.dx_to_bird = this.PrimaryBird.x - this.x;
-        this.dy_to_bird = this.PrimaryBird.y - this.y;
+        this.seek(this.leader, secondaryAttractionStrengthRef.current);
+        this.limitSpeed(0.99);
 
-        // Attraction is now directly proportional to the slider value
-        this.dx +=
-          (this.dx_to_bird * secondaryAttractionStrengthRef.current) / 100000;
-        this.dy +=
-          (this.dy_to_bird * secondaryAttractionStrengthRef.current) / 100000;
-
-        const currentSpeed = Math.sqrt(this.dx ** 2 + this.dy ** 2);
-        if (currentSpeed > speedLim) {
-          this.dx = this.dx * 0.99;
-          this.dy = this.dy * 0.99;
+        // Split the difference between where it is heading and away from the
+        // bird it is crowding — cohesion and separation in one nudge.
+        const crowding = this.nearestCrowding();
+        if (crowding) {
+          const away = Math.atan2(crowding.dy, crowding.dx);
+          const heading = Math.atan2(this.vy, this.vx);
+          const blended = (away + heading) / 2;
+          this.vx += Math.cos(blended) * 0.1;
+          this.vy += Math.sin(blended) * 0.1;
         }
 
-        const nearBirds = this.insideOtherBird();
-        if (nearBirds) {
-          const nearBirdDirection = Math.atan2(nearBirds.dy, nearBirds.dx);
-          const currentDirection = Math.atan2(this.dy, this.dx);
-          const newDirection = (nearBirdDirection + currentDirection) / 2;
-          this.dx = this.dx + Math.cos(newDirection) * 0.1;
-          this.dy = this.dy + Math.sin(newDirection) * 0.1;
-        }
-
-        this.x += this.dx * (simulationSpeedRef.current / 100);
-        this.y += this.dy * (simulationSpeedRef.current / 100);
+        this.integrate(simulationSpeedRef.current / 100);
       }
     }
 
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
+    const start = randomPointOnCanvas(canvas);
+    const leader = new LeadBird(start.x, start.y);
 
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
+    const flock = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new FlockBird(x, y, leader, flock);
+      },
+    });
+    flock.fill();
 
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
+    flockRef.current = { leader, flock };
 
-    function initParticles() {
-      particles = [];
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-      const x = Math.random() * canvas.width;
-      const y = Math.random() * canvas.height;
-      particles.push(new PrimaryBird(x, y));
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new SecondaryBird(x, y, particles[0], particles));
-      }
-    }
-
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (
-          let i = currentParticleCount;
-          i < particleCountRef.current + 1;
-          i++
-        ) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new SecondaryBird(x, y, particles[0], particles));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    // Attach particles array to canvas for theme effect access
-    canvas._particles = particles;
-    window.boidsParticles = particles;
-
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("resize", resizeCanvas);
+        leader.update();
+        leader.draw(ctx);
+        flock.step(ctx);
+      },
+      cleanup: () => {
+        flock.clear();
+        flockRef.current = null;
+      },
     };
   }, []);
 
-  // Update colorRefs and all birds' colors on theme change
+  // Recolour in place on a theme change, without restarting the flock.
   useEffect(() => {
     primaryColorRef.current = theme.accent;
     secondaryColorRef.current = theme.secondaryAccent;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._particles) {
-      if (canvas._particles[0]) canvas._particles[0].colour = theme.accent;
-      for (let i = 1; i < canvas._particles.length; i++) {
-        canvas._particles[i].colour = theme.secondaryAccent;
-      }
-    }
+
+    if (!flockRef.current) return;
+    flockRef.current.leader.color = theme.accent;
+    flockRef.current.flock.forEach((bird) => {
+      bird.color = theme.secondaryAccent;
+    });
   }, [theme]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
+
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

@@ -1,167 +1,102 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
+import { getCloseColour } from "../utilities/usefulFunctions";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  ParticleSystem,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Plants({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
-  const mousePosRef = useRef({ x: 0, y: 0 });
   const [restart, setRestart] = useState(false);
   const particleCountRef = useRef(25);
   const simulationSpeedRef = useRef(500);
   const simulationLengthRef = useRef(100);
-  const [, setRender] = React.useState(0);
+  const [, setRender] = useState(0);
 
-  const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
-
-  const getCloseColour = (colourHex) => {
-    const colour = {
-      r: parseInt(colourHex.slice(1, 3), 16),
-      g: parseInt(colourHex.slice(3, 5), 16),
-      b: parseInt(colourHex.slice(5, 7), 16),
-    };
-
-    const r = Math.floor(clamp(colour.r + Math.random() * 20 - 10, 0, 255));
-    const g = Math.floor(clamp(colour.g + Math.random() * 10 - 5, 0, 255));
-    const b = Math.floor(clamp(colour.b + Math.random() * 10 - 5, 0, 255));
-
-    const rHex = r.toString(16).padStart(2, "0");
-    const gHex = g.toString(16).padStart(2, "0");
-    const bHex = b.toString(16).padStart(2, "0");
-
-    return `#${rHex}${gHex}${bHex}`;
-  };
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-    let plants = [];
-    let animationFrameId;
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
+  const canvasRef = useCanvasScene(({ canvas, ctx }) => {
+    /**
+     * A plant is a chain of circles, each grown from the last: a little
+     * narrower, a little higher, and a shade off the previous colour.
+     */
     class Plant {
       constructor(x, y, size) {
         this.x = x;
         this.y = y;
-        this.growthPoints = [{ x: x, y: y }];
+        this.growthPoints = [{ x, y }];
         this.colours = [theme.secondaryAccent];
         this.sizes = [size];
       }
 
       update() {
-        if (Math.random() * 1000 > simulationSpeedRef.current) return; // Throttle the update
+        // Growth is stochastic rather than per-frame, so the slider reads as
+        // a growth rate rather than a frame rate.
+        if (Math.random() * 1000 > simulationSpeedRef.current) return;
 
         const lastPoint = this.growthPoints[this.growthPoints.length - 1];
+        const lastSize = this.sizes[this.sizes.length - 1];
+
         this.growthPoints.push({
-          x:
-            lastPoint.x +
-            this.sizes[this.sizes.length - 1] * (Math.random() - 0.5) * 2,
-          y:
-            lastPoint.y -
-            this.sizes[this.sizes.length - 1] * Math.random() * 2 +
-            1,
+          x: lastPoint.x + lastSize * (Math.random() - 0.5) * 2,
+          y: lastPoint.y - lastSize * Math.random() * 2 + 1,
         });
-
-        this.sizes.push(
-          this.sizes[this.sizes.length - 1] * (0.95 + Math.random() * 0.05)
-        );
-
+        this.sizes.push(lastSize * (0.95 + Math.random() * 0.05));
         this.colours.push(
-          getCloseColour(this.colours[this.colours.length - 1])
+          getCloseColour(this.colours[this.colours.length - 1], 20, 10, 10)
         );
 
+        // Fully grown: restart the whole scene so a new crop comes up.
         if (this.growthPoints.length > simulationLengthRef.current) {
-          setRestart(!restart);
+          setRestart((previous) => !previous);
         }
       }
 
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.sizes[0], 0, Math.PI * 2);
-        ctx.fillStyle = this.colours[0];
-        ctx.fill();
-        ctx.closePath();
+      draw(context) {
+        context.beginPath();
+        context.arc(this.x, this.y, this.sizes[0], 0, Math.PI * 2);
+        context.fillStyle = this.colours[0];
+        context.fill();
+        context.closePath();
 
         this.growthPoints.forEach((point, index) => {
-          ctx.beginPath();
-          ctx.arc(point.x, point.y, this.sizes[index], 0, Math.PI * 2);
-          ctx.fillStyle = this.colours[index];
-          ctx.fill();
-          ctx.closePath();
+          context.beginPath();
+          context.arc(point.x, point.y, this.sizes[index], 0, Math.PI * 2);
+          context.fillStyle = this.colours[index];
+          context.fill();
+          context.closePath();
         });
       }
     }
 
-    function initBlocks() {
-      plants = []; // Clear existing plants
-      for (let i = 0; i < particleCountRef.current; i++) {
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        // Scale the seed size with the viewport, and plant it on the floor.
         const size = Math.random() * 20 + (10 * canvas.width) / 1920;
-        const x = Math.random() * (canvas.width - size);
-        const y = Math.random() + (canvas.height - size);
-        plants.push(new Plant(x, y, size));
-      }
-    }
+        return new Plant(
+          Math.random() * (canvas.width - size),
+          Math.random() + (canvas.height - size),
+          size
+        );
+      },
+    }).fill();
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Adjust particle count
-      const currentParticleCount = plants.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const size = Math.random() * 20 + (10 * canvas.width) / 1920;
-          const x = Math.random() * (canvas.width - size);
-          const y = Math.random() + (canvas.height - size);
-          plants.push(new Plant(x, y, size));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        plants.splice(particleCountRef.current);
-      }
-      plants.forEach((plant) => {
-        plant.update();
-        plant.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initBlocks();
-    animate();
-
-    canvas.addEventListener("mousemove", handleMouseMove);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("resize", resizeCanvas);
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        system.step(ctx);
+      },
+      cleanup: () => system.clear(),
     };
   }, [restart]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
+
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

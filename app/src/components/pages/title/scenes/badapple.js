@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { IconGroup } from "../utilities/popovers";
 import { addColour, ElementCollisionHitbox } from "../utilities/usefulFunctions";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function BadApple({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const videoCanvasRef = useRef(null);
   const videoRef = useRef(null);
   const restoreSpeedRef = useRef(65);
@@ -27,19 +29,19 @@ export default function BadApple({ visibleUI }) {
   const mouseDisplacementStrengthRef = useRef(10);
 
   const scaleRef = useRef(4);
-  const colorRef = useRef(themeRef.current.accent);
+  const particlesRef = useRef([]);
   const [, setRender] = useState(0);
 
   const VID_WIDTH = 480;
   const VID_HEIGHT = 360;
 
-  // const SCALE_FACTOR = scaleRef.current;
-  let VIDEO_X = VID_WIDTH / scaleRef.current;
-  let VIDEO_Y = VID_HEIGHT / scaleRef.current;
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const vidCanvas = videoCanvasRef.current;
+
+    // How many source pixels each on-screen dot stands for; driven by the
+    // resolution slider, so it changes while the video plays.
+    let VIDEO_X = VID_WIDTH / scaleRef.current;
+    let VIDEO_Y = VID_HEIGHT / scaleRef.current;
 
     const titleHitbox = new ElementCollisionHitbox("title", 20)
     const iconsHitbox = new ElementCollisionHitbox("linkIcons", 20)
@@ -51,20 +53,20 @@ export default function BadApple({ visibleUI }) {
     const recalculateRect = () => {
       collisionElements.forEach((hitbox) => { hitbox.recalculate() })
     };
+    recalculateRect();
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
     const vidCtx = vidCanvas.getContext("2d");
 
     let particles = [];
-    let animationFrameId;
+    particlesRef.current = particles;
+
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef,
+      })
+    );
 
     // converts a 480 x 360 x 4 array to 480 x 360
     const flattenRGBAarray = (arr) => {
@@ -100,12 +102,8 @@ export default function BadApple({ visibleUI }) {
       return VIDEO_X * VIDEO_Y;
     }
 
-    const opacityToHex = (opacity) => {
-      return opacity.toString(16).padStart(2, '0');
-    };
-
-    const XSPACING = canvasRef.current.width / VIDEO_X;
-    const YSPACING = canvasRef.current.height / VIDEO_Y;
+    const XSPACING = canvas.width / VIDEO_X;
+    const YSPACING = canvas.height / VIDEO_Y;
     const startingSize = Math.min(XSPACING, YSPACING) / 2; // Half the spacing so particles don't overlap
 
     class Particle {
@@ -118,7 +116,7 @@ export default function BadApple({ visibleUI }) {
         this.targetY = y;
         this.opacity = 255;
         this.size = startingSize; // Half the spacing so particles don't overlap
-        this.color = colorRef.current;
+        this.color = themeRef.current.accent;
       }
 
       resize(size) {
@@ -167,37 +165,34 @@ export default function BadApple({ visibleUI }) {
       }
     }
 
+    /** Re-aim every dot at its cell centre after a resize or scale change. */
     const regenGrid = () => {
-      if (canvasRef.current) {
-        const XSPACING = canvasRef.current.width / VIDEO_X;
-        const YSPACING = canvasRef.current.height / VIDEO_Y;
-        const size = Math.min(XSPACING, YSPACING) / 2; // Half the spacing so particles don't overlap
+      const XSPACING = canvas.width / VIDEO_X;
+      const YSPACING = canvas.height / VIDEO_Y;
+      const size = Math.min(XSPACING, YSPACING) / 2;
 
-        let index = 0;
-        for (let y = 0; y < VIDEO_Y; y++) {
-          for (let x = 0; x < VIDEO_X; x++) {
-            particles[index].targetX = x * XSPACING + size / 2;
-            particles[index].targetY = y * YSPACING + size / 2;
-            index++;
-          }
+      let index = 0;
+      for (let y = 0; y < VIDEO_Y; y++) {
+        for (let x = 0; x < VIDEO_X; x++) {
+          particles[index].targetX = x * XSPACING + size / 2;
+          particles[index].targetY = y * YSPACING + size / 2;
+          index++;
         }
       }
     }
 
     function initParticles() {
-      if (canvasRef.current) {
-        const XSPACING = canvasRef.current.width / VIDEO_X;
-        const YSPACING = canvasRef.current.height / VIDEO_Y;
-        for (let y = 0; y < VIDEO_Y; y++) {
-          for (let x = startingSize; x < VIDEO_X; x++) {
-            particles.push(new Particle(x * XSPACING + Math.ceil(startingSize / 2), y * YSPACING + Math.ceil(startingSize / 2)));
-          }
+      const XSPACING = canvas.width / VIDEO_X;
+      const YSPACING = canvas.height / VIDEO_Y;
+      for (let y = 0; y < VIDEO_Y; y++) {
+        for (let x = startingSize; x < VIDEO_X; x++) {
+          particles.push(new Particle(x * XSPACING + Math.ceil(startingSize / 2), y * YSPACING + Math.ceil(startingSize / 2)));
         }
       }
     }
 
     function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      clearCanvas(ctx, canvas);
 
       videoRef.current.playbackRate = simulationSpeedRef.current / 100.0;
       videoRef.current.defaultPlaybackRate = simulationSpeedRef.current / 100.0;
@@ -247,86 +242,23 @@ export default function BadApple({ visibleUI }) {
       particles.forEach((particle) => {
         const col = arr_data[index] === 0 ? themeRef.current.primary : themeRef.current.accent;
         particle.update(col);
-        const XSPACING = canvasRef.current.width / VIDEO_X;
-        const YSPACING = canvasRef.current.height / VIDEO_Y;
+        const XSPACING = canvas.width / VIDEO_X;
+        const YSPACING = canvas.height / VIDEO_Y;
         particle.resize(Math.min(XSPACING, YSPACING) / 2);
         particle.draw();
         index++;
       });
-      animationFrameId = requestAnimationFrame(animate);
     }
 
     initParticles();
-    animate();
 
-    // Attach particles array to canvas for theme effect access
-    canvas._particles = particles;
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      touchActiveRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      touchActiveRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      particles = [];
+    return {
+      onResize: recalculateRect,
+      frame: animate,
+      cleanup: () => {
+        particles = [];
+        particlesRef.current = [];
+      },
     };
   }, []);
 
@@ -334,16 +266,12 @@ export default function BadApple({ visibleUI }) {
     visibleUIRef.current = visibleUI;
   }, [visibleUI]);
 
-  // Update colorRef and all particles' colors on theme change
+  // Recolour in place, without restarting the video.
   useEffect(() => {
     themeRef.current = theme;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._particles) {
-      canvas._particles.forEach((particle) => {
-        particle.color = theme.accent;
-      });
-    }
+    particlesRef.current.forEach((particle) => {
+      particle.color = theme.accent;
+    });
   }, [theme]);
 
   return (
@@ -373,14 +301,7 @@ export default function BadApple({ visibleUI }) {
           display: "none"
         }}
       />
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {
         visibleUI && (

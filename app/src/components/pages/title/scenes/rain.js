@@ -1,15 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { ElementCollisionHitbox } from "../utilities/usefulFunctions";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  createPointerTracker,
+  repelFromHitboxes,
+  repelWithinRadius,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
 export default function Rain({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
 
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
@@ -19,92 +26,36 @@ export default function Rain({ visibleUI }) {
   const mouseShieldRadiusRef = useRef(100);
   const windspeedRef = useRef(Math.round((Math.random() - 0.5) * 100));
   const titleShieldRadiusRef = useRef(30);
-  const recalculateRectRef = useRef(() => { });
+  const recalculateRectRef = useRef(() => {});
   const visibleUIRef = useRef(visibleUI);
-  const [, setRender] = useState(0); // Dummy state to force re-render
+  const [, setRender] = useState(0);
 
-  useEffect(() => {
-
-    let particles = [];
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const gravity = 0.5;
-    let animationFrameId;
     const maxFallSpeed = 13;
     const maxWindSpeed = 6;
 
-    const titleHitbox = new ElementCollisionHitbox("title", 20, titleShieldRadiusRef)
-    // const iconsHitbox = new ElementCollisionHitbox("linkIcons", 20, titleShieldRadiusRef)
+    // The title acts as an umbrella — drops that reach it are flung aside.
+    const hitboxes = [
+      new ElementCollisionHitbox("title", 20, titleShieldRadiusRef),
+    ];
 
-    let collisionElements = [titleHitbox];
-
-    const recalculateRect = () => {
-      collisionElements.forEach((hitbox) => { hitbox.recalculate() })
-    };
-
+    const recalculateRect = () =>
+      hitboxes.forEach((hitbox) => hitbox.recalculate());
     recalculateRectRef.current = recalculateRect;
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("popstate", recalculateRect);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      mouseClickRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
     recalculateRect();
 
-    class Particle {
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef: mouseClickRef,
+      })
+    );
+
+    class Drop extends Particle {
       constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.vx = Math.random() * 2 - 1;
-        this.vy = Math.random() * 10 + 5;
-        this.size = Math.random() * 2 + 1;
-        this.color = theme.secondary;
+        super(x, y, { vy: Math.random() * 10 + 5, color: theme.secondary });
       }
 
       reset() {
@@ -115,135 +66,61 @@ export default function Rain({ visibleUI }) {
       }
 
       update() {
-        const dx = this.x - mousePosRef.current.x;
-        const dy = this.y - mousePosRef.current.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (visibleUIRef.current) repelFromHitboxes(this, hitboxes);
 
-        if (visibleUIRef.current) {
-          collisionElements.forEach((element) => {
-            if (element.inElement(this.x, this.y)) {
-              const dxFromElementCenter = this.x - element.center.x;
-              const dyFromElementCenter = this.y - element.center.y;
-              const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-              this.vx = Math.cos(angle2) * 5;
-              this.vy = Math.sin(angle2) * 5;
-            }
-          })
-
-        }
-
-        if (distance < mouseShieldRadiusRef.current && (mouseClickRef.current)) {
-          const angle = Math.atan2(dy, dx);
-          this.vx = Math.cos(angle) * 5;
-          this.vy = Math.sin(angle) * 5;
+        if (mouseClickRef.current) {
+          repelWithinRadius(
+            this,
+            mousePosRef.current,
+            mouseShieldRadiusRef.current
+          );
         }
 
         if (Math.abs(this.vx) < maxWindSpeed) {
-          this.vx += windspeedRef.current / 50
+          this.vx += windspeedRef.current / 50;
         }
         if (this.vy < maxFallSpeed) {
           this.vy += gravity;
         }
 
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
+        this.integrate(simulationSpeedRef.current / 100);
 
-        if (this.y > canvas.height) {
-          this.reset()
+        if (
+          this.y > canvas.height ||
+          this.x >= canvas.width + this.size * 3 ||
+          this.x < 0 - this.size * 3
+        ) {
+          this.reset();
         }
-
-        if (this.x >= canvas.width + this.size * 3) {
-          this.reset()
-        }
-
-        if (this.x < 0 - this.size * 3) {
-          this.reset()
-        }
-      }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
       }
     }
 
-    function initParticles() {
-      particles = [];
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Particle(x, y));
-      }
-    }
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new Drop(x, y);
+      },
+    }).fill();
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return {
+      onResize: recalculateRect,
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-      collisionElements.forEach((element) => {
-        if (visibleUIRef.current && !element.elementObject) {
-          element.tryUpdateElement(element.elementName);
-        } else {
-          element.elementObject = null;
-        }
+        // The title is only an obstacle while it is actually on screen.
+        hitboxes.forEach((hitbox) => {
+          if (visibleUIRef.current && !hitbox.elementObject) {
+            hitbox.tryUpdateElement(hitbox.elementName);
+          } else if (!visibleUIRef.current) {
+            hitbox.elementObject = null;
+          }
+          hitbox.recalculate();
+        });
 
-        if (element) {
-          element.recalculate()
-        }
-      })
-
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Particle(x, y));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove);
-    window.addEventListener("touchstart", handleTouchStart);
-    window.addEventListener("touchend", handleTouchEnd);
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("popstate", recalculateRect);
-      if (canvas) {
-        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
-      }
-      particles = [];
+        system.step(ctx);
+      },
+      cleanup: () => system.clear(),
     };
   }, [theme.secondary]);
 
@@ -253,14 +130,8 @@ export default function Rain({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
+
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
@@ -305,9 +176,7 @@ export default function Rain({ visibleUI }) {
             rerenderSetter={setRender}
           />
 
-          <IconGroup icons={[
-            { type: "MOUSE" },
-          ]} />
+          <IconGroup icons={[{ type: "MOUSE" }]} />
         </div>
       )}
     </>

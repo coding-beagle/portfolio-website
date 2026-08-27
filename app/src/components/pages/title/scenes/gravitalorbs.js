@@ -1,33 +1,37 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  ParticleSystem,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
 export default function GravitalOrbs({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const particleCountRef = useRef(10);
   const gravConstantRef = useRef(3);
   const futurePredictionRef = useRef(0);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
+  const systemRef = useRef(null);
   const [, setRender] = useState(0);
   const [rerenderSim, setRerenderSim] = useState(false);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
+  const canvasRef = useCanvasScene(({ canvas, ctx }) => {
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new Body(x, y);
+      },
+    });
+    systemRef.current = system;
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-    let particles = [];
-    let animationFrameId;
+    // The n-body maths reads the whole cast every step.
+    const particles = system.particles;
 
     let TimeStep = 0.001;
     let lastTime = Date.now();
@@ -295,72 +299,47 @@ export default function GravitalOrbs({ visibleUI }) {
       }
     }
 
-    function initParticles() {
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Body(x, y));
-      }
-    }
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    system.fill();
 
-      const currentTime = Date.now();
-      TimeStep = (currentTime - lastTime) / 1000; // Convert to seconds
-      lastTime = currentTime; // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Body(x, y));
-        }
-        // Reset prediction cache when particles are added
-        sharedFuturePredictions = null;
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-        // Reset prediction cache when particles are removed
-        sharedFuturePredictions = null;
-      }
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-      const allParticlesOffScreen = particles.every(
-        (particle) =>
-          particle.x > canvas.width ||
-          particle.x < 0 ||
-          particle.y > canvas.height ||
-          particle.y < 0
-      );
+        const currentTime = Date.now();
+        TimeStep = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
 
-      if (allParticlesOffScreen) setRerenderSim((prev) => !prev);
-    }
+        // A change in cast invalidates any precomputed trajectories.
+        const countBefore = particles.length;
+        system.sync();
+        if (particles.length !== countBefore) sharedFuturePredictions = null;
 
-    initParticles();
-    animate();
+        system.update();
+        system.draw(ctx);
 
-    // Attach particles array to canvas for theme effect access
-    canvas._particles = particles;
-
-    return () => {
-      // Cleanup function to cancel the animation frame
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      particles = [];
+        // Once everything has flung itself off screen there is nothing left
+        // to watch, so deal a fresh hand.
+        const allOffScreen = particles.every(
+          (particle) =>
+            particle.x > canvas.width ||
+            particle.x < 0 ||
+            particle.y > canvas.height ||
+            particle.y < 0
+        );
+        if (allOffScreen) setRerenderSim((previous) => !previous);
+      },
+      cleanup: () => {
+        system.clear();
+        systemRef.current = null;
+      },
     };
   }, [rerenderSim, theme.secondary]);
 
-  // Update colorRef and all particles' colors on theme change
+  // Recolour in place, without restarting the simulation.
   useEffect(() => {
     colorRef.current = theme.accent;
-    // Update all existing particles' colors
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._particles) {
-      canvas._particles.forEach((particle) => {
+    if (systemRef.current) {
+      systemRef.current.forEach((particle) => {
         particle.color = theme.accent;
       });
     }
@@ -368,14 +347,7 @@ export default function GravitalOrbs({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>

@@ -1,156 +1,89 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  clearCanvas,
+  randomPointOnCanvas,
+} from "../utilities/engine";
 
 export default function Snow({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const particleCountRef = useRef(200);
   const simulationSpeedRef = useRef(100);
   const colorRef = useRef(theme.accent);
+  const systemRef = useRef(null);
   const [, setRender] = useState(0);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    // const titleShieldRadius = 30;
-
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    let particles = [];
+  const canvasRef = useCanvasScene(({ canvas, ctx }) => {
+    // Most of the time it snows; occasionally it snows upwards.
     const gravity = Math.random() > 0.1 ? 0.05 : -0.05;
     const maxSpeed = 1;
-    let animationFrameId;
 
-    class Particle {
+    class SnowFlake extends Particle {
       constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.vx = Math.random() * 2 - 1;
-        this.vy = Math.random() * 2 - 1;
-        this.size = Math.random() * 2 + 1;
-        this.color = colorRef.current;
+        super(x, y, { color: colorRef.current });
       }
 
       reset() {
+        this.x = Math.random() * canvas.width;
+        this.vx = Math.random() * 2 - 1;
         if (gravity > 0.0) {
           this.y = 0;
           this.vy *= -0.5;
-          this.x = Math.random() * canvas.width;
-          this.vx = Math.random() * 2 - 1;
         } else {
           this.y = canvas.height;
-          this.x = Math.random() * canvas.width;
-          this.vx = Math.random() * 2 - 1;
         }
       }
 
       update() {
         this.vy += gravity;
-        this.x += (this.vx * simulationSpeedRef.current) / 100;
-        this.y += (this.vy * simulationSpeedRef.current) / 100;
+        this.integrate(simulationSpeedRef.current / 100);
 
-        // if (element) {
-        //   const dxFromElementCenter = this.x - elementCenterX;
-        //   const dyFromElementCenter = this.y - elementCenterY;
+        if (this.y + this.size > canvas.height && gravity > 0.0) this.reset();
+        if (this.y + this.size < 0.0 && gravity < 0.0) this.reset();
 
-        //   if (inElement(rect_padded, this.x, this.y)) {
-        //     const angle2 = Math.atan2(dyFromElementCenter, dxFromElementCenter);
-        //     this.vx = Math.cos(angle2);
-        //     this.vy = Math.sin(angle2);
-        //   }
-        // }
-
-        if (this.y + this.size > canvas.height && gravity > 0.0) {
-          this.reset();
-        }
-
-        if (this.y + this.size < 0.0 && gravity < 0.0) {
-          this.reset();
-        }
-
-        if (Math.abs(this.vy) > maxSpeed) {
-          this.vy *= 0.97;
-        }
-
+        if (Math.abs(this.vy) > maxSpeed) this.vy *= 0.97;
         if (Math.abs(this.vy) < maxSpeed) {
-          this.vy += Math.random(0.1, 0.5) * Math.sign(gravity);
+          this.vy += Math.random() * Math.sign(gravity);
         }
 
         if (this.x - this.size > canvas.width || this.x + this.size < 0) {
           this.reset();
         }
       }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-        ctx.fillStyle = this.color;
-        ctx.fill();
-        ctx.closePath();
-      }
     }
 
-    function initParticles() {
-      for (let i = 0; i < particleCountRef.current; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        particles.push(new Particle(x, y));
-      }
-    }
+    const system = new ParticleSystem({
+      countRef: particleCountRef,
+      spawn: () => {
+        const { x, y } = randomPointOnCanvas(canvas);
+        return new SnowFlake(x, y);
+      },
+    }).fill();
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    systemRef.current = system;
 
-      // Adjust particle count
-      const currentParticleCount = particles.length;
-      if (currentParticleCount < particleCountRef.current) {
-        for (let i = currentParticleCount; i < particleCountRef.current; i++) {
-          const x = Math.random() * canvas.width;
-          const y = Math.random() * canvas.height;
-          particles.push(new Particle(x, y));
-        }
-      } else if (currentParticleCount > particleCountRef.current) {
-        particles.splice(particleCountRef.current);
-      }
-
-      particles.forEach((particle) => {
-        particle.update();
-        particle.draw();
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    initParticles();
-    animate();
-
-    // Attach particles array to canvas for theme effect access
-    canvas._particles = particles;
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      particles = [];
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        system.step(ctx);
+      },
+      cleanup: () => {
+        system.clear();
+        systemRef.current = null;
+      },
     };
   }, []);
 
-  // Update colorRef and all particles' colors on theme change
+  // Recolour the falling snow when the theme changes, without restarting it.
   useEffect(() => {
     colorRef.current = theme.accent;
-    // Update all existing particles' colors
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._particles) {
-      canvas._particles.forEach((particle) => {
+    if (systemRef.current) {
+      systemRef.current.forEach((particle) => {
         particle.color = theme.accent;
       });
     }
@@ -158,14 +91,7 @@ export default function Snow({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>

@@ -8,12 +8,17 @@ import { colourToRGB, scaleColour, scaleValue } from "../utilities/usefulFunctio
 import { VirtualJoypad } from "../utilities/virtualJoypad";
 import { MobileContext } from "../../../../contexts/MobileContext";
 import { IconGroup } from "../utilities/popovers";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  attachListeners,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Backrooms({ visibleUI }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
   const themeRef = useRef(theme);
-  const canvasRef = useRef(null);
   const moveSpeedRef = useRef(100);
   const turnSpeedRef = useRef(100);
   const fov = useRef(mobile ? 40 : 65);
@@ -71,20 +76,9 @@ export default function Backrooms({ visibleUI }) {
     setJoystickVisible(true);
   };
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
     const keysPressed = new Set();
     let keyPressCallbacks = [];
-
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
 
     const drawBufferWidth = mobile ? 480 : 640;
     const drawBufferHeight = mobile ? 640 : 480;
@@ -459,10 +453,9 @@ export default function Backrooms({ visibleUI }) {
     // one-time spawn safety so the player doesn't initialize inside a wall
     carveOpenAreaAt(fPlayerX, fPlayerY, 1)
 
-    let animationFrameId;
     // redraw loop
     function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      clearCanvas(ctx, canvas);
       maintainLoadedChunks(fPlayerX, fPlayerY)
       drawScreen(fPlayerX, fPlayerY, fPlayerA);
 
@@ -491,10 +484,7 @@ export default function Backrooms({ visibleUI }) {
         turnRight(Math.abs(joystickX))
       }
 
-      animationFrameId = requestAnimationFrame(animate);
     }
-
-    animate();
 
     const handleKeyDown = (event) => {
       keysPressed.add(event.key);
@@ -504,15 +494,14 @@ export default function Backrooms({ visibleUI }) {
       keysPressed.delete(event.key);
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    onCleanup(
+      attachListeners([
+        [window, "keydown", handleKeyDown],
+        [window, "keyup", handleKeyUp],
+      ])
+    );
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
+    return { frame: animate };
   }, [mobile]);
 
   useEffect(() => {
@@ -554,19 +543,14 @@ export default function Backrooms({ visibleUI }) {
       }
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("touchend", handleTouchEnd);
-    window.addEventListener("touchcancel", handleTouchEnd);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("touchcancel", handleTouchEnd);
-    };
+    // The virtual joystick drags outside the canvas, so these live on window.
+    return attachListeners([
+      [window, "mousemove", handleMouseMove],
+      [window, "mouseup", handleMouseUp],
+      [window, "touchmove", handleTouchMove, { passive: false }],
+      [window, "touchend", handleTouchEnd],
+      [window, "touchcancel", handleTouchEnd],
+    ]);
   }, []);
 
   // Update colorRef and all particles' colors on theme change
@@ -592,7 +576,7 @@ export default function Backrooms({ visibleUI }) {
           }}
         />
       )}
-      <canvas
+      <SceneCanvas
         ref={canvasRef}
         onMouseDown={(event) => {
           activateJoystick(event.clientX, event.clientY)
@@ -608,12 +592,7 @@ export default function Backrooms({ visibleUI }) {
 
           activateJoystick(touch.clientX, touch.clientY, touch.identifier)
         }}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          touchAction: "none",
-        }}
+        style={{ touchAction: "none" }}
       />
 
 

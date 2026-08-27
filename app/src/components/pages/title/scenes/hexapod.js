@@ -1,21 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Hexapod({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const mouseClickRef = useRef(false);
-  const simulationSpeedRef = useRef(100);
   const bodyCountRef = useRef(2);
   const gaitCountRef = useRef(180);
 
-  const mouseShieldRadiusRef = useRef(100);
   const [, setRender] = useState(0); // Dummy state to force re-render
 
   // Theme color refs for dynamic updates
@@ -23,35 +23,22 @@ export default function Hexapod({ visibleUI }) {
   const secondaryAccentColorRef = useRef(theme.secondaryAccent);
   const tertiaryAccentColorRef = useRef(theme.tertiaryAccent);
 
-  let hexapodArray = [];
-  let heartArray = [];
+  // Refs, not plain locals: the walkers have to survive a re-render.
+  const hexapodArrayRef = useRef([]);
+  const heartArrayRef = useRef([]);
+  const redrawRef = useRef(null);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    let animationFrameId;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    const hexapodArray = hexapodArrayRef.current;
+    const heartArray = heartArrayRef.current;
 
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = () => {
-      mouseClickRef.current = true;
-    };
-
-    const handleMouseUp = () => {
-      mouseClickRef.current = false;
-    };
+    onCleanup(
+      createPointerTracker(canvas, {
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        touchActiveRef: mouseClickRef,
+      })
+    );
 
     const originX = 0;
     const originY = 0;
@@ -926,7 +913,7 @@ export default function Hexapod({ visibleUI }) {
           gaitCycle = 0;
           gaitCycle2 = Math.ceil((360 - gaitCountRef.current) / 2);
         }
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        clearCanvas(ctx, canvas);
 
         hexapodArray.forEach((hexapod) => {
           hexapod.update();
@@ -959,7 +946,6 @@ export default function Hexapod({ visibleUI }) {
           heart.draw();
         });
 
-        animationFrameId = requestAnimationFrame(animate);
       }
     }
 
@@ -979,22 +965,22 @@ export default function Hexapod({ visibleUI }) {
     };
 
     init();
-    animate();
 
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleMouseMove);
-    window.addEventListener("pointerdown", handleMouseDown);
-    window.addEventListener("pointerup", handleMouseUp);
+    // A theme change redraws one frame without restarting the walk cycle.
+    redrawRef.current = () => {
+      if (hexapodArray.length === 0) return;
+      clearCanvas(ctx, canvas);
+      hexapodArray.forEach((hexapod) => hexapod.update());
+      heartArray.forEach((heart) => heart.draw());
+    };
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      hexapodArray = [];
-
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleMouseMove);
-      window.removeEventListener("pointerdown", handleMouseDown);
-      window.removeEventListener("pointerup", handleMouseUp);
-      window.removeEventListener("resize", resizeCanvas);
+    return {
+      frame: animate,
+      cleanup: () => {
+        hexapodArray.length = 0;
+        heartArray.length = 0;
+        redrawRef.current = null;
+      },
     };
   }, []);
 
@@ -1003,27 +989,12 @@ export default function Hexapod({ visibleUI }) {
     accentColorRef.current = theme.accent;
     secondaryAccentColorRef.current = theme.secondaryAccent;
     tertiaryAccentColorRef.current = theme.tertiaryAccent;
-    // Redraw on theme change
-    if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext("2d");
-      if (ctx && hexapodArray.length > 0) {
-        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-        hexapodArray.forEach((hexapod) => hexapod.update());
-        heartArray.forEach((heart) => heart.draw());
-      }
-    }
+    if (redrawRef.current) redrawRef.current();
   }, [theme]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

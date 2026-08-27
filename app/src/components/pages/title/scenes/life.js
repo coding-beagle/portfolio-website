@@ -1,36 +1,28 @@
-import React, { useContext, useEffect, useRef, useState } from "react";
+import React, { useContext, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { MobileContext } from "../../../../contexts/MobileContext";
 import { IconGroup } from "../utilities/popovers";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Life({ visibleUI }) {
   const myBirthday = new Date("July 12, 2004");
   const mobile = useContext(MobileContext);
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const selectedDate = useRef(0);
   const lifeRef = useRef(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [birthdate, setBirthdate] = useState({ $d: myBirthday });
   const [lifeExpectancy, setLifeExpectancy] = useState(80);
-  const colorRef = useRef(theme.accent);
   const [, setRender] = useState(0);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      calculate();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    onCleanup(createPointerTracker(canvas, { posRef: mousePosRef }));
 
     function diff_weeks(dt2, dt1) {
       // Calculate the difference in milliseconds between dt2 and dt1
@@ -61,8 +53,8 @@ export default function Life({ visibleUI }) {
         const numColumns = mobile ? 52 : 52 * 3;
         const numRows = total_weeks / numColumns;
         const boxSize = mobile
-          ? canvasRef.current.width / 52 - boxPadding
-          : canvasRef.current.width / (52 * 3) - boxPadding;
+          ? canvas.width / 52 - boxPadding
+          : canvas.width / (52 * 3) - boxPadding;
         const offsetX = boxSize + boxPadding;
         const offsetY = boxSize + boxPadding;
 
@@ -86,7 +78,7 @@ export default function Life({ visibleUI }) {
               }
               ctx.rect(columns * offsetY, rows * offsetX, boxSize, boxSize);
             } else {
-              const dy = rows * offsetX + canvasRef.current.height / 3 + boxSize / 2 - mousePosRef.current.y;
+              const dy = rows * offsetX + canvas.height / 3 + boxSize / 2 - mousePosRef.current.y;
               const dx = columns * offsetY + boxSize / 2 - mousePosRef.current.x;
 
               if (Math.sqrt(dx ** 2 + dy ** 2) < boxSize / 2) {
@@ -96,7 +88,7 @@ export default function Life({ visibleUI }) {
 
               ctx.rect(
                 columns * offsetY,
-                rows * offsetX + canvasRef.current.height / 3,
+                rows * offsetX + canvas.height / 3,
                 boxSize,
                 boxSize
               );
@@ -107,59 +99,18 @@ export default function Life({ visibleUI }) {
       }
     }
 
-    calculate();
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
+    return {
+      onResize: calculate,
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        calculate();
+      },
     };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    let animationFrameId
-
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      calculate();
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    animate();
-
-    window.addEventListener("pointermove", handleMouseMove);
-    window.addEventListener("touchmove", handleTouchMove);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("pointermove", handleMouseMove);
-      window.removeEventListener("touchmove", handleTouchMove);
-    };
-  }, [birthdate, lifeExpectancy, theme]);
+  }, [birthdate, lifeExpectancy, theme, mobile]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>

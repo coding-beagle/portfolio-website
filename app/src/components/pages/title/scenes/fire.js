@@ -1,255 +1,137 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
+import { IconGroup } from "../utilities/popovers";
+import { scaleColour } from "../utilities/usefulFunctions";
 import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+  useCanvasScene,
+  SceneCanvas,
+  Particle,
+  ParticleSystem,
+  createPointerTracker,
+  clearCanvas,
+} from "../utilities/engine";
 
 export default function Fire({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
   const simulationSpeedRef = useRef(100);
   const fireSizeRef = useRef(25);
+  const [, setRender] = useState(0);
 
-  const [, setRender] = React.useState(0);
-
-  let fire = [];
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-    let animationFrameId;
-
-    function getColourBasedOnTemperature(temperature) {
-      const hottestColor = theme.accent; // Hex color, e.g., "#FF0000"
-      const coldestColor = theme.tertiaryAccent; // Hex color, e.g., "#0000FF"
-
-      // Interpolate between the two colors based on temperature (0 to 10 scale)
-      const ratio = Math.min(Math.max(temperature / 10, 0), 1); // Clamp ratio between 0 and 1
-      const interpolate = (start, end) =>
-        Math.round(start + (end - start) * ratio);
-
-      const hexToRgb = (hex) =>
-        hex
-          .replace("#", "")
-          .match(/.{2}/g)
-          .map((val) => parseInt(val, 16));
-
-      const rgbToHex = (r, g, b) =>
-        `#${[r, g, b]
-          .map((val) => val.toString(16).padStart(2, "0"))
-          .join("")}`;
-
-      const [r1, g1, b1] = hexToRgb(hottestColor);
-      const [r2, g2, b2] = hexToRgb(coldestColor);
-
-      const r = interpolate(r2, r1);
-      const g = interpolate(g2, g1);
-      const b = interpolate(b2, b1);
-
-      return rgbToHex(r, g, b);
-    }
-
-    // two rules ; more fireparticles closer together = hotter
-    // hotter particles rise
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    onCleanup(createPointerTracker(canvas, { posRef: mousePosRef }));
 
     const speedLim = 2;
+    const maxTemperature = 10;
 
-    class FireParticle {
-      constructor(temperature, x, y, parent) {
-        this.temperature = temperature;
-        this.x = x;
-        this.y = y;
-        this.dx = 0;
-        this.dy = 0;
-        this.parent = parent;
-        this.gravity = 0.01; // Gravity effect
-        this.heatDissipationRate = 2; // Rate at which heat dissipates
+    /** Cold embers sit at the tertiary accent, the hottest at the accent. */
+    const colourForTemperature = (temperature) =>
+      scaleColour(
+        theme.tertiaryAccent,
+        theme.accent,
+        temperature / maxTemperature
+      );
+
+    /**
+     * Two rules make the flame: particles crowded together run hot, and hot
+     * particles rise. Everything else is drift back towards the cursor.
+     */
+    class Ember extends Particle {
+      constructor(x, y, flame) {
+        super(x, y, { vx: 0, vy: 0, size: 5 });
+        this.temperature = 0;
+        this.flame = flame;
+        this.gravity = 0.01;
+        this.heatDissipationRate = 2;
       }
 
-      insideOtherFire() {
+      /** Offset to the first neighbour close enough to jostle. */
+      nearestNeighbour() {
         const distance = 20;
-        for (let particle of this.parent.fireParticles) {
-          if (particle !== this) {
-            const dx = this.x - particle.x;
-            const dy = this.y - particle.y;
-            const dist = Math.sqrt(dx ** 2 + dy ** 2);
-            if (dist < distance) {
-              return { dx: dx, dy: dy };
-            }
-          }
+        for (const other of this.flame.particles) {
+          if (other === this) continue;
+          const dx = this.x - other.x;
+          const dy = this.y - other.y;
+          if (Math.sqrt(dx ** 2 + dy ** 2) < distance) return { dx, dy };
         }
-        return false;
+        return null;
       }
 
+      /** Temperature is simply how crowded this ember is. */
       calculateHeat() {
+        const distanceThreshold = 20;
         let nearbyCount = 0;
-        const distanceThreshold = 20; // Distance to consider "nearby"
-        for (let particle of this.parent.fireParticles) {
-          if (particle !== this) {
-            const dx = this.x - particle.x;
-            const dy = this.y - particle.y;
-            const dist = Math.sqrt(dx ** 2 + dy ** 2);
-            if (dist < distanceThreshold) {
-              nearbyCount++;
-            }
-          }
+
+        for (const other of this.flame.particles) {
+          if (other === this) continue;
+          const dx = this.x - other.x;
+          const dy = this.y - other.y;
+          if (Math.sqrt(dx ** 2 + dy ** 2) < distanceThreshold) nearbyCount++;
         }
-        this.temperature = Math.min(nearbyCount, 10); // Cap temperature at 10
+
+        this.temperature = Math.min(nearbyCount, maxTemperature);
       }
 
       update() {
-        this.calculateHeat(); // Update temperature based on nearby particles
+        this.calculateHeat();
 
-        this.dx_to_fire = this.parent.x - this.x;
-        this.dy_to_fire = this.parent.y - this.y;
+        const source = mousePosRef.current;
+        this.vx += (source.x - this.x) / 200;
+        // Hotter embers rise faster; gravity pulls the cool ones back down.
+        this.vy += (source.y - this.y) / 200 - this.temperature / 80;
+        this.vy += this.gravity;
 
-        this.dx += this.dx_to_fire / 200;
-        this.dy += this.dy_to_fire / 200 - this.temperature / 80; // Hotter particles rise faster
-
-        // Apply gravity
-        this.dy += this.gravity;
-
-        // Dissipate heat over time
         this.temperature = Math.max(
           this.temperature - this.heatDissipationRate,
           0
         );
 
-        const currentSpeed = Math.sqrt(this.dx ** 2 + this.dy ** 2);
-        if (currentSpeed > speedLim) {
-          this.dx = this.dx * 0.9;
-          this.dy = this.dy * 0.9;
+        if (Math.sqrt(this.vx ** 2 + this.vy ** 2) > speedLim) {
+          this.vx *= 0.9;
+          this.vy *= 0.9;
         }
 
-        const nearFire = this.insideOtherFire();
-        if (nearFire) {
-          const nearBirdDirection = Math.atan2(nearFire.dy, nearFire.dx);
-          const currentDirection = Math.atan2(this.dy, this.dx);
-          const newDirection = (nearBirdDirection + currentDirection) / 2;
-          this.dx = this.dx + Math.cos(newDirection) * 1;
-          this.dy = this.dy + Math.sin(newDirection) * 1;
+        const neighbour = this.nearestNeighbour();
+        if (neighbour) {
+          const away = Math.atan2(neighbour.dy, neighbour.dx);
+          const heading = Math.atan2(this.vy, this.vx);
+          const blended = (away + heading) / 2;
+          this.vx += Math.cos(blended);
+          this.vy += Math.sin(blended);
         }
 
-        this.x += this.dx * (simulationSpeedRef.current / 100);
-        this.y += this.dy * (simulationSpeedRef.current / 100);
+        this.integrate(simulationSpeedRef.current / 100);
       }
 
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = getColourBasedOnTemperature(this.temperature);
-        ctx.fill();
-        ctx.closePath();
-      }
-    }
-
-    class Fire {
-      constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.fireParticles = [];
-      }
-
-      update(posX, posY) {
-        this.x = posX;
-        this.y = posY;
-
-        this.fireParticles.forEach((fireParticle) => {
-          fireParticle.update(posX, posY);
-        });
-      }
-
-      draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = theme.accent;
-        ctx.fill();
-        ctx.closePath();
+      draw(context) {
+        context.beginPath();
+        context.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        context.fillStyle = colourForTemperature(this.temperature);
+        context.fill();
+        context.closePath();
       }
     }
 
-    function init() {
-      fire.push(new Fire(mousePosRef.current.x, mousePosRef.current.y));
-    }
+    const flame = new ParticleSystem({
+      countRef: fireSizeRef,
+      spawn: () =>
+        new Ember(mousePosRef.current.x, mousePosRef.current.y, flame),
+    });
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Adjust particle count
-      const currentParticleCount = fire[0].fireParticles.length;
-      if (currentParticleCount < fireSizeRef.current) {
-        for (let i = currentParticleCount; i < fireSizeRef.current; i++) {
-          fire[0].fireParticles.push(
-            new FireParticle(
-              0,
-              mousePosRef.current.x,
-              mousePosRef.current.y,
-              fire[0]
-            )
-          );
-        }
-      } else if (currentParticleCount > fireSizeRef.current) {
-        fire[0].fireParticles.length = fireSizeRef.current; // Truncate the array
-      }
-
-      fire.forEach((fireInstance) => {
-        fireInstance.update(mousePosRef.current.x, mousePosRef.current.y);
-        // fireInstance.draw();
-
-        // Iterate over the updated fireParticles array
-        fireInstance.fireParticles.forEach((fireParticle) => {
-          fireParticle.update();
-          fireParticle.draw();
-        });
-      });
-
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    init();
-    animate();
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleResize = (event) => {
-      resizeCanvas();
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("resize", handleResize);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("resize", handleResize);
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
+        flame.step(ctx);
+      },
+      cleanup: () => flame.clear(),
     };
   }, []);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
+
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup
@@ -271,12 +153,9 @@ export default function Fire({ visibleUI }) {
             ]}
             rerenderSetter={setRender}
           />
+
+          <IconGroup icons={[{ type: "MOUSE" }]} />
         </div>
-      )}
-      {visibleUI && (
-        <IconGroup icons={[
-          { type: "MOUSE" },
-        ]} />
       )}
     </>
   );

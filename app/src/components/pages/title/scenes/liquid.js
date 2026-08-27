@@ -1,16 +1,28 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import MouseTooltip, { IconGroup } from "../utilities/popovers";
+import { IconGroup } from "../utilities/popovers";
 import {
   ChangerGroup,
   CHANGER_TYPE,
 } from "../utilities/valueChangers";
-import { clamp, colourToRGB, DIRECTIONS, getIndexFromBrushSize, getNeighbourIndexFromGrid, inRect, scaleColour, scaleValue } from "../utilities/usefulFunctions";
+import {
+  colourToRGB,
+  DIRECTIONS,
+  getIndexFromBrushSize,
+  getNeighbourIndexFromGrid,
+  scaleColour,
+  scaleValue,
+} from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  createPointerTracker,
+  attachListeners,
+} from "../utilities/engine";
 
 export default function Liquid({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const mousePosRef = useRef({ x: 0, y: 0 });
 
   const [reset, setReset] = useState(false);
@@ -24,8 +36,6 @@ export default function Liquid({ visibleUI }) {
   const mouseClickRef = useRef(false);
   const rightClickRef = useRef(false);
   const touchActiveRef = useRef(false);
-  const titleShieldRadiusRef = useRef(30);
-  const recalculateRectRef = useRef(() => { });
 
   const tapFrequencyRef = useRef(20);
   const tapOnTime = useRef(5);
@@ -41,100 +51,17 @@ export default function Liquid({ visibleUI }) {
 
   const mobile = useContext(MobileContext);
 
-  useEffect(() => {
-    let element = document.getElementById("title") ?? null;
-    let rect_padded = { left: 0, right: 0, top: 0, bottom: 0 };
-    let elementCenterX = 0;
-    let elementCenterY = 0;
-
-    let animationFrameId;
-
-    const recalculateRect = () => {
-      if (!element) return;
-      let rect = element.getBoundingClientRect();
-      rect_padded = {
-        left: rect.left - titleShieldRadiusRef.current,
-        right: rect.right + titleShieldRadiusRef.current,
-        top: rect.top - titleShieldRadiusRef.current,
-        bottom: rect.bottom + titleShieldRadiusRef.current,
-      };
-      elementCenterX = rect.left + rect.width / 2;
-      elementCenterY = rect.top + rect.height / 2;
-    };
-
-    recalculateRectRef.current = recalculateRect;
-
-    const canvas = canvasRef.current;
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    window.addEventListener("popstate", recalculateRect);
-    const ctx = canvas.getContext("2d");
-
-    const handleMouseMove = (event) => {
-      const rect = canvas.getBoundingClientRect();
-      mousePosRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    };
-
-    const handleMouseDown = (e) => {
-      // e.preventDefault()
-      if (e.buttons === 2) {
-        rightClickRef.current = true;
-      } else {
-        mouseClickRef.current = true;
-      }
-    };
-
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-    }
-
-    const handleMouseUp = (e) => {
-
-      mouseClickRef.current = false;
-      rightClickRef.current = false;
-    };
-
-    const handleTouchMove = (event) => {
-      if (event.touches && event.touches.length > 0) {
-        const rect = canvas.getBoundingClientRect();
-        const touch = event.touches[0];
-        mousePosRef.current = {
-          x: touch.clientX - rect.left,
-          y: touch.clientY - rect.top,
-        };
-      }
-    };
-
-    const handleTouchStart = () => {
-      touchActiveRef.current = true;
-    };
-
-    const handleTouchEnd = () => {
-      touchActiveRef.current = false;
-    };
-
-    // --- Touch event handler to prevent scroll on drag ---
-    function handleTouchDragPreventScroll(e) {
-      if (e.touches && e.touches.length > 0) {
-        e.preventDefault();
-      }
-    }
-
-    const inElement = (rect, x, y) => {
-      return (
-        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-      );
-    };
-
-    recalculateRect();
+  const canvasRef = useCanvasScene(({ canvas, ctx, onCleanup }) => {
+    onCleanup(
+      createPointerTracker(canvas, {
+        target: canvas,
+        posRef: mousePosRef,
+        downRef: mouseClickRef,
+        rightDownRef: rightClickRef,
+        touchActiveRef,
+        blockContextMenu: true,
+      })
+    );
 
     const gridWidth = mobile ? 50 : 300;
     const gridHeight = mobile ? 100 : 150;
@@ -521,9 +448,9 @@ export default function Liquid({ visibleUI }) {
 
     function animate() {
 
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-      const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvasRef.current.width, 0, gridWidth));
-      const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvasRef.current.height, 0, gridHeight));
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      const mouseX = Math.floor(scaleValue(mousePosRef.current.x, 0, canvas.width, 0, gridWidth));
+      const mouseY = Math.floor(scaleValue(mousePosRef.current.y, 0, canvas.height, 0, gridHeight));
       const index = mouseX + gridWidth * mouseY;
       const indexes = getIndexFromBrushSize(gridWidth, gridHeight, index, Math.floor(brushSizeRef.current - 1));
 
@@ -598,51 +525,21 @@ export default function Liquid({ visibleUI }) {
       ctx.imageSmoothingEnabled = false;
 
       // Draw scaled to main canvas
-      ctx.drawImage(tempCanvas, 0, 0, canvasRef.current.width, canvasRef.current.height);
+      ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
 
-      animationFrameId = requestAnimationFrame(animate);
     }
 
-    animate();
-
+    // Scrolling over the canvas resizes the brush rather than the page.
     const handleWheel = (e) => {
       e.preventDefault();
-      const stepSize = 0.5; // Smaller steps for smoother control
-      const newSize = brushSizeRef.current - (Math.sign(e.deltaY) * stepSize);
+      const stepSize = 0.5;
+      const newSize = brushSizeRef.current - Math.sign(e.deltaY) * stepSize;
       brushSizeRef.current = Math.max(1, Math.min(10, newSize));
-    }
-
-    canvas.addEventListener("pointermove", handleMouseMove);
-    canvas.addEventListener("pointerdown", handleMouseDown);
-    canvas.addEventListener("pointerup", handleMouseUp);
-    canvas.addEventListener("touchmove", handleTouchMove);
-    canvas.addEventListener("touchstart", handleTouchStart);
-    canvas.addEventListener("touchend", handleTouchEnd);
-    canvas.addEventListener("contextmenu", handleContextMenu);
-    canvas.addEventListener("wheel", handleWheel);
-    // Prevent default scroll on touch drag over canvas
-    if (canvas) {
-      canvas.addEventListener("touchmove", handleTouchDragPreventScroll, {
-        passive: false,
-      });
-    }
-
-    return () => {
-      // Cleanup function to cancel the animation frame and remove event listeners
-      cancelAnimationFrame(animationFrameId);
-      canvas.removeEventListener("contextmenu", handleContextMenu);
-      canvas.removeEventListener("pointermove", handleMouseMove);
-      canvas.removeEventListener("pointerdown", handleMouseDown);
-      canvas.removeEventListener("pointerup", handleMouseUp);
-      canvas.removeEventListener("touchmove", handleTouchMove);
-      canvas.removeEventListener("touchstart", handleTouchStart);
-      canvas.removeEventListener("touchend", handleTouchEnd);
-      canvas.removeEventListener("resize", resizeCanvas);
-      canvas.addEventListener("wheel", handleWheel);
-      if (canvas) {
-        canvas.removeEventListener("touchmove", handleTouchDragPreventScroll);
-      }
     };
+
+    onCleanup(attachListeners([[canvas, "wheel", handleWheel]]));
+
+    return { frame: animate };
   }, [reset]);
 
   useEffect(() => {
@@ -655,14 +552,7 @@ export default function Liquid({ visibleUI }) {
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
           <ChangerGroup

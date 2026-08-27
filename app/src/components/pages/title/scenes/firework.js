@@ -1,102 +1,52 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
-import {
-  ChangerGroup,
-  CHANGER_TYPE,
-} from "../utilities/valueChangers";
+import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
 import { getCloseColour, getRandomColour } from "../utilities/usefulFunctions";
 import { MobileContext } from "../../../../contexts/MobileContext";
+import {
+  useCanvasScene,
+  SceneCanvas,
+  Spark,
+  clearCanvas,
+} from "../utilities/engine";
 
-export class FireworkChaff {
-  constructor(x, y, vx, vy, colour, initialSize, sizeFallOff, gravity) {
-    this.x = x;
-    this.y = y;
-    this.vx = vx;
-    this.vy = vy;
-    this.colour = colour;
-    this.size = initialSize;
-    this.sizeDecayRate = sizeFallOff;
-    this.gravity = gravity
-  }
-
-  update(simulationSpeedRef) {
-    this.x += (this.vx * simulationSpeedRef.current) / 100;
-    this.vy += this.gravity;
-    this.y += (this.vy * simulationSpeedRef.current) / 100;
-    this.initialSize -= this.sizeDecayRate;
-
-    if (simulationSpeedRef.current < Math.random() * 400)
-      this.colour = getCloseColour(this.colour, 0.1, 0.1, 0.1);
-  }
-
-  draw(ctx, bloom = true, bloomEffectRef = null) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-    if (bloom) {
-      ctx.shadowColor = this.colour;
-      ctx.shadowBlur = Math.min(24, this.size * bloomEffectRef.current); // Glow effect
-    }
-    ctx.fillStyle = this.colour;
-    ctx.fill();
-    ctx.closePath();
-    ctx.restore();
-  }
-}
+const FIREWORK_TYPES = ["Circle", "Star", "Spiral", "Trailer"];
 
 export default function Fireworks({ visibleUI }) {
   const { theme } = useTheme();
-  const canvasRef = useRef(null);
   const simulationSpeedRef = useRef(100);
   const bloomEffectRef = useRef(6);
   const colorRef = useRef(theme.accent);
+  const fireworksRef = useRef([]);
   const [, setRender] = useState(0);
 
   const mobile = useContext(MobileContext);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    // const titleShieldRadius = 30;
-
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // recalculateRect();
-    };
-    resizeCanvas();
-    window.addEventListener("resize", resizeCanvas);
-    const ctx = canvas.getContext("2d");
-
-    let fireworks = [];
-    // const gravity = Math.random() > 0.1 ? 0.05 : -0.05;
+  const canvasRef = useCanvasScene(({ canvas, ctx }) => {
     const gravity = 0.05;
-    const maxSpeed = 1;
-    let animationFrameId;
-
-    const fireWorkTypes = {
-      0: "Circle", // spawn a circle of particles that go out around
-      1: "Star", // star-shaped explosion
-      2: "Spiral", // new: spiral explosion
-      3: "Trailer",
-    };
-
     const maxFireworkSpeed = 10;
     const maxFireworkRiseSpeed = 2;
     const fireWorkLifeSpan = 2000;
 
+    /** Every burst pattern builds its sparks the same way; only the aim differs. */
+    const makeSpark = (x, y, vx, vy, color) =>
+      new Spark(x, y, {
+        vx,
+        vy,
+        color,
+        size: Math.random() * 2 + 1,
+        sizeDecayRate: Math.random() * 0.05 + 0.01,
+        gravity,
+      });
+
     class Firework {
       constructor() {
-        // Detect if on mobile
-
-        let x = Math.random() * canvasRef.current.width;
-        if (mobile) {
-          // Reduce x range for mobile (e.g., center fireworks more)
-          x =
-            canvasRef.current.width * 0.25 +
-            Math.random() * canvasRef.current.width * 0.5;
-        }
-        this.x = x;
-        this.y = canvasRef.current.height;
+        // Phones are narrow, so keep the shells over the middle half of the
+        // screen and rising near-vertically.
+        this.x = mobile
+          ? canvas.width * 0.25 + Math.random() * canvas.width * 0.5
+          : Math.random() * canvas.width;
+        this.y = canvas.height;
         this.vx = mobile
           ? Math.random() - 0.5
           : (Math.random() - 0.5) * maxFireworkSpeed;
@@ -104,255 +54,199 @@ export default function Fireworks({ visibleUI }) {
         this.size = Math.random() * 2 + 1;
 
         this.points = [];
-        const fireworkTypesKeys = Object.keys(fireWorkTypes);
         this.type =
-          fireWorkTypes[Math.floor(Math.random() * fireworkTypesKeys.length)];
-
+          FIREWORK_TYPES[Math.floor(Math.random() * FIREWORK_TYPES.length)];
         this.color =
           this.type === "Trailer" ? getRandomColour() : colorRef.current;
 
         this.sparklingIntensity = Math.random() * 0.5;
         this.exploded = false;
-        this.explodeCount = 0;
         this.postExplodeCount = 0;
-        this.explodeDelay = Math.floor((Math.random() + 500) * 100);
-        this.hasExplodedParticles = false; // Track if particles have been generated
-        // Randomize explosion height in the top portion (10% to 33% of screen)
+
+        // Burst somewhere in the top 10%–33% of the screen.
         this.explodeY =
-          Math.random() *
-          (canvasRef.current.height / 3 - canvasRef.current.height * 0.1) +
-          canvasRef.current.height * 0.1;
+          Math.random() * (canvas.height / 3 - canvas.height * 0.1) +
+          canvas.height * 0.1;
+      }
+
+      /** An even ring of sparks. */
+      explodeCircle(color) {
+        const chaffCount = Math.floor(Math.random() * 100) + 20;
+        const angleStep = (Math.PI * 2) / chaffCount;
+
+        for (let i = 0; i < chaffCount; i++) {
+          const angle = i * angleStep;
+          const speed = Math.random() * 2 + 1;
+          this.points.push(
+            makeSpark(
+              this.x,
+              this.y,
+              Math.cos(angle) * speed,
+              Math.sin(angle) * speed,
+              color
+            )
+          );
+        }
+      }
+
+      /** Arms of alternating long and short spokes. */
+      explodeStar(color) {
+        const points = 2 + Math.floor(Math.random() * 10);
+        const chaffPerArm = 16;
+        const outerRadius = Math.random() * 2 + 7;
+        const innerRadius = outerRadius * 0.45;
+
+        for (let arm = 0; arm < points; arm++) {
+          const armAngle = (Math.PI * 2 * arm) / points;
+
+          for (let j = 0; j < chaffPerArm; j++) {
+            const radius =
+              (j % 2 === 0 ? outerRadius : innerRadius) *
+              (0.97 + Math.random() * 0.06);
+            const angle =
+              armAngle +
+              ((j / chaffPerArm) * (Math.PI * 2)) / points / 2 +
+              (Math.random() - 0.5) * 0.07;
+            const speed = 1.7 * (0.97 + Math.random() * 0.06);
+
+            this.points.push(
+              makeSpark(
+                this.x,
+                this.y,
+                Math.cos(angle) * radius * speed * 0.18,
+                Math.sin(angle) * radius * speed * 0.18,
+                color
+              )
+            );
+          }
+        }
+      }
+
+      /** Curling arms — radial velocity plus a tangential kick to spin them. */
+      explodeSpiral(color) {
+        const spiralArms = 2 + Math.floor(Math.random() * 3);
+        const chaffCount = 60 + Math.floor(Math.random() * 40);
+        const spiralTurns = 2.5 + Math.random();
+        const spiralSpread = Math.random() * 2 + 7;
+        const spin = (spiralTurns >= 0 ? 1 : -1) * 0.25;
+
+        for (let i = 0; i < chaffCount; i++) {
+          const frac = i / chaffCount;
+          const angle =
+            Math.PI * 2 * spiralTurns * frac +
+            ((i % spiralArms) * (Math.PI * 2)) / spiralArms;
+          const radius = spiralSpread * frac * (0.95 + Math.random() * 0.1);
+          const speed = 1.2 + Math.random() * 0.7;
+          const tangential = angle + Math.PI / 2;
+
+          this.points.push(
+            makeSpark(
+              this.x,
+              this.y,
+              Math.cos(angle) * radius * speed * 0.18 +
+                Math.cos(tangential) * radius * spin,
+              Math.sin(angle) * radius * speed * 0.18 +
+                Math.sin(tangential) * radius * spin,
+              color
+            )
+          );
+        }
       }
 
       explode() {
-        if (this.hasExplodedParticles) return;
-        this.hasExplodedParticles = true;
-        if (this.type === "Circle") {
-          const chaffCount = Math.floor(Math.random() * 100) + 20;
-          const angleStep = (Math.PI * 2) / chaffCount;
-          const colour = getRandomColour();
-          for (let i = 0; i < chaffCount; i++) {
-            const angle = i * angleStep;
-            const speed = Math.random() * 2 + 1;
-            const vx = Math.cos(angle) * speed;
-            const vy = Math.sin(angle) * speed;
-            const initialSize = Math.random() * 2 + 1;
-            const sizeFallOff = Math.random() * 0.05 + 0.01;
-            this.points.push(
-              new FireworkChaff(
-                this.x,
-                this.y,
-                vx,
-                vy,
-                colour,
-                initialSize,
-                sizeFallOff,
-                gravity
-              )
-            );
-          }
-        } else if (this.type === "Star") {
-          const points = 2 + Math.floor(Math.random() * 10);
-          const chaffPerArm = 16;
-          const outerRadius = Math.random() * 2 + 7;
-          const innerRadius = outerRadius * 0.45;
-          const colour = getRandomColour();
-          for (let arm = 0; arm < points; arm++) {
-            const armAngle = (Math.PI * 2 * arm) / points;
-            for (let j = 0; j < chaffPerArm; j++) {
-              const frac = j / chaffPerArm;
-              const isOuter = j % 2 === 0;
-              const r =
-                (isOuter ? outerRadius : innerRadius) *
-                (0.97 + Math.random() * 0.06);
-              const angle =
-                armAngle +
-                (frac * (Math.PI * 2)) / points / 2 +
-                (Math.random() - 0.5) * 0.07;
-              const speed = 1.7 * (0.97 + Math.random() * 0.06);
-              const vx = Math.cos(angle) * r * speed * 0.18;
-              const vy = Math.sin(angle) * r * speed * 0.18;
-              const initialSize = Math.random() * 2 + 1;
-              const sizeFallOff = Math.random() * 0.05 + 0.01;
-              this.points.push(
-                new FireworkChaff(
-                  this.x,
-                  this.y,
-                  vx,
-                  vy,
-                  colour,
-                  initialSize,
-                  sizeFallOff,
-                  gravity
-                )
-              );
-            }
-          }
-        } else if (this.type === "Spiral") {
-          const spiralArms = 2 + Math.floor(Math.random() * 3); // 2-4 arms
-          const chaffCount = 60 + Math.floor(Math.random() * 40);
-          const spiralTurns = 2.5 + Math.random();
-          const spiralSpread = Math.random() * 2 + 7;
-          const colour = getRandomColour();
-          // Add a random spin direction and magnitude for this explosion
-          // Make spin direction match spiral direction and increase effect
-          const spiralDirection = spiralTurns >= 0 ? 1 : -1; // positive = CCW, negative = CW
-          const spin = spiralDirection * 0.25; // Stronger, always matches spiral
-          for (let i = 0; i < chaffCount; i++) {
-            const arm = i % spiralArms;
-            const frac = i / chaffCount;
-            const angle =
-              Math.PI * 2 * spiralTurns * frac +
-              (arm * (Math.PI * 2)) / spiralArms;
-            const r = spiralSpread * frac * (0.95 + Math.random() * 0.1);
-            const speed = 1.2 + Math.random() * 0.7;
-            // Base velocity (radial)
-            let vx = Math.cos(angle) * r * speed * 0.18;
-            let vy = Math.sin(angle) * r * speed * 0.18;
-            // Add tangential (rotational) velocity for inertia
-            const tangentialAngle = angle + Math.PI / 2;
-            vx += Math.cos(tangentialAngle) * r * spin;
-            vy += Math.sin(tangentialAngle) * r * spin;
-            const initialSize = Math.random() * 2 + 1;
-            const sizeFallOff = Math.random() * 0.05 + 0.01;
-            this.points.push(
-              new FireworkChaff(
-                this.x,
-                this.y,
-                vx,
-                vy,
-                colour,
-                initialSize,
-                sizeFallOff,
-                gravity
-              )
-            );
-          }
-        }
+        const color = getRandomColour();
+
+        if (this.type === "Circle") this.explodeCircle(color);
+        else if (this.type === "Star") this.explodeStar(color);
+        else if (this.type === "Spiral") this.explodeSpiral(color);
       }
 
       update() {
-        if (!this.exploded) {
-          this.y += (this.vy * simulationSpeedRef.current) / 100;
-          this.vy += gravity * 0.2;
-          this.x += (this.vx * simulationSpeedRef.current) / 100;
-
-          if (this.x >= canvas.width) {
-            this.vx *= -1;
-          }
-          if (this.x <= 0) {
-            this.vx *= -1;
-          }
-
-          if (this.type === "Trailer") {
-            if (Math.random() > this.sparklingIntensity) {
-              const colour = getCloseColour(this.color);
-              const vx = Math.random() - 0.5;
-              const vy = Math.random() - 0.5;
-              const initialSize = Math.random() * 2 + 1;
-              const sizeFallOff = Math.random() * 0.05 + 0.01;
-              this.points.push(
-                new FireworkChaff(
-                  this.x,
-                  this.y,
-                  vx,
-                  vy,
-                  colour,
-                  initialSize,
-                  sizeFallOff,
-                  gravity
-                )
-              );
-            }
-          }
-
-          // Explode when reaching the randomized explodeY
-
-          if (
-            this.y > 0 && // Top portion of the screen
-            this.y < canvasRef.current.height / 3 &&
-            !this.exploded // Adjusted to top third
-          ) {
-            this.explodeCount += 1;
-            if (this.y <= this.explodeY) {
-              this.exploded = true;
-              this.explode(); // Only generate particles once
-            }
-          }
-        } else {
+        if (this.exploded) {
           this.postExplodeCount += 1;
+          return;
+        }
+
+        const speedScale = simulationSpeedRef.current / 100;
+        this.y += this.vy * speedScale;
+        this.vy += gravity * 0.2;
+        this.x += this.vx * speedScale;
+
+        // Bounce off the sides rather than drifting out of frame.
+        if (this.x >= canvas.width || this.x <= 0) this.vx *= -1;
+
+        // A trailer never bursts; it just sheds sparks the whole way up.
+        if (this.type === "Trailer" && Math.random() > this.sparklingIntensity) {
+          this.points.push(
+            makeSpark(
+              this.x,
+              this.y,
+              Math.random() - 0.5,
+              Math.random() - 0.5,
+              getCloseColour(this.color)
+            )
+          );
+        }
+
+        if (this.y > 0 && this.y <= this.explodeY) {
+          this.exploded = true;
+          this.explode();
         }
       }
 
-      draw() {
-        if (!this.exploded) {
-          ctx.beginPath();
-          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-          ctx.fillStyle = this.color;
-          ctx.fill();
-          ctx.closePath();
-        }
+      draw(context) {
+        if (this.exploded) return;
+
+        context.beginPath();
+        context.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        context.fillStyle = this.color;
+        context.fill();
+        context.closePath();
       }
     }
 
-    function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    fireworksRef.current = [];
 
-      if (Math.random() > 0.99) {
-        fireworks.push(new Firework());
-      }
-      fireworks.forEach((firework) => {
-        firework.update();
-        firework.draw();
+    return {
+      frame: () => {
+        clearCanvas(ctx, canvas);
 
-        if (firework.postExplodeCount > fireWorkLifeSpan) {
-          fireworks = fireworks.filter((f) => f !== firework);
-        } else {
-          firework.points.forEach((fireworkPoint) => {
-            fireworkPoint.update(simulationSpeedRef);
-            fireworkPoint.draw(ctx, true, bloomEffectRef);
+        if (Math.random() > 0.99) {
+          fireworksRef.current.push(new Firework());
+        }
+
+        const speedScale = simulationSpeedRef.current / 100;
+
+        fireworksRef.current = fireworksRef.current.filter(
+          (firework) => firework.postExplodeCount <= fireWorkLifeSpan
+        );
+
+        fireworksRef.current.forEach((firework) => {
+          firework.update();
+          firework.draw(ctx);
+
+          firework.points.forEach((spark) => {
+            spark.update(speedScale, simulationSpeedRef.current);
+            spark.draw(ctx, bloomEffectRef.current);
           });
-        }
-      });
-      animationFrameId = requestAnimationFrame(animate);
-    }
-
-    // Attach fireworks array to canvas for theme effect access
-    canvas._fireworks = fireworks;
-    window.fireworks = fireworks;
-
-    animate();
-
-    return () => {
-      // Cleanup function to cancel the animation frame
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
-      fireworks = [];
+        });
+      },
+      cleanup: () => {
+        fireworksRef.current = [];
+      },
     };
   }, []);
 
-  // Update colorRef and all fireworks' colors on theme change
   useEffect(() => {
     colorRef.current = theme.accent;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (canvas._fireworks) {
-      canvas._fireworks.forEach((firework) => {
-        firework.color = theme.accent;
-      });
-    }
+    fireworksRef.current.forEach((firework) => {
+      firework.color = theme.accent;
+    });
   }, [theme]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-        }}
-      />
+      <SceneCanvas ref={canvasRef} />
 
       {visibleUI && (
         <div style={{ zIndex: 3000 }}>
