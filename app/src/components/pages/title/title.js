@@ -47,6 +47,7 @@ import Penguin from "./scenes/penguin";
 import Runes from "./scenes/runes";
 import Leaves from "./scenes/leaves";
 import Backrooms from "./scenes/backrooms";
+import BZ from "./scenes/bz";
 
 const Scenes = {
   0: { component: Snow, name: "snow" },
@@ -74,6 +75,7 @@ const Scenes = {
   22: { component: Runes, name: "runes" },
   23: { component: Leaves, name: "leaves" },
   24: { component: Backrooms, name: "backrooms" },
+  25: { component: BZ, name: "bz" },
 };
 
 export default function Title({

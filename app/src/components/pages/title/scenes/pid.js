@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { IconGroup } from "../utilities/popovers";
 import { ChangerGroup, CHANGER_TYPE } from "../utilities/valueChangers";
-import { clamp } from "../utilities/usefulFunctions";
+import { clamp, randomFloatBetweenTwo } from "../utilities/usefulFunctions";
 import {
   useCanvasScene,
   SceneCanvas,
@@ -92,8 +92,8 @@ export default function PID({ visibleUI }) {
           (dy_err * derivGain.current) / -10.0;
 
         // Heavy low-pass on the output, so the gains read as a smooth response.
-        this.vx = 0.98 * this.last_vx + 0.02 * this.target_vx;
-        this.vy = 0.98 * this.last_vy + 0.02 * this.target_vy;
+        this.vx = 0.98 * this.last_vx + 0.02 * this.target_vx + randomFloatBetweenTwo(-0.5 * simulationSpeedRef.current / 100.0, 0.5 * simulationSpeedRef.current / 100.0);
+        this.vy = 0.98 * this.last_vy + 0.02 * this.target_vy + randomFloatBetweenTwo(-0.5 * simulationSpeedRef.current / 100.0, 0.5 * simulationSpeedRef.current / 100.0);
 
         this.integrate(simulationSpeedRef.current / 100);
 
