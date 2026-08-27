@@ -34,6 +34,11 @@ function AppWrapper() {
   const openProjectsString = searchParams.get("projects");
   const openProjectsBool = openProjectsString === "true" || openProjectsString !== null;
 
+  // ?blog opens the post list, ?post=<slug> opens straight to one post.
+  const openBlogString = searchParams.get("blog");
+  const openBlogBool = openBlogString !== null && openBlogString !== "false";
+  const initialPost = searchParams.get("post");
+
   const disableShake = searchParams.get("shake");
   const disableShakeBool = !(disableShake === "false" || disableShake !== null);
 
@@ -91,6 +96,8 @@ function AppWrapper() {
         text={path}
         initialScene={scene?.toUpperCase()}
         proj={openProjectsBool}
+        blog={openBlogBool}
+        initialPost={initialPost}
         disableInitialShake={disableShakeBool}
         visibleUI={visibleUI}
         setVisibleUI={setVisibleUI}

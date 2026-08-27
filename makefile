@@ -41,6 +41,12 @@ test_watch:
 	npm run test:watch; \
 	cd -; \
 
+# regenerate public/posts/index.json from the markdown in public/posts
+posts:
+	cd ./app; \
+	npm run posts; \
+	cd -; \
+
 # creates a built (HTML) version the react app
 build:
 	cd ./app; \

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useContext } from 'react';
 import { useTheme } from '../../../themes/ThemeProvider';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight, faTimes } from '@fortawesome/free-solid-svg-icons';
+import PanelButton, { PanelButtonStyles } from './PanelButton';
 import { MobileContext } from "../../../contexts/MobileContext";
 
 
@@ -217,86 +217,37 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
         {/* Navigation arrows */}
         {imageList.length > 1 && (
           <>
-            <button
+            <PanelButton
+              icon={faChevronLeft}
+              label="Previous project"
               onClick={goToPrevious}
               disabled={isAnimating}
-              style={{
-                position: 'absolute',
-                left: '10px',
-                top: '50%',
-                transform: `translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(-100%)'}`,
-                background: `${theme.accent}15`,
-                backdropFilter: 'blur(10px)',
-                border: `1px solid ${theme.accent}30`,
-                color: theme.accent,
-                fontSize: '1.2em',
-                cursor: isAnimating ? 'not-allowed' : 'pointer',
-                padding: '8px 10px',
-                borderRadius: '50%',
-                transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                opacity: isAnimating ? 0.5 : 0.8,
-                zIndex: 101,
-              }}
-              onMouseEnter={(e) => !isAnimating && (e.target.style.opacity = '1')}
-              onMouseLeave={(e) => !isAnimating && (e.target.style.opacity = '0.8')}
-            >
-              <FontAwesomeIcon icon={faChevronLeft} />
-            </button>
-
-            <button
+              baseTransform={`translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(-150%)'}`}
+              style={{ left: '12px', top: '50%' }}
+            />
+            <PanelButton
+              icon={faChevronRight}
+              label="Next project"
               onClick={goToNext}
               disabled={isAnimating}
-              style={{
-                position: 'absolute',
-                right: '10px',
-                top: '50%',
-                transform: `translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(100%)'}`,
-                background: `${theme.accent}15`,
-                backdropFilter: 'blur(10px)',
-                border: `1px solid ${theme.accent}30`,
-                color: theme.accent,
-                fontSize: '1.2em',
-                cursor: isAnimating ? 'not-allowed' : 'pointer',
-                padding: '8px 10px',
-                borderRadius: '50%',
-                transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                opacity: isAnimating ? 0.5 : 0.8,
-                zIndex: 101,
-              }}
-              onMouseEnter={(e) => !isAnimating && (e.target.style.opacity = '1')}
-              onMouseLeave={(e) => !isAnimating && (e.target.style.opacity = '0.8')}
-            >
-              <FontAwesomeIcon icon={faChevronRight} />
-            </button>
+              baseTransform={`translateY(-50%) ${isVisible_internal ? 'translateX(0)' : 'translateX(150%)'}`}
+              style={{ right: '12px', top: '50%' }}
+            />
           </>
         )}
 
         {/* Close button */}
         {onClose && (
-          <button
+          <PanelButton
+            icon={faTimes}
+            label="Close projects"
             onClick={onClose}
             style={{
-              position: 'absolute',
-              top: '10px',
-              right: '10px',
-              background: `${theme.accent}15`,
-              backdropFilter: 'blur(10px)',
-              border: `1px solid ${theme.accent}30`,
-              color: theme.accent,
-              fontSize: '1.1em',
-              cursor: 'pointer',
-              padding: '8px 9px',
-              borderRadius: '50%',
-              transition: 'all 0.3s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-              opacity: 0.8,
-              zIndex: 101,
-              transform: isVisible_internal ? 'scale(1)' : 'scale(0)',
+              top: '12px',
+              right: '12px',
+              opacity: isVisible_internal ? 1 : 0,
             }}
-            onMouseEnter={(e) => (e.target.style.opacity = '1')}
-            onMouseLeave={(e) => (e.target.style.opacity = '0.8')}
-          >
-            <FontAwesomeIcon icon={faTimes} />
-          </button>
+          />
         )}
 
         {/* Image container */}
@@ -425,35 +376,21 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
               }}
             >
               {/* Close button for zoom */}
-              <button
+              <PanelButton
+                icon={faTimes}
+                label="Close zoom"
                 onClick={handleZoomClose}
+                size={28}
                 style={{
-                  position: 'absolute',
                   top: '8px',
                   right: '8px',
-                  background: `${theme.accent}20`,
-                  backdropFilter: 'blur(10px)',
-                  border: `1px solid ${theme.accent}40`,
-                  color: theme.accent,
-                  fontSize: '0.8em',
-                  cursor: 'pointer',
-                  padding: '6px 8px',
-                  borderRadius: '50%',
-                  transition: 'all 0.3s ease',
-                  opacity: 0.9,
+                  fontSize: '0.7rem',
                   zIndex: 104,
-                  width: '24px',
-                  height: '24px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  pointerEvents: 'auto', // Enable clicks on close button
+                  // The overlay itself is click-through so the pointer keeps
+                  // driving the zoom; this control still needs to be clickable.
+                  pointerEvents: 'auto',
                 }}
-                onMouseEnter={(e) => (e.target.style.opacity = '1')}
-                onMouseLeave={(e) => (e.target.style.opacity = '0.9')}
-              >
-                <FontAwesomeIcon icon={faTimes} />
-              </button>
+              />
 
               {/* Zoomed image container */}
               <div
@@ -530,6 +467,8 @@ const InlineCarousel = ({ images, isVisible, onClose }) => {
           </p>
         </div>
       </div>
+
+      <PanelButtonStyles />
 
       {/* Dots indicator */}
       {imageList.length > 1 && (

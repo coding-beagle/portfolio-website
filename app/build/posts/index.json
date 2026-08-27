@@ -1,0 +1,15 @@
+[
+  {
+    "slug": "hello-world",
+    "title": "TODO, write something interesting",
+    "date": "2026-08-27",
+    "summary": "A blog where I can speak into the void now lives here. Yay.",
+    "tags": [
+      "meta",
+      "intro",
+      "first"
+    ],
+    "cover": "",
+    "file": "posts/2026-08-27-hello-world.md"
+  }
+]

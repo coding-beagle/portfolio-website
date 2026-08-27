@@ -5,6 +5,8 @@ import {
   useRef,
   useContext,
   useCallback,
+  lazy,
+  Suspense,
 } from "react";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { MobileContext } from "../../../contexts/MobileContext";
@@ -14,7 +16,7 @@ import {
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
-import { faFolder } from "@fortawesome/free-solid-svg-icons";
+import { faBookOpen, faFolder } from "@fortawesome/free-solid-svg-icons";
 
 import Snow from "./scenes/snow";
 import Rain from "./scenes/rain";
@@ -49,6 +51,10 @@ import Leaves from "./scenes/leaves";
 import Backrooms from "./scenes/backrooms";
 import BZ from "./scenes/bz";
 
+// Split out: react-markdown is a large dependency and the panel sits behind a
+// click, so it is only fetched once the blog is opened for the first time.
+const InlineBlog = lazy(() => import("./InlineBlog"));
+
 const Scenes = {
   0: { component: Snow, name: "snow" },
   1: { component: Rain, name: "rain" },
@@ -82,6 +88,8 @@ export default function Title({
   text = "Nicholas Teague",
   initialScene = "",
   proj = false,
+  blog = false,
+  initialPost = null,
   disableInitialShake = false,
   visibleUI = true,
   setVisibleUI = () => { },
@@ -102,6 +110,9 @@ export default function Title({
   const headerRef = useRef(null);
   const animationNameRef = useRef("");
   const [showCarousel, setShowCarousel] = useState(proj ?? false);
+  const [showBlog, setShowBlog] = useState((blog ?? false) || initialPost !== null);
+  // Latches on first open and stays mounted, so the close animation can play.
+  const [blogMounted, setBlogMounted] = useState((blog ?? false) || initialPost !== null);
 
   const [displayedText, setDisplayedText] = useState("");
   const [typingDone, setTypingDone] = useState(false);
@@ -178,6 +189,28 @@ export default function Title({
   useEffect(() => {
     setShowCarousel(proj);
   }, [proj])
+
+  useEffect(() => {
+    const open = blog || initialPost !== null;
+    setShowBlog(open);
+    if (open) setBlogMounted(true);
+  }, [blog, initialPost])
+
+  // Only one inline panel at a time, so the column never stacks two cards.
+  const toggleCarousel = useCallback(() => {
+    setShowCarousel((prev) => {
+      if (!prev) setShowBlog(false);
+      return !prev;
+    });
+  }, []);
+
+  const toggleBlog = useCallback(() => {
+    setBlogMounted(true);
+    setShowBlog((prev) => {
+      if (!prev) setShowCarousel(false);
+      return !prev;
+    });
+  }, []);
 
   useEffect(() => {
     setAutoShake(disableInitialShake);
@@ -404,6 +437,15 @@ export default function Title({
           isVisible={showCarousel}
           onClose={() => setShowCarousel(false)}
         />}
+        {visibleUI && blogMounted && (
+          <Suspense fallback={null}>
+            <InlineBlog
+              isVisible={showBlog}
+              initialSlug={initialPost}
+              onClose={() => setShowBlog(false)}
+            />
+          </Suspense>
+        )}
         {visibleUI && (
           <>
             {!mobile && <div
@@ -446,11 +488,21 @@ export default function Title({
             >
               <IconButton
                 icon={faFolder}
-                onClick={() => setShowCarousel(!showCarousel)}
+                onClick={toggleCarousel}
                 openNewTab={false}
                 title="View projects"
                 style={{
                   transform: showCarousel ? 'scale(1.1)' : 'scale(1)',
+                  transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              />
+              <IconButton
+                icon={faBookOpen}
+                onClick={toggleBlog}
+                openNewTab={false}
+                title="Read the blog"
+                style={{
+                  transform: showBlog ? 'scale(1.1)' : 'scale(1)',
                   transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
               />
