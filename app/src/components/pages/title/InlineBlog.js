@@ -20,6 +20,23 @@ const formatDate = (value) => {
   );
 };
 
+// Image paths in a post can be written three ways: an absolute URL, a path from
+// the public root ("/carousel_imgs/x.png"), or a bare name sitting next to the
+// post itself ("diagram.png"). The last one is the one people reach for, and it
+// would otherwise resolve against the site root rather than the posts folder.
+const resolveAsset = (src, base = 'posts/') => {
+  if (!src) return src;
+  if (/^(https?:)?\/\//.test(src) || src.startsWith('data:')) return src;
+  if (src.startsWith('/')) return `${PUBLIC_URL}${src}`;
+  return `${PUBLIC_URL}/${base}${src}`;
+};
+
+// The directory a post lives in, so its colocated images can be found.
+const assetBaseFor = (file) => {
+  const cut = (file || '').lastIndexOf('/');
+  return cut === -1 ? 'posts/' : `${file.slice(0, cut + 1)}`;
+};
+
 // The post body arrives with the frontmatter block still attached; it is only
 // there for the index generator, so strip it before rendering.
 const stripFrontmatter = (source) => source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
@@ -48,6 +65,8 @@ const InlineBlog = ({ isVisible, onClose, initialSlug = null }) => {
     () => posts.find((post) => post.slug === activeSlug) || null,
     [posts, activeSlug]
   );
+
+  const assetBase = useMemo(() => assetBaseFor(activePost?.file), [activePost]);
 
   // Handle opening/closing animations
   useEffect(() => {
@@ -279,7 +298,7 @@ const InlineBlog = ({ isVisible, onClose, initialSlug = null }) => {
       ),
       img: ({ src, alt }) => (
         <img
-          src={src}
+          src={resolveAsset(src, assetBase)}
           alt={alt}
           style={{
             maxWidth: '100%',
@@ -319,7 +338,7 @@ const InlineBlog = ({ isVisible, onClose, initialSlug = null }) => {
         </td>
       ),
     };
-  }, [theme, mobile]);
+  }, [theme, mobile, assetBase]);
 
   if (!shouldRender) return null;
 
@@ -561,7 +580,7 @@ const PostCard = ({ post, index, mobile, visible, onOpen }) => {
     >
       {post.cover && (
         <img
-          src={`${PUBLIC_URL}${post.cover}`}
+          src={resolveAsset(post.cover, assetBaseFor(post.file))}
           alt=""
           style={{
             width: '100%',
