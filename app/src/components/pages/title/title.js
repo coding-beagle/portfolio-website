@@ -50,6 +50,7 @@ import Runes from "./scenes/runes";
 import Leaves from "./scenes/leaves";
 import Backrooms from "./scenes/backrooms";
 import BZ from "./scenes/bz";
+import Hyperspace from "./scenes/hyperspace";
 
 // Split out: react-markdown is a large dependency and the panel sits behind a
 // click, so it is only fetched once the blog is opened for the first time.
@@ -82,6 +83,7 @@ const Scenes = {
   23: { component: Leaves, name: "leaves" },
   24: { component: Backrooms, name: "backrooms" },
   25: { component: BZ, name: "bz" },
+  26: { component: Hyperspace, name: "hyperspace" },
 };
 
 export default function Title({
