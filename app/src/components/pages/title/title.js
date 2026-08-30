@@ -27,7 +27,7 @@ import IconHover from "./iconHover";
 import IconButton from "./IconButton";
 import InlineCarousel from "./InlineCarousel";
 import Conway from "./scenes/conway";
-// import WindTunnel from "./scenes/windtunnel";
+import WindTunnel from "./scenes/windtunnel";
 import Hexapod from "./scenes/hexapod";
 import Mandelbrot from "./scenes/mandelbrot";
 import Plants from "./scenes/plants";
@@ -84,6 +84,7 @@ const Scenes = {
   24: { component: Backrooms, name: "backrooms" },
   25: { component: BZ, name: "bz" },
   26: { component: Hyperspace, name: "hyperspace" },
+  27: { component: WindTunnel, name: "windtunnel" },
 };
 
 export default function Title({
@@ -467,6 +468,7 @@ export default function Title({
                 opacity: sceneLabelVisible && !sceneLabelFaded ? 1 : 0,
                 transition: "opacity 1.0s ease",
               }}
+              id="sceneLabel"
             >
               {sceneLabel === null ? `Current scene: ${getSceneName(currentScene)}` : sceneLabel}
             </div>}

@@ -765,8 +765,24 @@ export default function Hexapod({ visibleUI }) {
     }
 
     const MAX_HEART_LIFECYCLE = 150;
-    const HEART_WIDTH = canvas.width / 50;
-    const HEART_HEIGHT = canvas.height / 25;
+    // How long a heart spends growing to full size, so one pops into being
+    // rather than appearing whole.
+    const HEART_POP_FRAMES = 12;
+
+    /*
+     * A heart is as wide as it is tall, and sized off the shorter side of the
+     * viewport.
+     *
+     * It used to take its width from the canvas width and its height from the
+     * canvas height, over different divisors, so the shape stretched with the
+     * window: a needle on a phone, a squat blob on a wide monitor. Both were
+     * also fixed at setup, so neither followed a resize.
+     */
+    let heartSize = 0;
+    const resizeHearts = () => {
+      heartSize = clamp(Math.min(canvas.width, canvas.height) / 25, 18, 56);
+    };
+    resizeHearts();
 
     class Heart {
       constructor(x, y) {
@@ -784,52 +800,72 @@ export default function Hexapod({ visibleUI }) {
         }
       }
 
+      /** Grows from nothing, overshooting a little before it settles. */
+      size() {
+        const t = Math.min(this.lifeCycle / HEART_POP_FRAMES, 1);
+        const overshoot = 1.70158;
+        const eased =
+          1 + (overshoot + 1) * (t - 1) ** 3 + overshoot * (t - 1) ** 2;
+        return heartSize * eased;
+      }
+
       draw() {
         if (this.deleted) {
           return;
         }
+
+        const size = this.size();
+        if (size <= 0) return;
+
+        // The curves run from the top of the lobes down to the tip, so the
+        // shape is drawn half a heart above the point it was dropped at —
+        // otherwise it hangs below the cursor instead of sitting on it.
+        const top = this.y - size / 2;
+        const half = size / 2;
+        const topCurveHeight = size * 0.3;
+        const waist = top + (size + topCurveHeight) / 2;
+
         ctx.save();
         ctx.beginPath();
-        var topCurveHeight = HEART_HEIGHT * 0.3;
-        ctx.moveTo(this.x, this.y + topCurveHeight);
+        ctx.moveTo(this.x, top + topCurveHeight);
         // top left curve
         ctx.bezierCurveTo(
           this.x,
-          this.y,
-          this.x - HEART_WIDTH / 2,
-          this.y,
-          this.x - HEART_WIDTH / 2,
-          this.y + topCurveHeight
+          top,
+          this.x - half,
+          top,
+          this.x - half,
+          top + topCurveHeight
         );
 
         // bottom left curve
         ctx.bezierCurveTo(
-          this.x - HEART_WIDTH / 2,
-          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          this.x - half,
+          waist,
           this.x,
-          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
+          waist,
           this.x,
-          this.y + HEART_HEIGHT
+          top + size
         );
 
         // bottom right curve
         ctx.bezierCurveTo(
           this.x,
-          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
-          this.x + HEART_WIDTH / 2,
-          this.y + (HEART_HEIGHT + topCurveHeight) / 2,
-          this.x + HEART_WIDTH / 2,
-          this.y + topCurveHeight
+          waist,
+          this.x + half,
+          waist,
+          this.x + half,
+          top + topCurveHeight
         );
 
         // top right curve
         ctx.bezierCurveTo(
-          this.x + HEART_WIDTH / 2,
-          this.y,
+          this.x + half,
+          top,
           this.x,
-          this.y,
+          top,
           this.x,
-          this.y + topCurveHeight
+          top + topCurveHeight
         );
 
         ctx.closePath();
@@ -842,7 +878,9 @@ export default function Hexapod({ visibleUI }) {
             0,
             255
           )
-        ).toString(16);
+        )
+          .toString(16)
+          .padStart(2, "0");
 
         ctx.fillStyle = tertiaryAccentColorRef.current + hexOpacity;
         ctx.fill();
@@ -886,7 +924,19 @@ export default function Hexapod({ visibleUI }) {
 
     regenWalkCycle();
 
-    let canGenerateHeart = true;
+    /*
+     * How often holding the pointer drops another heart.
+     *
+     * The gate used to be the walk cycle passing zero, which tied the rate to
+     * the Walking Speed slider and to whatever phase the gait happened to be
+     * in: up to five seconds of nothing at the slow end, and a heart every
+     * frame at the fast end. The rate belongs to the click rather than the
+     * legs, so a fresh press drops one immediately and holding drops one every
+     * HEART_INTERVAL frames.
+     */
+    const HEART_INTERVAL = 15;
+    let heartCooldown = 0;
+    let wasClicking = false;
 
     let lastGaitCount = 0;
     let lastBodyCount = 0;
@@ -925,26 +975,36 @@ export default function Hexapod({ visibleUI }) {
         gaitCycle2 += 1;
         gaitCycle2 %= 360 - gaitCountRef.current;
         gaitCycle %= 360 - gaitCountRef.current;
-        if (gaitCycle == 0) {
-          canGenerateHeart = true;
+
+        if (heartCooldown > 0) heartCooldown -= 1;
+
+        const clicking = mouseClickRef.current;
+        // A new press never waits on the tail of the last one's cooldown.
+        if (clicking && !wasClicking) heartCooldown = 0;
+        wasClicking = clicking;
+
+        if (clicking && heartCooldown === 0 && isMouseCloseToHexapod()) {
+          heartArray.push(
+            new Heart(mousePosRef.current.x, mousePosRef.current.y)
+          );
+          heartCooldown = HEART_INTERVAL;
         }
 
-        if (mouseClickRef.current) {
-          if (isMouseCloseToHexapod() && canGenerateHeart) {
-            heartArray.push(
-              new Heart(mousePosRef.current.x, mousePosRef.current.y)
-            );
-            canGenerateHeart = false;
-          }
-        }
-
-        heartArray.forEach((heart, index) => {
-          if (heart.deleted) {
-            heartArray.splice(index, 1);
-          }
+        // Splicing inside a forEach made the loop skip the heart after every
+        // one it removed, so spent hearts came out a few frames late and in
+        // fits. Compacting the survivors down over the same pass drops all of
+        // them at once, and keeps them in the order they were dropped so the
+        // newest is the one on top.
+        let alive = 0;
+        for (let index = 0; index < heartArray.length; index++) {
+          const heart = heartArray[index];
           heart.update();
+          if (heart.deleted) continue;
           heart.draw();
-        });
+          heartArray[alive] = heart;
+          alive += 1;
+        }
+        heartArray.length = alive;
 
       }
     }
@@ -975,6 +1035,7 @@ export default function Hexapod({ visibleUI }) {
     };
 
     return {
+      onResize: resizeHearts,
       frame: animate,
       cleanup: () => {
         hexapodArray.length = 0;
