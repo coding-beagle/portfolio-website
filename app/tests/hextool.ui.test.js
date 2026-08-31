@@ -137,6 +137,13 @@ describe("hex tool", () => {
     expect(readAs("whole word", "hex")).toContain("0x0000_00FF");
   });
 
+  it("offers a way back to the site the tool is a subdomain of", () => {
+    render(<HexApp />);
+    const home = screen.getByRole("link", { name: /nteague\.com/i });
+    // jsdom serves the page from localhost, where the portfolio is a hash away.
+    expect(home).toHaveAttribute("href", "#/?scene=desktop");
+  });
+
   it("explains a literal it cannot read", () => {
     render(<HexApp />);
     retype("0b1021");

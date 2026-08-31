@@ -73,6 +73,32 @@ page is also reachable from the portfolio at `/#/hextool`.
 `make build_hextool` writes `app/build-hextool`, which is what the subdomain's
 document root gets.
 
+### Reaching it from the main site
+
+The `desktop` scene (`?scene=desktop`) is a Windows XP desktop: the subdomain
+utilities are shortcuts on it, and a Scenes folder holds every other scene, so
+it doubles as a way around the rest of them. Double-click to open, or use the
+start menu. Shortcuts drag around the desktop and snap to the grid, and the
+folder is draggable and resizable.
+
+The page's own theme and hide-UI buttons are suppressed while this scene is
+showing — `Title` reports the current scene up to `App` for that — and the
+desktop carries the same two controls as programs instead, which is what lets
+the taskbar sit in the corner at XP's height rather than being pushed out of
+the way of two floating circles.
+
+The Luna chrome uses XP's own colours rather than the site theme's: the taskbar
+blue, the green start button and the beige window face are the whole
+recognition, and deriving them from the theme's cyan just produced a generic
+blue desktop. The wallpaper is the exception — the Bliss hill is drawn from
+`theme.secondaryAccent`, and the sky goes to dusk on the dark theme.
+
+Every shortcut comes from `SUBDOMAIN_APPS` in `app/src/subdomains.js` — a new
+utility is one entry there and nothing else. Give it a `localPath` and the
+desktop still opens something when the site is being run from localhost, where
+the subdomains do not exist. The same module's `homeHref()` is what the
+utilities link back to.
+
 ## Make Commands:
 
 `make install` -> Install JS deps

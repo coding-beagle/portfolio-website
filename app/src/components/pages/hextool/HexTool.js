@@ -1,9 +1,10 @@
 import React, { useContext, useMemo, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCheck, faCopy } from "@fortawesome/free-solid-svg-icons";
+import { faArrowLeft, faCheck, faCopy } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { MobileContext } from "../../../contexts/MobileContext";
 import { noSelect } from "../title/utilities/valueChangerElements/styles";
+import { homeHref } from "../../../subdomains";
 import BitGrid, { BitGridStyles } from "./BitGrid";
 import {
   applySelection,
@@ -303,13 +304,33 @@ export default function HexTool() {
     >
       <BitGridStyles />
       <style>{`
-        .hexSeg:focus-visible, .hexCopy:focus-visible {
+        .hexSeg:focus-visible, .hexCopy:focus-visible, .hexHome:focus-visible {
           outline: 2px solid currentColor;
           outline-offset: 2px;
         }
+        .hexHome:hover { opacity: 1; color: ${theme.secondary}; }
       `}</style>
 
       <header style={{ marginBottom: "1.5em" }}>
+        <a
+          className="hexHome"
+          href={homeHref()}
+          style={{
+            ...noSelect,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5em",
+            marginBottom: "0.9em",
+            fontSize: "0.8rem",
+            color: theme.accent,
+            opacity: 0.65,
+            textDecoration: "none",
+            transition: "opacity 0.2s ease, color 0.2s ease",
+          }}
+        >
+          <FontAwesomeIcon icon={faArrowLeft} />
+          nteague.com
+        </a>
         <h1
           style={{
             margin: 0,

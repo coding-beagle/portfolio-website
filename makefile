@@ -82,3 +82,6 @@ deploy_hextool:
 	rm -rf $(HEXTOOL_DEPLOYPATH)/*; \
 	cp -r app/build-hextool/* $(HEXTOOL_DEPLOYPATH)/; \
 	echo "Deployed hex tool to $(HEXTOOL_DEPLOYPATH)"; \
+
+# prod only, deploys the main site and the hex tool subdomain
+deploy: deploy_manual deploy_hextool

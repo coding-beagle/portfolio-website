@@ -51,6 +51,7 @@ import Leaves from "./scenes/leaves";
 import Backrooms from "./scenes/backrooms";
 import BZ from "./scenes/bz";
 import Hyperspace from "./scenes/hyperspace";
+import Desktop from "./scenes/desktop";
 
 // Split out: react-markdown is a large dependency and the panel sits behind a
 // click, so it is only fetched once the blog is opened for the first time.
@@ -85,6 +86,7 @@ const Scenes = {
   25: { component: BZ, name: "bz" },
   26: { component: Hyperspace, name: "hyperspace" },
   27: { component: WindTunnel, name: "windtunnel" },
+  28: { component: Desktop, name: "desktop" },
 };
 
 export default function Title({
@@ -99,6 +101,7 @@ export default function Title({
   handleThemeToggle = () => { },
   handleVisibleToggle = () => { },
   onIntroComplete = () => { },
+  onSceneChange = () => { },
 }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
@@ -270,6 +273,17 @@ export default function Title({
     return Scenes[currentScene].component;
   };
 
+  useEffect(() => {
+    onSceneChange(Scenes[currentScene].name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScene]);
+
+  const openSceneByName = useCallback((name) => {
+    const index = sceneNameToIndex(name);
+    if (index !== undefined) setCurrentScene(index);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const getShakeTransform = (left) => {
     const animationName = `cartoony-shake-${Math.random()
       .toString(36)
@@ -386,7 +400,17 @@ export default function Title({
           overflow: "hidden"
         }}
       >
-        {createElement(renderScene(visibleUI), { visibleUI: visibleUI && settledUI })}
+        {createElement(renderScene(visibleUI), {
+          visibleUI: visibleUI && settledUI,
+          // Only the desktop scene reads these; the rest ignore the extra
+          // props. It owns the folder of shortcuts to every other scene, so
+          // the registry has to reach it from here.
+          sceneNames: Object.values(Scenes).map((scene) => scene.name),
+          currentSceneName: getSceneName(currentScene),
+          onOpenScene: openSceneByName,
+          onToggleTheme: handleThemeToggle,
+          onToggleVisibleUI: handleVisibleToggle,
+        })}
         {visibleUI && (
           <header
             ref={headerRef}

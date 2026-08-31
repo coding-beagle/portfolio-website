@@ -56,6 +56,10 @@ function AppWrapper() {
   const [canSetShowHideButton, setCanSetShowHideButton] = useState(true);
   const [visibleUI, setVisibleUI] = useState(hideUIBool);
   const [introComplete, setIntroComplete] = useState(false);
+  // The desktop scene offers the theme and hide-UI controls as programs of its
+  // own, so the page stands its two floating buttons down while it is showing.
+  const [sceneName, setSceneName] = useState(null);
+  const sceneOwnsControls = sceneName === "desktop";
 
   // Handler for animated theme toggle
   const handleThemeToggle = () => {
@@ -104,8 +108,9 @@ function AppWrapper() {
         handleThemeToggle={handleThemeToggle}
         handleVisibleToggle={handleVisibleToggle}
         onIntroComplete={() => setIntroComplete(true)}
+        onSceneChange={setSceneName}
       />
-      {visibleUI && (
+      {visibleUI && !sceneOwnsControls && (
         <button
           onClick={handleThemeToggle}
           style={{
@@ -176,7 +181,12 @@ function AppWrapper() {
       <div style={{
         padding: '1em',
         overflow: "hidden",
+        display: sceneOwnsControls ? "none" : "block",
         position: "fixed",
+        // `position: fixed` always creates a stacking context, so the button
+        // inside is only 9999 *within this wrapper* — without a z-index here
+        // the whole thing sits at auto and scene chrome can paint over it.
+        zIndex: 9999,
         right: "0em",
         bottom: "0em",
         width: "10vw",
