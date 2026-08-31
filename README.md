@@ -127,8 +127,22 @@ The design, including the phase 2 encryption work, is written up separately.
 4. Make sure AutoSSL covers the subdomain. Phase 2 needs `crypto.subtle`, which
    does not exist without HTTPS.
 
-Run `php php/uploadthat/tests/run.php` (or `make test_uploadthat`) to check the
-API against a throwaway database.
+### Checking it works
+
+`make test_uploadthat` exercises the store against a throwaway database, and
+parses every PHP file first — the CLI scripts are not otherwise loaded by
+anything, and a parse error with `display_errors` off prints nothing at all.
+
+`api/cli/doctor.php` checks the things that have to be true on the server and
+names the one that is not:
+
+    php ~/public_uploadthat_html/api/cli/doctor.php
+
+`make smoke_uploadthat` drives a deployed instance over real HTTP, which is the
+only way to test the parts the unit tests cannot reach: the rewrite, whether the
+`Authorization` header survives the trip to PHP, multipart upload and streamed
+download. It opens a real session, so pass `OPERATOR_KEY=...` to avoid spending
+one of the three anonymous sessions an IP gets per hour.
 
 ### Running it locally
 

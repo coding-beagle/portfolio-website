@@ -29,6 +29,11 @@ run_uploadthat_api:
 test_uploadthat:
 	php php/uploadthat/tests/run.php
 
+# check a DEPLOYED uploadthat over real HTTP: make smoke_uploadthat URL=https://...
+URL ?= https://uploadthat.nteague.com
+smoke_uploadthat:
+	php/uploadthat/tests/smoke.sh $(URL) $(OPERATOR_KEY)
+
 # clean node modules and build folders
 clean:
 	rm -rf app/node_modules
