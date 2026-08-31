@@ -9,6 +9,13 @@ import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "../src/themes/ThemeProvider";
 import { MobileContext } from "../src/contexts/MobileContext";
 import Desktop from "../src/components/pages/title/scenes/desktop";
+import {
+  eyeHeight,
+  faceProjection,
+  litHemispherePath,
+  mouthPath,
+  spinEase,
+} from "../src/components/pages/title/utilities/desktopElements/CelestialSphere";
 import { SUBDOMAIN_APPS, appHref } from "../src/subdomains";
 
 const SCENES = ["snow", "rain", "hyperspace", "desktop"];
@@ -18,7 +25,7 @@ const mount = ({ mobile = false, ...props } = {}) => {
   const onOpenScene = jest.fn();
   const onToggleTheme = jest.fn();
   const onToggleVisibleUI = jest.fn();
-  render(
+  const view = render(
     <MobileContext.Provider value={mobile}>
       <ThemeProvider>
         <Desktop
@@ -33,7 +40,7 @@ const mount = ({ mobile = false, ...props } = {}) => {
       </ThemeProvider>
     </MobileContext.Provider>
   );
-  return { onLaunch, onOpenScene, onToggleTheme, onToggleVisibleUI };
+  return { ...view, onLaunch, onOpenScene, onToggleTheme, onToggleVisibleUI };
 };
 
 const shortcut = (label) => screen.getByTitle(label);
@@ -42,8 +49,16 @@ const shortcut = (label) => screen.getByTitle(label);
 // position breaks every time a utility is added to the registry.
 const GRID_TOP = 16;
 const CELL_HEIGHT = 92 + 6;
+const GRID_LEFT = 16;
+const CELL_WIDTH = 84 + 6;
 const homeTop = (index) => `${GRID_TOP + index * CELL_HEIGHT}px`;
 const SCENES_INDEX = SUBDOMAIN_APPS.length;
+
+/** jsdom fixes the viewport at 1024x768, so a phone has to be declared. */
+const setViewport = (width, height) => {
+  Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: height, configurable: true });
+};
 /**
  * `hidden: true` because a minimised window is still mounted, only display:none
  * — which the role queries would otherwise treat as not being there at all, and
@@ -51,6 +66,140 @@ const SCENES_INDEX = SUBDOMAIN_APPS.length;
  */
 const folderWindow = () => screen.queryByRole("dialog", { hidden: true });
 const taskbar = () => within(screen.getByRole("toolbar", { name: "Taskbar" }));
+
+afterEach(() => setViewport(1024, 768));
+
+/**
+ * jsdom has no 2D context, so the star field would silently skip drawing.
+ * Recording the calls instead lets the wallpaper actually be tested.
+ */
+function stubCanvas() {
+  const calls = { arc: 0, stroke: 0 };
+  HTMLCanvasElement.prototype.getContext = () => ({
+    setTransform: () => {},
+    clearRect: () => {},
+    beginPath: () => {},
+    arc: () => {
+      calls.arc += 1;
+    },
+    fill: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    stroke: () => {
+      calls.stroke += 1;
+    },
+    set globalAlpha(value) {},
+    set fillStyle(value) {},
+    set strokeStyle(value) {},
+    set lineWidth(value) {},
+  });
+  return calls;
+}
+
+describe("the wallpaper", () => {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = originalGetContext;
+  });
+
+  it("draws a sky for both times of day so the toggle can cross-fade", () => {
+    stubCanvas();
+    const { container } = mount();
+    // Both layers stay mounted; only their opacity differs.
+    expect(container.querySelectorAll(".utWallpaperLayer")).toHaveLength(2);
+  });
+
+  it("puts stars in the night sky", () => {
+    const calls = stubCanvas();
+    mount();
+    // The dark theme is the default, so the night layer is the live one.
+    expect(calls.arc).toBeGreaterThan(50);
+    // Comets are drawn as circles too, like the stars scene's — a streak drawn
+    // with lineTo/stroke would mean the old, wrong one had come back.
+    expect(calls.stroke).toBe(0);
+  });
+
+  it("shows one sphere whose two hemispheres are sun and moon", () => {
+    stubCanvas();
+    const { container } = mount();
+
+    // One body, not two stacked discs and not a flipping plane.
+    expect(container.querySelectorAll('[data-celestial="sphere"]')).toHaveLength(1);
+
+    // Dark theme by default, so the sphere is turned to its moon side: the moon
+    // is facing us and the sun's markings are round the back.
+    expect(container.querySelector('[data-face="moon"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-face="sun"]')).toBeNull();
+  });
+
+  it("projects the faces onto the sphere rather than sliding them flat", () => {
+    // Facing us at the front, gone at the back, and squashed to nothing at the
+    // limb — which is what a marking on a turning ball does.
+    expect(faceProjection(0, 0).facing).toBe(true);
+    expect(faceProjection(Math.PI, 0).facing).toBe(false);
+    expect(faceProjection(Math.PI / 2, 0).facing).toBe(false);
+
+    // Halfway to the limb it has moved out and narrowed by the same cosine.
+    const quarter = faceProjection(Math.PI / 4, 0);
+    expect(quarter.transform).toContain("translate(71.213 50)");
+    expect(quarter.transform).toContain("scale(0.707 1)");
+  });
+
+  it("draws the terminator as an ellipse that flattens through the turn", () => {
+    // Facing the sun: the boundary lies on the limb, so the lit half covers all.
+    expect(litHemispherePath(0)).toContain("A 30 30 0 0 0");
+    // Halfway: an arc of zero width, which SVG draws as the straight meridian.
+    expect(litHemispherePath(Math.PI / 2)).toContain("A 0 30");
+  });
+
+  it("puts the terminator on the correct side whichever way it turns", () => {
+    // Only one of the sun's two bounding meridians is on the near side, and
+    // which one swaps with the direction of travel. Getting this wrong is
+    // invisible in one direction and badly wrong in the other.
+    const right = litHemispherePath(Math.PI / 3);
+    const left = litHemispherePath(-Math.PI / 3);
+    expect(right).not.toBe(left);
+    // Mirrored: same arc widths, opposite limb.
+    expect(right).toContain("A 15 30");
+    expect(left).toContain("A 15 30");
+    expect(right.endsWith("0 0 0 50 20")).toBe(true);
+    expect(left.endsWith("0 0 1 50 20")).toBe(true);
+  });
+
+  it("strains the face while it is turning", () => {
+    // At rest the mouth curves up and the eyes are open.
+    expect(mouthPath(0)).toBe("M43 58 Q50 64 57 58");
+    expect(eyeHeight(0, false)).toBe(6);
+
+    // Under load it inverts into a grimace and the eyes narrow.
+    expect(mouthPath(1)).toBe("M43 60 Q50 55 57 60");
+    expect(eyeHeight(1, false)).toBeLessThan(3);
+
+    // A blink still shuts them regardless.
+    expect(eyeHeight(0, true)).toBe(0.7);
+  });
+
+  it("winds back before it turns, then eases through on a cubic", () => {
+    expect(spinEase(0)).toBeCloseTo(0, 5);
+    expect(spinEase(1)).toBeCloseTo(1, 5);
+    // Goes the wrong way first, and by a good margin.
+    expect(spinEase(0.3)).toBeLessThan(-0.15);
+    // Still behind where it started a third of the way in, then quickest
+    // through the middle of the twist.
+    expect(spinEase(0.35)).toBeLessThan(0);
+    const early = spinEase(0.5) - spinEase(0.45);
+    const middle = spinEase(0.7) - spinEase(0.65);
+    const late = spinEase(0.95) - spinEase(0.9);
+    expect(middle).toBeGreaterThan(early);
+    expect(middle).toBeGreaterThan(late);
+  });
+
+  it("carries on without a canvas rather than taking the scene down", () => {
+    HTMLCanvasElement.prototype.getContext = () => null;
+    expect(() => mount()).not.toThrow();
+    expect(shortcut("Scenes")).toBeInTheDocument();
+  });
+});
 
 describe("desktop scene", () => {
   it("puts every subdomain app on the desktop, plus the scenes folder", () => {
@@ -124,6 +273,134 @@ describe("desktop scene", () => {
     fireEvent.doubleClick(shortcut("Scenes"));
     userEvent.click(screen.getByLabelText("Close"));
     expect(folderWindow()).toBeNull();
+  });
+
+  it("stacks the shortcuts down the screen on a desktop", () => {
+    mount();
+    // A column at a time, the way Windows fills a desktop.
+    expect(shortcut(SUBDOMAIN_APPS[0].name)).toHaveStyle({
+      left: "16px",
+      top: homeTop(0),
+    });
+    expect(shortcut("Scenes")).toHaveStyle({
+      left: "16px",
+      top: homeTop(SCENES_INDEX),
+    });
+  });
+
+  it("runs them across the screen on a phone instead", () => {
+    // Tall and narrow: a single column would run off the bottom while the whole
+    // width went unused.
+    setViewport(390, 720);
+    mount({ mobile: true });
+
+    const columns = Math.floor((390 - GRID_LEFT + 6) / CELL_WIDTH);
+    expect(columns).toBeGreaterThan(1);
+
+    expect(shortcut(SUBDOMAIN_APPS[0].name)).toHaveStyle({
+      left: `${GRID_LEFT}px`,
+      top: homeTop(0),
+    });
+    // The second shortcut sits beside the first, not below it.
+    expect(shortcut(SUBDOMAIN_APPS[1].name)).toHaveStyle({
+      left: `${GRID_LEFT + CELL_WIDTH}px`,
+      top: homeTop(0),
+    });
+    // And the row wraps once it runs out of width.
+    expect(shortcut("Show Desktop")).toHaveStyle({ top: homeTop(1) });
+  });
+
+  it("selects what the band covers, and keeps it after the mouse comes up", () => {
+    const { container } = mount();
+    const surface = container.firstChild;
+    const first = shortcut(SUBDOMAIN_APPS[0].name);
+    const second = shortcut(SUBDOMAIN_APPS[1].name);
+
+    const isLit = (icon) => icon.style.borderColor !== "transparent";
+    expect(isLit(first)).toBe(false);
+
+    // A band over the top two icons in the column.
+    fireEvent.mouseDown(surface, { clientX: 8, clientY: 8, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 130 });
+    expect(isLit(first)).toBe(true);
+    expect(isLit(second)).toBe(true);
+    expect(isLit(shortcut("Show Desktop"))).toBe(false);
+
+    // And it survives the release — this is what was broken.
+    fireEvent.mouseUp(window);
+    expect(isLit(shortcut(SUBDOMAIN_APPS[0].name))).toBe(true);
+    expect(isLit(shortcut(SUBDOMAIN_APPS[1].name))).toBe(true);
+
+    // Clicking bare desktop clears it again.
+    fireEvent.mouseDown(surface, { clientX: 600, clientY: 400, button: 0 });
+    fireEvent.mouseUp(window);
+    expect(isLit(shortcut(SUBDOMAIN_APPS[0].name))).toBe(false);
+  });
+
+  it("hides the selection band when it collapses onto its own axis", () => {
+    const { container } = mount();
+    const band = () => container.querySelector(".desktopMarquee");
+    const surface = container.firstChild;
+
+    fireEvent.mouseDown(surface, { clientX: 300, clientY: 300, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 420, clientY: 400 });
+    expect(band()).toBeInTheDocument();
+
+    // Back onto the x it started from: no width left, so nothing to draw.
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 400 });
+    expect(band()).toBeNull();
+
+    // And onto the y instead.
+    fireEvent.mouseMove(window, { clientX: 420, clientY: 300 });
+    expect(band()).toBeNull();
+
+    // It comes back the moment the drag has area again, on either side of the
+    // origin — dragging up and left is still a selection.
+    fireEvent.mouseMove(window, { clientX: 180, clientY: 200 });
+    expect(band()).toBeInTheDocument();
+
+    fireEvent.mouseUp(window);
+    expect(band()).toBeNull();
+  });
+
+  it("drags every selected shortcut together", () => {
+    const { container } = mount();
+    const surface = container.firstChild;
+    const first = () => shortcut(SUBDOMAIN_APPS[0].name);
+    const second = () => shortcut(SUBDOMAIN_APPS[1].name);
+
+    // Band over the top two, then drag one of them.
+    fireEvent.mouseDown(surface, { clientX: 8, clientY: 8, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 130 });
+    fireEvent.mouseUp(window);
+
+    fireEvent.mouseDown(first(), { clientX: 40, clientY: 40, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 220, clientY: 240 });
+    fireEvent.mouseUp(window);
+
+    // Both moved, and by the same amount — the group keeps its shape.
+    expect(first()).toHaveStyle({ left: "196px", top: homeTop(2) });
+    expect(second()).toHaveStyle({ left: "196px", top: homeTop(3) });
+  });
+
+  it("drags only the pressed shortcut when it was not selected", () => {
+    const { container } = mount();
+    const surface = container.firstChild;
+
+    fireEvent.mouseDown(surface, { clientX: 8, clientY: 8, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 130 });
+    fireEvent.mouseUp(window);
+
+    // "Show Desktop" is outside that band, so pressing it takes over the
+    // selection rather than dragging the other two along with it.
+    const outsider = () => shortcut("Show Desktop");
+    const before = shortcut(SUBDOMAIN_APPS[0].name).style.top;
+    fireEvent.mouseDown(outsider(), { clientX: 40, clientY: 420, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 220, clientY: 430 });
+    fireEvent.mouseUp(window);
+
+    expect(outsider()).toHaveStyle({ left: "196px" });
+    expect(shortcut(SUBDOMAIN_APPS[0].name).style.top).toBe(before);
   });
 
   it("lets a shortcut be dragged, and drops it on the grid", () => {

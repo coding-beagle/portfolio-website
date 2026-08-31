@@ -30,6 +30,11 @@ const SCENES_FOLDER = "scenes";
 const DISPLAY_PROPERTIES = "display";
 const SHOW_DESKTOP = "showDesktop";
 const GRID_GAP = 6;
+// Once the pointer crosses back over where the drag started, the band collapses
+// to a line in that axis and Windows stopped drawing it — there is no area left
+// to fill. Two pixels rather than zero so it blinks out cleanly instead of
+// leaving a sliver of border behind.
+const MARQUEE_MIN = 2;
 const GRID_TOP = 16;
 const GRID_LEFT = 16;
 const CELL_WIDTH = ICON_WIDTH + GRID_GAP;
@@ -37,11 +42,43 @@ const CELL_HEIGHT = ICON_HEIGHT + GRID_GAP;
 // A press has to travel this far before it counts as a drag rather than a click.
 const DRAG_THRESHOLD = 4;
 
-/** Where a shortcut sits before anyone has moved it: one column, top-left. */
-const homePosition = (index) => ({
-  x: GRID_LEFT,
-  y: GRID_TOP + index * CELL_HEIGHT,
+/** How many shortcuts fit across and down, once the taskbar is accounted for. */
+const measureGrid = () => ({
+  columns: Math.max(
+    1,
+    Math.floor((window.innerWidth - GRID_LEFT + GRID_GAP) / CELL_WIDTH)
+  ),
+  rows: Math.max(
+    1,
+    Math.floor(
+      (window.innerHeight - TASKBAR_HEIGHT - GRID_TOP + GRID_GAP) / CELL_HEIGHT
+    )
+  ),
 });
+
+function useGridExtent() {
+  const [extent, setExtent] = useState(measureGrid);
+  useEffect(() => {
+    const onResize = () => setExtent(measureGrid());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return extent;
+}
+
+/**
+ * Where a shortcut sits before anyone has moved it.
+ *
+ * Windows fills a column and then starts the next one, which is right on a
+ * screen taller than it is wide. A phone is the other way round: a single
+ * column runs off the bottom while the whole width goes unused, so there the
+ * icons fill a row at a time instead.
+ */
+const homePosition = (index, extent, rowFirst) => {
+  const column = rowFirst ? index % extent.columns : Math.floor(index / extent.rows);
+  const row = rowFirst ? Math.floor(index / extent.columns) : index % extent.rows;
+  return { x: GRID_LEFT + column * CELL_WIDTH, y: GRID_TOP + row * CELL_HEIGHT };
+};
 
 /** Dropped icons land on the grid, the way "Align to Grid" always did. */
 const snapToGrid = (x, y, bottomInset) => {
@@ -97,8 +134,11 @@ export default function Desktop({
   const mobile = useContext(MobileContext);
   const luna = lunaPalette(themeName);
 
-  const [selected, setSelected] = useState(null);
+  // A list, not one key: a marquee selects however many it covers, and dropping
+  // that selection on release was why dragging a band appeared to do nothing.
+  const [selected, setSelected] = useState([]);
   const [positions, setPositions] = useState({});
+  const extent = useGridExtent();
   // The press in progress, and whether it has travelled far enough to be a drag.
   const iconDrag = useRef(null);
   const draggedRef = useRef(false);
@@ -137,7 +177,8 @@ export default function Desktop({
     },
   ];
 
-  const positionOf = (entry, index) => positions[entry.key] ?? homePosition(index);
+  const positionOf = (entry, index) =>
+    positions[entry.key] ?? homePosition(index, extent, mobile);
 
   /**
    * Press, move, release on a shortcut. A press that never travels is left
@@ -147,11 +188,24 @@ export default function Desktop({
   const grabHandlers = (entry, index) => ({
     start: (event) => {
       if (event.button !== 0) return;
-      const from = positionOf(entry, index);
+
+      // Dragging an icon that is part of a selection takes the whole selection
+      // with it, which is what a selection is for. Dragging one that is not
+      // replaces the selection with it first, the way Windows does.
+      const group = selected.includes(entry.key) ? selected : [entry.key];
+      if (!selected.includes(entry.key)) setSelected([entry.key]);
+
+      // Where every icon in the group started, so they all move by one delta
+      // and keep their arrangement rather than piling onto the cursor.
+      const origins = {};
+      shortcuts.forEach((other, otherIndex) => {
+        if (group.includes(other.key)) origins[other.key] = positionOf(other, otherIndex);
+      });
+
       iconDrag.current = {
-        key: entry.key,
-        dx: event.clientX - from.x,
-        dy: event.clientY - from.y,
+        primary: entry.key,
+        keys: group,
+        origins,
         originX: event.clientX,
         originY: event.clientY,
       };
@@ -175,23 +229,36 @@ export default function Desktop({
       )
         return;
       draggedRef.current = true;
-      setSelected(active.key);
-      setPositions((prev) => ({
-        ...prev,
-        [active.key]: { x: event.clientX - active.dx, y: event.clientY - active.dy },
-      }));
+      const dx = event.clientX - active.originX;
+      const dy = event.clientY - active.originY;
+      setPositions((prev) => {
+        const next = { ...prev };
+        active.keys.forEach((key) => {
+          const from = active.origins[key];
+          if (from) next[key] = { x: from.x + dx, y: from.y + dy };
+        });
+        return next;
+      });
     };
     const end = () => {
       const active = iconDrag.current;
       iconDrag.current = null;
       if (!active || !draggedRef.current) return;
       setPositions((prev) => {
-        const dropped = prev[active.key];
+        const dropped = prev[active.primary];
         if (!dropped) return prev;
-        return {
-          ...prev,
-          [active.key]: snapToGrid(dropped.x, dropped.y, TASKBAR_HEIGHT),
-        };
+        // The icon under the cursor is the one that lands on a cell; the rest
+        // shift by the same amount, so a group keeps its shape instead of every
+        // icon snapping onto the same square.
+        const landed = snapToGrid(dropped.x, dropped.y, TASKBAR_HEIGHT);
+        const dx = landed.x - dropped.x;
+        const dy = landed.y - dropped.y;
+        const next = { ...prev };
+        active.keys.forEach((key) => {
+          const at = prev[key];
+          if (at) next[key] = { x: at.x + dx, y: at.y + dy };
+        });
+        return next;
       });
     };
     window.addEventListener("mousemove", move);
@@ -234,7 +301,7 @@ export default function Desktop({
     if (event.button !== 0) return;
     if (event.target.closest(".desktopIcon, [role='dialog'], [role='menu'], .startOrb, .taskbarButton"))
       return;
-    setSelected(null);
+    setSelected([]);
     const bounds = surface.current.getBoundingClientRect();
     dragStart.current = {
       x: event.clientX - bounds.left,
@@ -254,7 +321,11 @@ export default function Desktop({
       );
     };
     const end = () => {
+      if (!dragStart.current) return;
       dragStart.current = null;
+      // Commit what the band was covering. Without this the highlight only
+      // lasted as long as the drag, so releasing looked like nothing happened.
+      setSelected(marqueeSelectionRef.current);
       setMarquee(null);
     };
     window.addEventListener("mousemove", move);
@@ -281,12 +352,17 @@ export default function Desktop({
         .map((entry) => entry.key)
     : [];
 
+  // The band is authoritative while it is being dragged; the committed
+  // selection takes over the moment it is released.
+  const marqueeSelectionRef = useRef([]);
+  marqueeSelectionRef.current = marqueeSelection;
+
   const isSelected = (entry) =>
-    marquee ? marqueeSelection.includes(entry.key) : selected === entry.key;
+    (marquee ? marqueeSelection : selected).includes(entry.key);
 
   useEffect(() => {
     const onKey = (event) => {
-      if (event.key === "Escape") setSelected(null);
+      if (event.key === "Escape") setSelected([]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -328,28 +404,31 @@ export default function Desktop({
             href={entry.url ? appHref(entry) : null}
             selected={isSelected(entry)}
             position={positionOf(entry, index)}
-            onSelect={() => setSelected(entry.key)}
+            onSelect={() => setSelected([entry.key])}
             onOpen={() => open(entry)}
             onGrab={grabHandlers(entry, index)}
           />
         ))}
       </div>
 
-      {marquee && (
-        <div
-          style={{
-            position: "absolute",
-            left: marquee.left,
-            top: marquee.top,
-            width: marquee.right - marquee.left,
-            height: marquee.bottom - marquee.top,
-            background: luna.selection,
-            border: `1px solid ${luna.selectionEdge}`,
-            pointerEvents: "none",
-            zIndex: 2,
-          }}
-        />
-      )}
+      {marquee &&
+        marquee.right - marquee.left >= MARQUEE_MIN &&
+        marquee.bottom - marquee.top >= MARQUEE_MIN && (
+          <div
+            className="desktopMarquee"
+            style={{
+              position: "absolute",
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.right - marquee.left,
+              height: marquee.bottom - marquee.top,
+              background: luna.selection,
+              border: `1px solid ${luna.selectionEdge}`,
+              pointerEvents: "none",
+              zIndex: 3,
+            }}
+          />
+        )}
 
       {folder !== null && (
         <LunaWindow

@@ -30,16 +30,21 @@ export function hillColours(green, dusk) {
   };
 }
 
+/** The sky, for either time of day — both are needed at once to cross-fade. */
+export function skyGradient(dusk) {
+  const sky = dusk ? DUSK : DAY;
+  return `linear-gradient(180deg, ${sky.skyTop} 0%, ${sky.skyMid} 52%, ${sky.skyLow} 100%)`;
+}
+
 export function lunaPalette(themeName) {
   const dusk = themeName !== "light";
-  const sky = dusk ? DUSK : DAY;
 
   return {
     dusk,
 
     // Bliss' sky: deep at the top, washing out towards the horizon. The hill
     // that sits under it is drawn separately, in Wallpaper.
-    sky: `linear-gradient(180deg, ${sky.skyTop} 0%, ${sky.skyMid} 52%, ${sky.skyLow} 100%)`,
+    sky: skyGradient(dusk),
 
     // The taskbar: a bright band across the top, the body, a dark foot.
     barGradient:
