@@ -32,7 +32,7 @@ test_uploadthat:
 # check a DEPLOYED uploadthat over real HTTP: make smoke_uploadthat URL=https://...
 URL ?= https://uploadthat.nteague.com
 smoke_uploadthat:
-	php/uploadthat/tests/smoke.sh $(URL) $(OPERATOR_KEY)
+	php/uploadthat/tests/smoke.sh "$(URL)" "$(OPERATOR_KEY)"
 
 # clean node modules and build folders
 clean:

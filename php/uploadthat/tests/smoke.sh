@@ -26,12 +26,30 @@ bad()  { printf '  FAIL %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; f
 check(){ if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$3', got '$2'"; fi; }
 
 # php is the one JSON parser guaranteed to be present here; jq often is not.
+#
+# A missing key prints NOTHING, not "null" — otherwise `[ -z "$x" ]` never fires
+# and a failed request cascades into every later step using the literal string
+# "null" as a session id, which then reports a tidy row of false passes.
 json() {
   php -r '$d = json_decode(stream_get_contents(STDIN), true);
           foreach (explode(".", $argv[1]) as $part) {
               $d = (is_array($d) && array_key_exists($part, $d)) ? $d[$part] : null;
           }
+          if ($d === null) { exit; }
+          if (is_bool($d)) { echo $d ? "1" : "0"; exit; }
           echo is_scalar($d) ? $d : json_encode($d);' "$1"
+}
+
+# What went wrong, from an error envelope or, failing that, the raw body.
+why() {
+  local code message
+  code=$(printf '%s' "$1" | json error.code)
+  message=$(printf '%s' "$1" | json error.message)
+  if [ -n "$code" ]; then
+    printf '%s (%s)' "$message" "$code"
+  else
+    printf '%s' "$(printf '%s' "$1" | head -c 300)"
+  fi
 }
 
 work=$(mktemp -d)
@@ -67,7 +85,15 @@ TOKEN=$(printf '%s' "$created" | json token)
 TIER=$(printf '%s' "$created" | json tier)
 
 if [ -z "$SID" ]; then
-  bad "POST /api/session" "$created"
+  bad "POST /api/session" "$(why "$created")"
+  echo
+  if [ -n "$OPERATOR_KEY" ]; then
+    echo "If that says the key was not recognised, check the key reached the script"
+    echo "in one piece — a passphrase with spaces needs quoting all the way through."
+    echo "Try once without a key to test the anonymous path on its own."
+  fi
+  echo
+  echo "$passed passed, $((failed)) failed"
   exit 1
 fi
 ok "POST /api/session"
@@ -90,7 +116,9 @@ FID=$(printf '%s' "$uploaded" | json id)
 
 if [ -z "$FID" ]; then
   # The single most likely cause, and it looks like a plain auth failure.
-  bad "POST .../files" "$uploaded — if this says unauthorised, the Authorization header is not reaching PHP; check the RewriteRule in api/.htaccess"
+  bad "POST .../files" "$(why "$uploaded")"
+  echo "       if that says unauthorised, the Authorization header is not reaching"
+  echo "       PHP — check the RewriteRule in api/.htaccess"
 else
   ok "the guest uploaded a file (so the Authorization header arrives)"
 
