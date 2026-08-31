@@ -139,7 +139,11 @@ function ut_route_create(): void
 
     $offered = isset($body['operatorKey']) ? (string) $body['operatorKey'] : '';
     if ($offered !== '') {
-        if (!ut_rate_allow(ut_client_ip(), 'operator')) {
+        // Checked before verifying, so a guessing attack cannot make the server
+        // burn bcrypt time on its behalf — but only charged for below, on a
+        // wrong key. Using your own key correctly should never lock you out of
+        // your own tool, which spending the budget on every attempt would do.
+        if (ut_rate_exceeded(ut_client_ip(), 'operator')) {
             ut_fail(429, 'rate_limited', 'Too many key attempts. Try again later.');
         }
         $hash = $config['operator_key_hash'];
@@ -154,6 +158,7 @@ function ut_route_create(): void
         }
 
         if (!is_string($hash) || $hash === '' || !password_verify($offered, $hash)) {
+            ut_rate_consume(ut_client_ip(), 'operator');
             ut_fail(403, 'bad_key', 'That key was not recognised.');
         }
         $tier = 'operator';

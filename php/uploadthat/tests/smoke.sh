@@ -40,6 +40,18 @@ json() {
           echo is_scalar($d) ? $d : json_encode($d);' "$1"
 }
 
+# Runs a request, leaving the status in REPLY_STATUS and the body in REPLY_BODY.
+# The status is what separates a routing problem from a rejection from a crash,
+# and without it every failure looks the same.
+REPLY_STATUS=""
+REPLY_BODY=""
+call() {
+  local out
+  out=$(curl -sS --max-time 60 -w $'\n%{http_code}' "$@" 2>&1)
+  REPLY_STATUS="${out##*$'\n'}"
+  REPLY_BODY="${out%$'\n'*}"
+}
+
 # What went wrong, from an error envelope or, failing that, the raw body.
 why() {
   local code message
@@ -59,13 +71,14 @@ echo "uploadthat over HTTP — $BASE"
 echo
 echo "reachability"
 
-health=$(curl -sS --max-time 15 "$BASE/api/health" 2>&1)
+call "$BASE/api/health"
+health="$REPLY_BODY"
 if [ "$(printf '%s' "$health" | json ok)" = "1" ]; then
   ok "GET /api/health (so the rewrite works)"
   printf '       web SAPI upload ceiling: %s bytes\n' "$(printf '%s' "$health" | json uploadCeiling)"
   check "accepting sessions" "$(printf '%s' "$health" | json acceptingSessions)" "1"
 else
-  bad "GET /api/health" "$health"
+  bad "GET /api/health" "HTTP $REPLY_STATUS — $(why "$health")"
   echo
   echo "Nothing else can pass until that does. Check the .htaccess in the document root."
   exit 1
@@ -77,15 +90,15 @@ echo "a session"
 body='{}'
 [ -n "$OPERATOR_KEY" ] && body=$(php -r 'echo json_encode(["operatorKey" => $argv[1]]);' "$OPERATOR_KEY")
 
-created=$(curl -sS --max-time 15 -X POST "$BASE/api/session" \
-  -H 'Content-Type: application/json' -d "$body")
+call -X POST "$BASE/api/session" -H 'Content-Type: application/json' -d "$body"
+created="$REPLY_BODY"
 SID=$(printf '%s' "$created" | json sessionId)
 CODE=$(printf '%s' "$created" | json code)
 TOKEN=$(printf '%s' "$created" | json token)
 TIER=$(printf '%s' "$created" | json tier)
 
 if [ -z "$SID" ]; then
-  bad "POST /api/session" "$(why "$created")"
+  bad "POST /api/session" "HTTP $REPLY_STATUS — $(why "$created")"
   echo
   if [ -n "$OPERATOR_KEY" ]; then
     echo "If that says the key was not recognised, check the key reached the script"
@@ -100,9 +113,14 @@ ok "POST /api/session"
 printf '       tier: %s, code: %s\n' "$TIER" "$CODE"
 [ -n "$OPERATOR_KEY" ] && check "the operator key was accepted" "$TIER" "operator"
 
-joined=$(curl -sS --max-time 15 -X POST "$BASE/api/join/$CODE")
+call -X POST "$BASE/api/join/$CODE"
+joined="$REPLY_BODY"
 GUEST=$(printf '%s' "$joined" | json token)
-check "a second device can join with the code" "$(printf '%s' "$joined" | json sessionId)" "$SID"
+if [ "$(printf '%s' "$joined" | json sessionId)" = "$SID" ]; then
+  ok "a second device can join with the code"
+else
+  bad "a second device can join with the code" "HTTP $REPLY_STATUS — $(why "$joined")"
+fi
 
 echo
 echo "a file"
@@ -110,21 +128,26 @@ echo "a file"
 printf 'hello from the smoke test\n' > "$work/smoke.txt"
 META=$(php -r 'echo base64_encode(json_encode(["name" => "smoke.txt", "type" => "text/plain"]));')
 
-uploaded=$(curl -sS --max-time 60 -X POST "$BASE/api/session/$SID/files" \
-  -H "Authorization: Bearer $GUEST" -F "meta=$META" -F "file=@$work/smoke.txt")
+# Falls back to the owner's token, so a failed join does not also disguise
+# itself as an upload failure.
+UPLOADER="${GUEST:-$TOKEN}"
+call -X POST "$BASE/api/session/$SID/files" \
+  -H "Authorization: Bearer $UPLOADER" -F "meta=$META" -F "file=@$work/smoke.txt"
+uploaded="$REPLY_BODY"
 FID=$(printf '%s' "$uploaded" | json id)
 
 if [ -z "$FID" ]; then
   # The single most likely cause, and it looks like a plain auth failure.
-  bad "POST .../files" "$(why "$uploaded")"
+  bad "POST .../files" "HTTP $REPLY_STATUS — $(why "$uploaded")"
   echo "       if that says unauthorised, the Authorization header is not reaching"
   echo "       PHP — check the RewriteRule in api/.htaccess"
 else
-  ok "the guest uploaded a file (so the Authorization header arrives)"
+  ok "uploaded a file over multipart"
 
   manifest=$(curl -sS --max-time 15 "$BASE/api/session/$SID/manifest" -H "Authorization: Bearer $TOKEN")
   check "the owner sees it in the manifest" "$(printf '%s' "$manifest" | json files.0.id)" "$FID"
-  check "attributed to the device that sent it" "$(printf '%s' "$manifest" | json files.0.uploadedBy)" "Device 2"
+  [ -n "$GUEST" ] && check "attributed to the device that sent it" \
+    "$(printf '%s' "$manifest" | json files.0.uploadedBy)" "Device 2"
   check "with its description untouched" "$(printf '%s' "$manifest" | json files.0.meta)" "$META"
 
   etag=$(curl -sS --max-time 15 -D - -o /dev/null "$BASE/api/session/$SID/manifest" \
@@ -148,7 +171,13 @@ fi
 echo
 echo "closing up"
 
-curl -sS --max-time 15 -X POST "$BASE/api/session/$SID/close" -H "Authorization: Bearer $TOKEN" > /dev/null
+call -X POST "$BASE/api/session/$SID/close" -H "Authorization: Bearer $TOKEN"
+if [ "$(printf '%s' "$REPLY_BODY" | json closed)" = "1" ]; then
+  ok "POST .../close"
+else
+  bad "POST .../close" "HTTP $REPLY_STATUS — $(why "$REPLY_BODY")"
+fi
+
 status=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$BASE/api/session/$SID/manifest" \
   -H "Authorization: Bearer $TOKEN")
 check "the session is gone once closed" "$status" "401"

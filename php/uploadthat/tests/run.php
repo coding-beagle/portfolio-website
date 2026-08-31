@@ -177,6 +177,13 @@ check('the third is not', ut_rate_allow('198.51.100.7', 'create'), false);
 checkThat('a different caller has its own budget', ut_rate_allow('198.51.100.8', 'create'));
 checkThat('an unconfigured bucket is not limited', ut_rate_allow('198.51.100.7', 'nonexistent'));
 
+// The operator key uses these two halves rather than ut_rate_allow, so that a
+// correct key never spends the budget that exists to slow down wrong ones.
+check('checking a budget does not spend it', ut_rate_exceeded('198.51.100.9', 'create'), false);
+checkThat('and it is still untouched afterwards', ut_rate_allow('198.51.100.9', 'create'));
+ut_rate_consume('198.51.100.9', 'create');
+checkThat('spending it twice reaches the limit', ut_rate_exceeded('198.51.100.9', 'create'));
+
 // --- the data directory guard -----------------------------------------
 echo "\nconfiguration\n";
 $caught = false;
