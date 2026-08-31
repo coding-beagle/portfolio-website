@@ -19,29 +19,51 @@ ini_set('error_reporting', (string) E_ALL);
 
 $problems = 0;
 
-function report(string $what, bool $ok, string $detail = ''): void
+/**
+ * `$detail` is worth knowing either way; `$fix` is what to do about it and only
+ * appears on a failure — printing remediation next to a passing check reads as
+ * though something is wrong with it.
+ */
+function report(string $what, bool $ok, string $detail = '', string $fix = ''): void
 {
     global $problems;
     if (!$ok) {
         $problems++;
     }
-    printf("  %-4s %s%s\n", $ok ? 'ok' : 'FAIL', $what, $detail === '' ? '' : ' — ' . $detail);
+    $note = $detail;
+    if (!$ok && $fix !== '') {
+        $note = $note === '' ? $fix : $note . '; ' . $fix;
+    }
+    printf("  %-4s %s%s\n", $ok ? 'ok' : 'FAIL', $what, $note === '' ? '' : ' — ' . $note);
 }
 
 echo "php\n";
-report('version ' . PHP_VERSION, PHP_VERSION_ID >= 70400, 'needs 7.4 or newer');
+report('version ' . PHP_VERSION, PHP_VERSION_ID >= 70400, '', 'needs 7.4 or newer');
 report('sapi is ' . PHP_SAPI, true);
-report('pdo_sqlite', extension_loaded('pdo_sqlite'), 'enable it in MultiPHP INI Editor');
+report('pdo_sqlite', extension_loaded('pdo_sqlite'), '', 'enable it in MultiPHP INI Editor');
 report('json', extension_loaded('json'));
 
-echo "\nupload limits\n";
+// These are the CLI values. cPanel usually gives the web SAPI a different ini,
+// and the web one is what actually limits an upload — so this section is a
+// sanity check, not the answer. GET /api/health reports the live web figures.
+echo "\nupload limits (as seen from the command line)\n";
 require_once __DIR__ . '/../lib/http.php';
 $upload = ut_bytes_ini('upload_max_filesize');
 $post = ut_bytes_ini('post_max_size');
 report('upload_max_filesize = ' . ini_get('upload_max_filesize'), $upload > 0);
-report('post_max_size = ' . ini_get('post_max_size'), $post >= $upload, 'should be at least upload_max_filesize');
+report(
+    'post_max_size = ' . ini_get('post_max_size'),
+    $post >= $upload,
+    '',
+    'should be at least upload_max_filesize, or large uploads are silently truncated'
+);
 report('memory_limit = ' . ini_get('memory_limit'), true);
-report('max_execution_time = ' . ini_get('max_execution_time'), true);
+report(
+    'max_execution_time = ' . ini_get('max_execution_time'),
+    true,
+    (int) ini_get('max_execution_time') === 0 ? 'unlimited' : 'seconds'
+);
+echo "       the web server's own limits: curl -s https://uploadthat.nteague.com/api/health\n";
 
 echo "\nconfiguration\n";
 try {
@@ -62,12 +84,15 @@ try {
         report(
             'operator_key_hash is a password hash',
             $named !== 'unknown',
-            $named === 'unknown'
-                ? 'looks like a plain passphrase; store password_hash() output instead'
-                : $named
+            $named === 'unknown' ? '' : $named,
+            'looks like a plain passphrase; store password_hash() output instead'
         );
     }
-    report('accepting_sessions', (bool) $config['accepting_sessions'], 'kill switch is on');
+    report(
+        'accepting_sessions',
+        true,
+        $config['accepting_sessions'] ? 'yes, kill switch off' : 'NO, kill switch is on'
+    );
 } catch (Throwable $error) {
     report('config loads', false, $error->getMessage());
 }
