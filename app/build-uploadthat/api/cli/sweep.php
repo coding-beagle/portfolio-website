@@ -29,8 +29,12 @@ ini_set('error_reporting', (string) E_ALL);
 
 require_once __DIR__ . '/../lib/store.php';
 
+// `--all` ends every session, not just the expired ones. Pair it with
+// accepting_sessions = false to take the tool out of service cleanly.
+$purgeAll = in_array('--all', array_slice($argv, 1), true);
+
 try {
-    $sessions = ut_sweep();
+    $sessions = $purgeAll ? ut_purge_all() : ut_sweep();
     $orphans = ut_sweep_orphans();
 } catch (Throwable $error) {
     fwrite(
@@ -41,4 +45,9 @@ try {
     exit(1);
 }
 
-echo sprintf("uploadthat: culled %d session(s), %d orphan director(ies)\n", $sessions, $orphans);
+echo sprintf(
+    "uploadthat: %s %d session(s), %d orphan director(ies)\n",
+    $purgeAll ? 'ended' : 'culled',
+    $sessions,
+    $orphans
+);

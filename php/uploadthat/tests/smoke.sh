@@ -65,7 +65,21 @@ why() {
 }
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+SID=""
+TOKEN=""
+
+# Close the session however the script exits, not just on the happy path. An
+# operator session runs for two hours, so a failed run used to leave one sitting
+# in the database until it aged out.
+cleanup() {
+  rm -rf "$work"
+  if [ -n "$SID" ] && [ -n "$TOKEN" ]; then
+    curl -sS --max-time 10 -X POST "$BASE/api/session/$SID/close" \
+      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' \
+      >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 
 echo "uploadthat over HTTP — $BASE"
 echo

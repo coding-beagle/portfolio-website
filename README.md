@@ -123,7 +123,10 @@ The design, including the phase 2 encryption work, is written up separately.
    unlock the higher limits, or leave it null to disable that tier.
 3. Add a cron job: `*/5 * * * * php ~/public_uploadthat_html/api/cli/sweep.php`.
    Culling still works without it — every request clears a few expired sessions
-   — but the cron pass also catches orphaned blob directories.
+   — but the cron pass also catches orphaned blob directories. Send stderr to a
+   file rather than `/dev/null`: a sweeper that fails silently fills the disk.
+   Run it with `--all` to end every session immediately, expired or not, which
+   is what you want after setting `accepting_sessions` to false.
 4. Make sure AutoSSL covers the subdomain. Phase 2 needs `crypto.subtle`, which
    does not exist without HTTPS.
 

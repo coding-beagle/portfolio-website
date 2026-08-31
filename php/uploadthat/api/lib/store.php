@@ -308,6 +308,25 @@ function ut_sweep(?int $limit = null): int
 }
 
 /**
+ * Ends every session immediately, expired or not.
+ *
+ * The manual counterpart to the kill switch: set `accepting_sessions` to false
+ * so nothing new starts, then run this to clear what is already open. Also what
+ * you want after a test run that left sessions behind.
+ *
+ * @return int how many sessions were ended
+ */
+function ut_purge_all(): int
+{
+    $pdo = ut_db();
+    $rows = $pdo->query('SELECT id FROM sessions')->fetchAll();
+    foreach ($rows as $row) {
+        ut_close_session($row['id']);
+    }
+    return count($rows);
+}
+
+/**
  * The second pass, for cron only: blob directories with no session behind them.
  * This is what catches a crash between deleting the row and deleting the files.
  */

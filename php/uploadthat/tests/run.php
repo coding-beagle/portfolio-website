@@ -169,6 +169,17 @@ check('closing a session ends it', ut_authenticate($session['token']), null);
 check('and the guest with it', ut_authenticate($joined['token']), null);
 checkThat('and takes the blob directory', !is_dir(ut_blob_dir($session['id'])));
 
+// --- purging -----------------------------------------------------------
+$live = ut_create_session('anon');
+$alsoLive = ut_create_session('anon');
+mkdir(ut_blob_dir($live['id']), 0700, true);
+file_put_contents(ut_blob_dir($live['id']) . '/a-file', 'bytes');
+
+check('purging ends every session, expired or not', ut_purge_all(), 2);
+check('and none are left', (int) ut_db()->query('SELECT COUNT(*) FROM sessions')->fetchColumn(), 0);
+checkThat('taking their files with them', !is_dir(ut_blob_dir($live['id'])));
+check('their tokens stop working', ut_authenticate($alsoLive['token']), null);
+
 // --- rate limiting -----------------------------------------------------
 echo "\nrate limiting\n";
 checkThat('the first use is allowed', ut_rate_allow('198.51.100.7', 'create'));
