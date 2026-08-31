@@ -5,11 +5,12 @@ import {
   faLinkedin,
   faYoutube,
 } from "@fortawesome/free-brands-svg-icons";
-import { faPowerOff, faUser } from "@fortawesome/free-solid-svg-icons";
+import { faPowerOff } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../../contexts/MobileContext";
 import { noSelect } from "../valueChangerElements/styles";
 import { lunaPalette } from "./luna";
+import SiteLogo from "./SiteLogo";
 import { TASKBAR_HEIGHT } from "./Taskbar";
 
 const LINKS = [
@@ -135,7 +136,7 @@ export default function StartMenu({ entries, onLaunch, onShutDown, onClose }) {
             background: luna.tray,
           }}
         >
-          <FontAwesomeIcon icon={faUser} />
+          <SiteLogo size={22} />
         </span>
         <span style={{ fontWeight: "bold", fontSize: "0.92rem" }}>
           Nicholas Teague

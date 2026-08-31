@@ -1,10 +1,10 @@
 import React, { useContext, useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faWindows } from "@fortawesome/free-brands-svg-icons";
 import { useTheme } from "../../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../../contexts/MobileContext";
 import { noSelect } from "../valueChangerElements/styles";
 import { lunaPalette } from "./luna";
+import SiteLogo from "./SiteLogo";
 
 /**
  * XP's own proportions. The page's corner buttons used to force a much taller
@@ -120,7 +120,7 @@ export default function Taskbar({
           textShadow: "1px 1px 2px rgba(0,0,0,0.55)",
         }}
       >
-        <FontAwesomeIcon icon={faWindows} style={{ fontStyle: "normal" }} />
+        <SiteLogo size={20} />
         <span>start</span>
       </button>
 

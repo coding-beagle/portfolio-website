@@ -190,6 +190,14 @@ describe("desktop scene", () => {
     expect(screen.queryByTitle("Show Desktop")).toBeNull();
   });
 
+  it("wears the site's own mark where Windows had its flag", () => {
+    mount();
+    const logo = screen
+      .getByLabelText("Start")
+      .querySelector("[data-site-logo]");
+    expect(logo).toHaveAttribute("src", "/logo192.png");
+  });
+
   it("opens apps from the start menu on one click", () => {
     const { onLaunch } = mount();
     expect(screen.queryByRole("menu", { name: "Start menu" })).toBeNull();
