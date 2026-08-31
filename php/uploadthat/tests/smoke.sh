@@ -113,7 +113,10 @@ ok "POST /api/session"
 printf '       tier: %s, code: %s\n' "$TIER" "$CODE"
 [ -n "$OPERATOR_KEY" ] && check "the operator key was accepted" "$TIER" "operator"
 
-call -X POST "$BASE/api/join/$CODE"
+# An explicit empty body, not a bodiless POST: curl sends no Content-Length for
+# the latter, and ModSecurity rejects that with a 403 before it reaches PHP.
+# Browsers always send Content-Length: 0, so this matches what the app does.
+call -X POST "$BASE/api/join/$CODE" -H 'Content-Type: application/json' -d '{}' 
 joined="$REPLY_BODY"
 GUEST=$(printf '%s' "$joined" | json token)
 if [ "$(printf '%s' "$joined" | json sessionId)" = "$SID" ]; then
@@ -171,7 +174,8 @@ fi
 echo
 echo "closing up"
 
-call -X POST "$BASE/api/session/$SID/close" -H "Authorization: Bearer $TOKEN"
+call -X POST "$BASE/api/session/$SID/close" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}' 
 if [ "$(printf '%s' "$REPLY_BODY" | json closed)" = "1" ]; then
   ok "POST .../close"
 else

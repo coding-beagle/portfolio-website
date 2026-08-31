@@ -45,16 +45,23 @@ export function decodeMeta(encoded) {
 const authHeaders = (session) => ({ Authorization: `Bearer ${session.token}` });
 
 async function request(path, { method = "GET", body, session, headers = {} } = {}) {
+  // A POST always carries a body, even an empty one. Browsers send
+  // `Content-Length: 0` for a bodiless POST and the server is happy with that,
+  // but ModSecurity on this host rejects a POST with no Content-Length at all
+  // with a 403 that never reaches PHP — so there is no reason to leave the
+  // heartbeat and the close call one proxy quirk away from silent failure.
+  const payload = method === "POST" ? JSON.stringify(body ?? {}) : undefined;
+
   let response;
   try {
     response = await fetch(`${BASE}${path}`, {
       method,
       headers: {
-        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(payload === undefined ? {} : { "Content-Type": "application/json" }),
         ...(session ? authHeaders(session) : {}),
         ...headers,
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: payload,
     });
   } catch (error) {
     throw new ApiError("offline", "Could not reach the server.", 0);
