@@ -1,0 +1,8 @@
+# Deployed to the subdomain document root.
+Options -Indexes
+
+# HTTPS is not optional: crypto.subtle does not exist without it, so phase 2
+# simply will not run over plain HTTP.
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]

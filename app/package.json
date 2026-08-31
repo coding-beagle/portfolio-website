@@ -12,6 +12,7 @@
     "@testing-library/react": "^16.2.0",
     "@testing-library/user-event": "^13.5.0",
     "fontawesome": "^5.6.3",
+    "qrcode-generator": "^2.0.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -27,10 +28,13 @@
     "prestart": "npm run posts",
     "start": "react-scripts start",
     "start:hextool": "REACT_APP_TARGET=hextool react-scripts start",
+    "start:uploadthat": "REACT_APP_TARGET=uploadthat react-scripts start",
     "prebuild": "npm run posts",
     "build": "react-scripts build",
-    "build:hextool": "REACT_APP_TARGET=hextool BUILD_PATH=build-hextool react-scripts build",
+    "build:hextool": "REACT_APP_TARGET=hextool BUILD_PATH=build-hextool GENERATE_SOURCEMAP=false react-scripts build",
     "postbuild:hextool": "node scripts/finish-hextool-build.js",
+    "build:uploadthat": "REACT_APP_TARGET=uploadthat BUILD_PATH=build-uploadthat GENERATE_SOURCEMAP=false react-scripts build",
+    "postbuild:uploadthat": "node scripts/finish-uploadthat-build.js",
     "test": "jest --config jest.config.js",
     "eject": "react-scripts eject",
     "test:watch": "jest --config jest.config.js --watch"
@@ -55,5 +59,6 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  }
+  },
+  "proxy": "http://localhost:8787"
 }

@@ -15,12 +15,27 @@ run:
 run_hextool:
 	cd app && npm run start:hextool
 
+# run uploadthat locally (needs run_uploadthat_api in another terminal)
+run_uploadthat:
+	cd app && npm run start:uploadthat
+
+# serve the uploadthat PHP API locally on :8787, for run_uploadthat to proxy to
+run_uploadthat_api:
+	cd ./php/uploadthat; \
+	php -S localhost:8787 -t . api/index.php; \
+	cd -; \
+
+# run the uploadthat API's own tests (needs php on PATH)
+test_uploadthat:
+	php php/uploadthat/tests/run.php
+
 # clean node modules and build folders
 clean:
 	rm -rf app/node_modules
 	rm -rf app/package-lock.json
 	rm -rf app/build
 	rm -rf app/build-hextool
+	rm -rf app/build-uploadthat
 
 # install deps from the lockfile
 install:
@@ -64,8 +79,14 @@ build_hextool:
 	npm run build:hextool; \
 	cd -; \
 
-# build both deployables
-build_all: build build_hextool
+# creates a built version of uploadthat, front end plus PHP API
+build_uploadthat:
+	cd ./app; \
+	npm run build:uploadthat; \
+	cd -; \
+
+# build every deployable
+build_all: build build_hextool build_uploadthat
 
 # prod only, sends the built app to the folder where the site is hosted
 deploy_manual:
@@ -73,9 +94,9 @@ deploy_manual:
 	cp -r app/build/* /home/nteagvxe/public_html/; \
 	echo "Deployed successfully!"; \
 
-# prod only, sends the built hex tool to its subdomain's document root.
 # Override the path if cPanel put the subdomain somewhere else:
 #   make deploy_hextool HEXTOOL_DEPLOYPATH=/home/nteagvxe/some/other/dir
+# prod only, sends the built hex tool to its subdomain's document root
 HEXTOOL_DEPLOYPATH ?= /home/nteagvxe/public_hextool_html
 deploy_hextool:
 	test -d $(HEXTOOL_DEPLOYPATH) || { echo "No such directory: $(HEXTOOL_DEPLOYPATH)"; exit 1; }; \
@@ -83,5 +104,15 @@ deploy_hextool:
 	cp -r app/build-hextool/* $(HEXTOOL_DEPLOYPATH)/; \
 	echo "Deployed hex tool to $(HEXTOOL_DEPLOYPATH)"; \
 
-# prod only, deploys the main site and the hex tool subdomain
-deploy: deploy_manual deploy_hextool
+# The data directory is deliberately NOT under this path: it has to survive the
+# wipe, and uploads under the document root would be reachable by URL.
+# prod only, sends the built uploadthat (front end + PHP API) to its subdomain
+UPLOADTHAT_DEPLOYPATH ?= /home/nteagvxe/public_uploadthat_html
+deploy_uploadthat:
+	test -d $(UPLOADTHAT_DEPLOYPATH) || { echo "No such directory: $(UPLOADTHAT_DEPLOYPATH)"; exit 1; }; \
+	rm -rf $(UPLOADTHAT_DEPLOYPATH)/*; \
+	cp -r app/build-uploadthat/. $(UPLOADTHAT_DEPLOYPATH)/; \
+	echo "Deployed uploadthat to $(UPLOADTHAT_DEPLOYPATH)"; \
+
+# prod only, deploys the main site and every subdomain
+deploy: deploy_manual deploy_hextool deploy_uploadthat

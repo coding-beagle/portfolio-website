@@ -6,15 +6,17 @@ import reportWebVitals from './reportWebVitals';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
 /*
- * One source tree, two deployables. `REACT_APP_TARGET=hextool` builds the hex
- * tool for its own subdomain; anything else builds the portfolio. The import is
+ * One source tree, several deployables. `REACT_APP_TARGET` picks which root
+ * component to mount; anything unrecognised builds the portfolio. The import is
  * dynamic so webpack splits the two into separate chunks and each build only
  * ever downloads its own.
  */
-const rootModule =
-  process.env.REACT_APP_TARGET === "hextool"
-    ? import('./HexApp')
-    : import('./App');
+const TARGETS = {
+  hextool: () => import('./HexApp'),
+  uploadthat: () => import('./UploadThatApp'),
+};
+
+const rootModule = (TARGETS[process.env.REACT_APP_TARGET] ?? (() => import('./App')))();
 
 rootModule.then(({ default: Root }) => {
   root.render(

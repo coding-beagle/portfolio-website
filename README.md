@@ -99,6 +99,42 @@ desktop still opens something when the site is being run from localhost, where
 the subdomains do not exist. The same module's `homeHref()` is what the
 utilities link back to.
 
+## uploadthat
+
+`uploadthat.nteague.com` is a file bridge: open a session on one device, join it
+from another with a six-digit code or a QR scan, and move files across in either
+direction. Everything is deleted when the session ends.
+
+The front end is a third `REACT_APP_TARGET` build from the same tree; the API is
+PHP over SQLite in `php/uploadthat`, copied into the build output by
+`scripts/finish-uploadthat-build.js` — the deploy target wipes the document
+root, so the API has to arrive as build output rather than be placed there once.
+
+The design, including the phase 2 encryption work, is written up separately.
+
+### Setting it up on the server
+
+1. Copy `php/uploadthat/config.sample.php` to `~/uploadthat_config.php` — outside
+   the document root, and never into the repository. Set `data_dir` to a path
+   that is also outside the document root; the API refuses to start otherwise,
+   because uploads under the web root would be reachable by URL and wiped by the
+   next deploy.
+2. Set `operator_key_hash` with `password_hash('...', PASSWORD_DEFAULT)` to
+   unlock the higher limits, or leave it null to disable that tier.
+3. Add a cron job: `*/5 * * * * php ~/public_uploadthat_html/api/cli/sweep.php`.
+   Culling still works without it — every request clears a few expired sessions
+   — but the cron pass also catches orphaned blob directories.
+4. Make sure AutoSSL covers the subdomain. Phase 2 needs `crypto.subtle`, which
+   does not exist without HTTPS.
+
+Run `php php/uploadthat/tests/run.php` (or `make test_uploadthat`) to check the
+API against a throwaway database.
+
+### Running it locally
+
+Two terminals: `make run_uploadthat_api` serves the PHP on :8787, and
+`make run_uploadthat` starts the dev server, which proxies `/api` to it.
+
 ## Make Commands:
 
 `make install` -> Install JS deps

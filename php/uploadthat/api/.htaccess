@@ -1,0 +1,11 @@
+# The API is a single front controller; everything under /api routes to it.
+RewriteEngine On
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Authorization is not passed through to PHP by default on some cPanel setups.
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+Options -Indexes

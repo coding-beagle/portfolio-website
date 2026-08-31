@@ -37,6 +37,13 @@ const mount = ({ mobile = false, ...props } = {}) => {
 };
 
 const shortcut = (label) => screen.getByTitle(label);
+
+// The shortcuts stack in one column below the subdomain apps, so a hard-coded
+// position breaks every time a utility is added to the registry.
+const GRID_TOP = 16;
+const CELL_HEIGHT = 92 + 6;
+const homeTop = (index) => `${GRID_TOP + index * CELL_HEIGHT}px`;
+const SCENES_INDEX = SUBDOMAIN_APPS.length;
 /**
  * `hidden: true` because a minimised window is still mounted, only display:none
  * — which the role queries would otherwise treat as not being there at all, and
@@ -122,16 +129,20 @@ describe("desktop scene", () => {
   it("lets a shortcut be dragged, and drops it on the grid", () => {
     mount();
     const icon = shortcut("Scenes");
-    // Second in the column: one icon height and gap below the first.
-    expect(icon).toHaveStyle({ left: "16px", top: "114px" });
+    expect(icon).toHaveStyle({ left: "16px", top: homeTop(SCENES_INDEX) });
 
 
-    fireEvent.mouseDown(icon, { clientX: 16, clientY: 114, button: 0 });
-    fireEvent.mouseMove(window, { clientX: 216, clientY: 214 });
+    const from = GRID_TOP + SCENES_INDEX * CELL_HEIGHT;
+    fireEvent.mouseDown(icon, { clientX: 16, clientY: from, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 216, clientY: from + 100 });
     fireEvent.mouseUp(window);
 
-    // Dropped between grid cells, so it lands on the nearest one.
-    expect(icon).toHaveStyle({ left: "196px", top: "212px" });
+    // Dropped between grid cells, so it lands on the nearest one: two columns
+    // across, and one row further down than it started.
+    expect(icon).toHaveStyle({
+      left: "196px",
+      top: homeTop(SCENES_INDEX + 1),
+    });
   });
 
   it("does not move a shortcut on a press that never travels", () => {

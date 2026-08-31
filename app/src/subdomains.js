@@ -1,4 +1,4 @@
-import { faHashtag } from "@fortawesome/free-solid-svg-icons";
+import { faHashtag, faRightLeft } from "@fortawesome/free-solid-svg-icons";
 
 /**
  * The utilities that live on their own subdomains.
@@ -16,6 +16,16 @@ export const SUBDOMAIN_APPS = [
     description: "Hex, binary and Verilog bit selects",
     url: "https://hextool.nteague.com",
     localPath: "#/hextool",
+  },
+  {
+    key: "uploadthat",
+    name: "uploadthat",
+    icon: faRightLeft,
+    description: "Move files between two devices",
+    url: "https://uploadthat.nteague.com",
+    // No local stand-in: it needs the PHP API, which the portfolio build does
+    // not serve. Run it with `make run_uploadthat` instead.
+    localPath: null,
   },
 ];
 
@@ -41,7 +51,7 @@ const HOME_URL = "https://www.nteague.com/#/?scene=desktop";
 
 // True in the build that is deployed to a utility's subdomain, where the
 // portfolio is a different origin and has to be reached by its full URL.
-const IS_SUBDOMAIN_BUILD = process.env.REACT_APP_TARGET === "hextool";
+const IS_SUBDOMAIN_BUILD = Boolean(process.env.REACT_APP_TARGET);
 
 /**
  * Where "back to the desktop" should point. Within the portfolio's own build on

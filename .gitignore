@@ -1,3 +1,10 @@
 app/node_modules
 *.env
 *.venv/
+
+# Uploadthat: the live config holds the operator key hash, and the data
+# directory holds sessions and uploaded blobs. Neither belongs in a public
+# repository — note that anything committed once stays in the history.
+uploadthat_config.php
+php/uploadthat/config.php
+php/uploadthat_data/
