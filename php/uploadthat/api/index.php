@@ -143,6 +143,16 @@ function ut_route_create(): void
             ut_fail(429, 'rate_limited', 'Too many key attempts. Try again later.');
         }
         $hash = $config['operator_key_hash'];
+
+        // A passphrase pasted in where the hash belongs would otherwise fail
+        // exactly like a wrong key, with nothing to tell the two apart.
+        if (is_string($hash) && $hash !== '' && (password_get_info($hash)['algoName'] ?? 'unknown') === 'unknown') {
+            error_log(
+                '[uploadthat] operator_key_hash is not a password hash. Generate one with '
+                . 'password_hash($passphrase, PASSWORD_DEFAULT) and store that instead.'
+            );
+        }
+
         if (!is_string($hash) || $hash === '' || !password_verify($offered, $hash)) {
             ut_fail(403, 'bad_key', 'That key was not recognised.');
         }

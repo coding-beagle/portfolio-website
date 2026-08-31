@@ -65,7 +65,33 @@ function checkThat(string $what, bool $condition): void
     check($what, $condition, true);
 }
 
-echo "uploadthat store\n";
+// --- every file parses -------------------------------------------------
+// First, because everything below is meaningless if a file will not compile —
+// and the CLI scripts are never required by these tests, so nothing else here
+// would notice one being broken. A parse error with display_errors off prints
+// nothing at all, which is a miserable thing to debug on a server.
+echo "syntax\n";
+
+$sources = array_merge(
+    glob(__DIR__ . '/../api/*.php') ?: [],
+    glob(__DIR__ . '/../api/lib/*.php') ?: [],
+    glob(__DIR__ . '/../api/cli/*.php') ?: [],
+    glob(__DIR__ . '/../*.php') ?: []
+);
+
+foreach ($sources as $source) {
+    $output = [];
+    $status = 0;
+    exec(escapeshellarg(PHP_BINARY) . ' -l ' . escapeshellarg($source) . ' 2>&1', $output, $status);
+    $name = basename(dirname($source)) . '/' . basename($source);
+    if ($status === 0) {
+        check("$name parses", true, true);
+    } else {
+        check("$name parses", trim(implode(' ', $output)), 'no syntax errors');
+    }
+}
+
+echo "\nuploadthat store\n";
 
 // --- sessions ----------------------------------------------------------
 $session = ut_create_session('anon');

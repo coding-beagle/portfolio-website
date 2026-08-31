@@ -17,9 +17,15 @@ return [
     // sessions already open keep working until they expire.
     'accepting_sessions' => true,
 
-    // password_hash('your passphrase here', PASSWORD_DEFAULT)
-    // PASSWORD_DEFAULT rather than a named algorithm, because Argon2 is not
-    // compiled into every cPanel PHP. Leave null to disable the operator tier.
+    // The OUTPUT of password_hash(), not the passphrase itself. Generate it
+    // without putting the passphrase in your shell history:
+    //
+    //   php -r '$p = trim(fgets(STDIN)); echo password_hash($p, PASSWORD_DEFAULT), PHP_EOL;'
+    //
+    // then type the passphrase and press enter. The result starts with $2y$ or
+    // $argon2. PASSWORD_DEFAULT rather than a named algorithm, because Argon2
+    // is not compiled into every cPanel PHP.
+    // Leave null to disable the operator tier.
     'operator_key_hash' => null,
 
     // Once stored bytes pass `disk_soft_fraction` of this, anonymous sessions
