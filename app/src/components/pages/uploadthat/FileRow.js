@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faDownload, faFile, faImage, faTrashCan } from "@fortawesome/free-solid-svg-icons";
+import {
+  faDownload,
+  faFile,
+  faImage,
+  faSpinner,
+  faTrashCan,
+} from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { downloadFile, saveBlob } from "./api";
-import { canPreview, loadPreview } from "./preview";
+import { canPreview, isImage, loadPreview } from "./preview";
+import ImageLightbox from "./ImageLightbox";
 
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -12,12 +19,21 @@ const formatBytes = (bytes) => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
-/** The thumbnail, or the icon that stands in for one. */
+/**
+ * The thumbnail, or the icon that stands in for one — and, for a picture, the
+ * way into a full-size look at it.
+ *
+ * Small images load their thumbnail on their own; a large one waits to be asked,
+ * so nothing downloads megabytes over mobile data that nobody wanted to see.
+ * Either way the bytes are fetched once and reused for both sizes.
+ */
 function Thumbnail({ session, file }) {
   const { theme } = useTheme();
   const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
   const previewable = canPreview(file);
-  const isImage = typeof file.type === "string" && file.type.startsWith("image/");
+  const picture = isImage(file);
 
   useEffect(() => {
     if (!previewable) return undefined;
@@ -32,10 +48,25 @@ function Thumbnail({ session, file }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sessionId, file.id, previewable]);
 
+  const expand = async () => {
+    if (url) {
+      setOpen(true);
+      return;
+    }
+    setLoading(true);
+    const next = await loadPreview(session, file);
+    setLoading(false);
+    if (next) {
+      setUrl(next);
+      setOpen(true);
+    }
+  };
+
   const box = {
     width: 44,
     height: 44,
     flex: "0 0 44px",
+    padding: 0,
     borderRadius: 4,
     display: "flex",
     alignItems: "center",
@@ -43,24 +74,41 @@ function Thumbnail({ session, file }) {
     overflow: "hidden",
     background: `${theme.accent}14`,
     color: `${theme.accent}80`,
+    border: "none",
   };
 
-  if (url) {
-    return (
-      <span style={box}>
-        <img
-          src={url}
-          alt=""
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </span>
-    );
+  const inside = url ? (
+    <img
+      src={url}
+      alt=""
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+    />
+  ) : (
+    <FontAwesomeIcon
+      icon={loading ? faSpinner : picture ? faImage : faFile}
+      spin={loading}
+    />
+  );
+
+  if (!picture) {
+    return <span style={box}>{inside}</span>;
   }
 
   return (
-    <span style={box}>
-      <FontAwesomeIcon icon={isImage ? faImage : faFile} />
-    </span>
+    <>
+      <button
+        className="utControl"
+        onClick={expand}
+        aria-label={`Preview ${file.name}`}
+        title="Preview"
+        style={{ ...box, cursor: "zoom-in" }}
+      >
+        {inside}
+      </button>
+      {open && url && (
+        <ImageLightbox url={url} name={file.name} onClose={() => setOpen(false)} />
+      )}
+    </>
   );
 }
 

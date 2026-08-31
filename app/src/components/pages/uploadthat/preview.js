@@ -13,22 +13,26 @@
  */
 import { downloadFile } from "./api";
 
-// Beyond this a thumbnail is not worth the download, least of all on a phone
-// using mobile data. Larger images simply get no preview; they still download.
+// Beyond this, fetching a thumbnail nobody asked for is not worth the download,
+// least of all on a phone using mobile data. It is a cap on what loads *by
+// itself*, not on what can be looked at — a larger image still opens on demand.
 export const PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
 
 const cache = new Map();
 
-export const canPreview = (file) =>
-  typeof file.type === "string" &&
-  file.type.startsWith("image/") &&
-  file.size > 0 &&
-  file.size <= PREVIEW_MAX_BYTES;
+/** Anything that can be shown as a picture, at any size. */
+export const isImage = (file) =>
+  typeof file.type === "string" && file.type.startsWith("image/") && file.size > 0;
+
+/** Small enough that its thumbnail is worth loading without being asked. */
+export const canPreview = (file) => isImage(file) && file.size <= PREVIEW_MAX_BYTES;
 
 const keyOf = (session, file) => `${session.sessionId}:${file.id}`;
 
 /**
  * The object URL for a file's preview, fetching it once and reusing it after.
+ * No size check here: that is the caller's decision, and an image opened
+ * deliberately should load however big it is.
  *
  * The blob is rebuilt with the type from the file's own description rather than
  * the response's, because downloads deliberately come back as

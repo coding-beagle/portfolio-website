@@ -14,6 +14,7 @@ import { releasePreviews } from "./preview";
 import QrCode from "./QrCode";
 import DropZone from "./DropZone";
 import FileRow, { formatBytes } from "./FileRow";
+import ThemeToggle from "../../common/ThemeToggle";
 
 /** The code in the address bar, if someone arrived from a QR scan. */
 export function codeFromHash(hash) {
@@ -143,6 +144,9 @@ export default function UploadThat() {
             borderBottom: `1px solid ${theme.accent}1F`,
           }}
         >
+          {/* Kept at the far end from the destructive button, so the two are
+              never a mis-tap apart. */}
+          <ThemeToggle />
           <span style={{ flex: 1, minWidth: 0, fontSize: "0.8rem", opacity: 0.7 }}>
             {remaining !== null && (
               <>
@@ -207,24 +211,34 @@ export default function UploadThat() {
         </div>
       ) : (
         <header style={{ marginBottom: "1.8em" }}>
-          <a
-            className="utHome utControl"
-            href={homeHref()}
+          <div
             style={{
-              ...noSelect,
-              display: "inline-flex",
+              display: "flex",
               alignItems: "center",
-              gap: "0.5em",
+              justifyContent: "space-between",
+              gap: "1em",
               marginBottom: "0.9em",
-              fontSize: "0.8rem",
-              color: theme.accent,
-              opacity: 0.65,
-              textDecoration: "none",
             }}
           >
-            <FontAwesomeIcon icon={faArrowLeft} />
-            nteague.com
-          </a>
+            <a
+              className="utHome utControl"
+              href={homeHref()}
+              style={{
+                ...noSelect,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.5em",
+                fontSize: "0.8rem",
+                color: theme.accent,
+                opacity: 0.65,
+                textDecoration: "none",
+              }}
+            >
+              <FontAwesomeIcon icon={faArrowLeft} />
+              nteague.com
+            </a>
+            <ThemeToggle />
+          </div>
           <h1
             style={{
               margin: 0,

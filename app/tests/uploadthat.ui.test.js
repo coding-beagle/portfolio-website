@@ -3,7 +3,7 @@
  * does once the poll comes back.
  */
 import React from "react";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import UploadThat, {
   codeFromHash,
@@ -230,6 +230,22 @@ describe("on a phone", () => {
     expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
   });
 
+  it("keeps the theme toggle in the bar, at the far end from End", async () => {
+    started();
+    mount(true);
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+
+    const toggle = screen.getByRole("button", { name: /Switch to (light|dark) mode/i });
+    const end = screen.getByRole("button", { name: /End session and delete files/ });
+    const bar = toggle.parentElement;
+    expect(bar).toContainElement(end);
+    // Ordered within the bar, so they are never a mis-tap apart.
+    expect(
+      bar.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
   it("keeps ending the session reachable, away from the theme toggle", async () => {
     started();
     mount(true);
@@ -314,6 +330,74 @@ describe("the file list", () => {
     const fetched = global.fetch.mock.calls.map(([url]) => url);
     expect(fetched.some((url) => url.includes("/files/img"))).toBe(true);
     expect(fetched.some((url) => url.includes("/files/doc"))).toBe(false);
+  });
+
+  const imageSession = (size) => {
+    global.URL.createObjectURL = jest.fn(() => "blob:preview");
+    global.URL.revokeObjectURL = jest.fn();
+    routeFetch({
+      "/files/": () => ({
+        status: 200,
+        blob: { arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer },
+      }),
+      "/manifest": () => ({
+        body: {
+          version: 1,
+          expiresAt: SESSION.expiresAt,
+          files: [
+            {
+              id: "img",
+              size,
+              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
+              uploadedBy: "Device 2",
+            },
+          ],
+        },
+      }),
+      "/api/session": () => ({ status: 201, body: SESSION }),
+    });
+  };
+
+  it("opens an image full size, and closes three ways", async () => {
+    imageSession(2048);
+    mount();
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+    await waitFor(() => expect(global.URL.createObjectURL).toHaveBeenCalled());
+
+    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
+    const dialog = await screen.findByRole("dialog", { name: "holiday.jpg" });
+    expect(within(dialog).getByAltText("holiday.jpg")).toHaveAttribute(
+      "src",
+      "blob:preview"
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "holiday.jpg" })).toBeNull()
+    );
+
+    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
+    userEvent.click(await screen.findByRole("button", { name: "Close preview" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "holiday.jpg" })).toBeNull()
+    );
+  });
+
+  it("waits to be asked before downloading a large image", async () => {
+    // Over the auto-thumbnail cap: nothing is fetched until the button is used.
+    imageSession(20 * 1024 * 1024);
+    mount();
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+
+    const fetchedFiles = () =>
+      global.fetch.mock.calls.filter(([url]) => url.includes("/files/")).length;
+    expect(fetchedFiles()).toBe(0);
+
+    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
+    await screen.findByRole("dialog", { name: "holiday.jpg" });
+    expect(fetchedFiles()).toBe(1);
   });
 
   it("says so when the session is empty rather than showing nothing", async () => {

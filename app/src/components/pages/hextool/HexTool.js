@@ -5,6 +5,7 @@ import { useTheme } from "../../../themes/ThemeProvider";
 import { MobileContext } from "../../../contexts/MobileContext";
 import { noSelect } from "../title/utilities/valueChangerElements/styles";
 import { homeHref } from "../../../subdomains";
+import ThemeToggle from "../../common/ThemeToggle";
 import BitGrid, { BitGridStyles } from "./BitGrid";
 import {
   applySelection,
@@ -304,7 +305,7 @@ export default function HexTool() {
     >
       <BitGridStyles />
       <style>{`
-        .hexSeg:focus-visible, .hexCopy:focus-visible, .hexHome:focus-visible {
+        .hexSeg:focus-visible, .hexCopy:focus-visible, .hexHome:focus-visible, .hexControl:focus-visible {
           outline: 2px solid currentColor;
           outline-offset: 2px;
         }
@@ -312,25 +313,35 @@ export default function HexTool() {
       `}</style>
 
       <header style={{ marginBottom: "1.5em" }}>
-        <a
-          className="hexHome"
-          href={homeHref()}
+        <div
           style={{
-            ...noSelect,
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
-            gap: "0.5em",
+            justifyContent: "space-between",
+            gap: "1em",
             marginBottom: "0.9em",
-            fontSize: "0.8rem",
-            color: theme.accent,
-            opacity: 0.65,
-            textDecoration: "none",
-            transition: "opacity 0.2s ease, color 0.2s ease",
           }}
         >
-          <FontAwesomeIcon icon={faArrowLeft} />
-          nteague.com
-        </a>
+          <a
+            className="hexHome"
+            href={homeHref()}
+            style={{
+              ...noSelect,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5em",
+              fontSize: "0.8rem",
+              color: theme.accent,
+              opacity: 0.65,
+              textDecoration: "none",
+              transition: "opacity 0.2s ease, color 0.2s ease",
+            }}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} />
+            nteague.com
+          </a>
+          <ThemeToggle />
+        </div>
         <h1
           style={{
             margin: 0,

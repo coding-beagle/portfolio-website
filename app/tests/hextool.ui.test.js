@@ -144,6 +144,13 @@ describe("hex tool", () => {
     expect(home).toHaveAttribute("href", "#/?scene=desktop");
   });
 
+  it("puts the theme toggle beside the link back to the site", () => {
+    render(<HexApp />);
+    const home = screen.getByRole("link", { name: /nteague\.com/i });
+    const toggle = screen.getByRole("button", { name: /Switch to (light|dark) mode/i });
+    expect(home.parentElement).toContainElement(toggle);
+  });
+
   it("explains a literal it cannot read", () => {
     render(<HexApp />);
     retype("0b1021");
