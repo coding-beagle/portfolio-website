@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, lazy } from "react";
 import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
 import Title from "./components/pages/title/title";
 import { ThemeProvider, useTheme } from "./themes/ThemeProvider";
@@ -9,14 +9,14 @@ import {
   faMoon,
   faSun,
 } from "@fortawesome/free-solid-svg-icons";
-import { MobileContext } from "./contexts/MobileContext";
+import { MobileContext, isMobile } from "./contexts/MobileContext";
 
-// Helper to detect mobile devices
-const isMobile = () =>
-  typeof window !== "undefined" &&
-  /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent
-  );
+// The hex tool has its own build for its subdomain; this route is the same page
+// reachable from the portfolio. Lazy so none of it lands in the portfolio's
+// main chunk.
+const HexPage = lazy(() =>
+  import("./HexApp").then((module) => ({ default: module.HexPage }))
+);
 
 // Wrapper component to handle location and pass path
 function AppWrapper() {
@@ -269,9 +269,12 @@ function App() {
     <MobileContext.Provider value={mobile}>
       <ThemeProvider>
         <HashRouter>
-          <Routes>
-            <Route path="*" element={<AppWrapper />} />
-          </Routes>
+          <Suspense fallback={null}>
+            <Routes>
+              <Route path="/hextool" element={<HexPage />} />
+              <Route path="*" element={<AppWrapper />} />
+            </Routes>
+          </Suspense>
         </HashRouter>
       </ThemeProvider>
     </MobileContext.Provider>

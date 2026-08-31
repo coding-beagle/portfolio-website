@@ -11,11 +11,16 @@ help:
 run: 
 	cd app && npm start
 
-# clean node modules and build folder
+# run the development version of the hex tool (the subdomain build)
+run_hextool:
+	cd app && npm run start:hextool
+
+# clean node modules and build folders
 clean:
 	rm -rf app/node_modules
 	rm -rf app/package-lock.json
 	rm -rf app/build
+	rm -rf app/build-hextool
 
 # install deps from the lockfile
 install:
@@ -53,8 +58,27 @@ build:
 	npm run build; \
 	cd -; \
 
+# creates a built (HTML) version of the hex tool, for its own subdomain
+build_hextool:
+	cd ./app; \
+	npm run build:hextool; \
+	cd -; \
+
+# build both deployables
+build_all: build build_hextool
+
 # prod only, sends the built app to the folder where the site is hosted
 deploy_manual:
 	rm -rf /home/nteagvxe/public_html/*; \
 	cp -r app/build/* /home/nteagvxe/public_html/; \
 	echo "Deployed successfully!"; \
+
+# prod only, sends the built hex tool to its subdomain's document root.
+# Override the path if cPanel put the subdomain somewhere else:
+#   make deploy_hextool HEXTOOL_DEPLOYPATH=/home/nteagvxe/some/other/dir
+HEXTOOL_DEPLOYPATH ?= /home/nteagvxe/public_hextool_html
+deploy_hextool:
+	test -d $(HEXTOOL_DEPLOYPATH) || { echo "No such directory: $(HEXTOOL_DEPLOYPATH)"; exit 1; }; \
+	rm -rf $(HEXTOOL_DEPLOYPATH)/*; \
+	cp -r app/build-hextool/* $(HEXTOOL_DEPLOYPATH)/; \
+	echo "Deployed hex tool to $(HEXTOOL_DEPLOYPATH)"; \

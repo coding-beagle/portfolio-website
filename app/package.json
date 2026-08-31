@@ -26,8 +26,11 @@
     "posts": "node scripts/build-posts.js",
     "prestart": "npm run posts",
     "start": "react-scripts start",
+    "start:hextool": "REACT_APP_TARGET=hextool react-scripts start",
     "prebuild": "npm run posts",
     "build": "react-scripts build",
+    "build:hextool": "REACT_APP_TARGET=hextool BUILD_PATH=build-hextool react-scripts build",
+    "postbuild:hextool": "node scripts/finish-hextool-build.js",
     "test": "jest --config jest.config.js",
     "eject": "react-scripts eject",
     "test:watch": "jest --config jest.config.js --watch"
@@ -36,7 +39,10 @@
     "extends": [
       "react-app",
       "react-app/jest"
-    ]
+    ],
+    "env": {
+      "es2020": true
+    }
   },
   "browserslist": {
     "production": [

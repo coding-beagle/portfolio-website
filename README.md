@@ -59,10 +59,34 @@
 ### Pid:
 ![PID](python_scripts/outgifs/pid.gif)
 
+## Hex tool
+
+A second app built from the same `app/` source tree, for its own subdomain:
+paste a hex or binary word and read it back in the other base, column by
+column, with Verilog bit selects (`0xDEADBEEF[13]`, `[31:16]`, `[16 +: 16]`).
+
+It shares the site's theming and mobile context by importing them directly.
+`REACT_APP_TARGET=hextool` swaps the root component in `src/index.js`, so the
+two apps are separate chunks and neither build ships the other's code. The same
+page is also reachable from the portfolio at `/#/hextool`.
+
+`make build_hextool` writes `app/build-hextool`, which is what the subdomain's
+document root gets.
+
 ## Make Commands:
 
 `make install` -> Install JS deps
 
 `make run` -> Run webpack to render website locally
+
+`make run_hextool` -> Run the hex tool locally
+
+`make build` -> Build the portfolio into `app/build`
+
+`make build_hextool` -> Build the hex tool into `app/build-hextool`
+
+`make build_all` -> Build both
+
+`make test` -> Run the unit tests
 
 `make clean` -> Clear out node_modules
