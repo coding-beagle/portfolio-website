@@ -139,6 +139,18 @@ else
   bad "a second device can join with the code" "HTTP $REPLY_STATUS — $(why "$joined")"
 fi
 
+# The heartbeat is a bodiless POST like the two ModSecurity rejected, and the
+# app sends one every 30 seconds — a rule catching it would look like sessions
+# timing out early rather than like a blocked request.
+call -X POST "$BASE/api/session/$SID/heartbeat" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+BEAT=$(printf '%s' "$REPLY_BODY" | json expiresAt)
+if [ -n "$BEAT" ] && [ "$BEAT" -gt "$(date +%s)" ] 2>/dev/null; then
+  ok "the heartbeat keeps the session alive"
+else
+  bad "the heartbeat keeps the session alive" "HTTP $REPLY_STATUS — $(why "$REPLY_BODY")"
+fi
+
 echo
 echo "a file"
 
@@ -183,6 +195,16 @@ else
 
   status=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$BASE/api/session/$SID/files/$FID")
   check "and not without a token" "$status" "401"
+
+  call -X DELETE "$BASE/api/session/$SID/files/$FID" -H "Authorization: Bearer $TOKEN"
+  if [ "$(printf '%s' "$REPLY_BODY" | json deleted)" = "1" ]; then
+    ok "a file can be removed early"
+  else
+    bad "a file can be removed early" "HTTP $REPLY_STATUS — $(why "$REPLY_BODY")"
+  fi
+
+  manifest=$(curl -sS --max-time 15 "$BASE/api/session/$SID/manifest" -H "Authorization: Bearer $TOKEN")
+  check "and the list is empty again" "$(printf '%s' "$manifest" | json files.0.id)" ""
 fi
 
 echo

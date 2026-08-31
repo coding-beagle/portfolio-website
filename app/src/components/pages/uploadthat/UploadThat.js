@@ -2,18 +2,18 @@ import React, { useContext, useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
-  faDownload,
   faPowerOff,
-  faTrashCan,
+  faQrcode,
 } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { MobileContext } from "../../../contexts/MobileContext";
 import { noSelect } from "../title/utilities/valueChangerElements/styles";
 import { homeHref } from "../../../subdomains";
-import { downloadFile, saveBlob } from "./api";
 import useBridge from "./useBridge";
+import { releasePreviews } from "./preview";
 import QrCode from "./QrCode";
 import DropZone from "./DropZone";
+import FileRow, { formatBytes } from "./FileRow";
 
 /** The code in the address bar, if someone arrived from a QR scan. */
 export function codeFromHash(hash) {
@@ -21,18 +21,13 @@ export function codeFromHash(hash) {
   return match ? match[1] : null;
 }
 
-export function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
 export function formatCountdown(seconds) {
   if (seconds <= 0) return "0:00";
   const minutes = Math.floor(seconds / 60);
   return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
+
+export { formatBytes };
 
 /** Seconds left on the session, ticking. */
 function useCountdown(expiresAt) {
@@ -53,8 +48,10 @@ export default function UploadThat() {
   const [code, setCode] = useState("");
   const [operatorKey, setOperatorKey] = useState("");
   const [showKey, setShowKey] = useState(false);
+  // On a phone the code and QR are what you needed a minute ago, not what you
+  // need now, so they fold away behind a button and the files get the screen.
+  const [showJoinPanel, setShowJoinPanel] = useState(false);
 
-  // Arriving from a QR scan lands on #/j/<code>; fill it in and join.
   useEffect(() => {
     const scanned = codeFromHash(window.location.hash);
     if (scanned) {
@@ -66,11 +63,22 @@ export default function UploadThat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Object URLs outlive the component that made them, so they go back when the
+  // session does rather than when a row happens to unmount.
+  const sessionId = session?.sessionId;
+  useEffect(
+    () => () => {
+      if (sessionId) releasePreviews(sessionId);
+    },
+    [sessionId]
+  );
+
   const remaining = useCountdown(manifest?.expiresAt ?? session?.expiresAt);
   const joinUrl = useMemo(
     () => (session ? `${window.location.origin}/#/j/${session.code}` : ""),
     [session]
   );
+  const joinPanelVisible = !mobile || showJoinPanel;
 
   const label = {
     ...noSelect,
@@ -94,6 +102,8 @@ export default function UploadThat() {
     ...extra,
   });
 
+  const pad = mobile ? "1em" : "2em";
+
   return (
     <div
       style={{
@@ -109,40 +119,128 @@ export default function UploadThat() {
         .utHome:hover { opacity: 1; color: ${theme.secondary}; }
       `}</style>
 
-      <header style={{ marginBottom: "1.8em" }}>
-        <a
-          className="utHome utControl"
-          href={homeHref()}
+      {session ? (
+        /*
+         * Pinned, and the session controls live at the top right — the theme
+         * toggle is fixed to the bottom left of the viewport, and on a phone it
+         * sat right on top of where this used to be.
+         */
+        <div
           style={{
             ...noSelect,
-            display: "inline-flex",
+            position: "sticky",
+            top: 0,
+            zIndex: 5,
+            display: "flex",
             alignItems: "center",
-            gap: "0.5em",
-            marginBottom: "0.9em",
-            fontSize: "0.8rem",
-            color: theme.accent,
-            opacity: 0.65,
-            textDecoration: "none",
+            gap: "0.6em",
+            marginLeft: `-${pad}`,
+            marginRight: `-${pad}`,
+            marginTop: mobile ? "-1.5em" : "-3em",
+            marginBottom: "1.2em",
+            padding: `0.7em ${pad}`,
+            background: theme.primary,
+            borderBottom: `1px solid ${theme.accent}1F`,
           }}
         >
-          <FontAwesomeIcon icon={faArrowLeft} />
-          nteague.com
-        </a>
-        <h1
-          style={{
-            margin: 0,
-            fontSize: mobile ? "1.6rem" : "2rem",
-            fontWeight: 400,
-            letterSpacing: "0.04em",
-          }}
-        >
-          uploadthat
-        </h1>
-        <p style={{ margin: "0.4em 0 0", opacity: 0.6, fontSize: "0.9rem" }}>
-          Open a session here, join it from another device, and drag files across.
-          Everything is deleted when the session ends.
-        </p>
-      </header>
+          <span style={{ flex: 1, minWidth: 0, fontSize: "0.8rem", opacity: 0.7 }}>
+            {remaining !== null && (
+              <>
+                ends in{" "}
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: "0.95rem",
+                    color: remaining < 60 ? theme.tertiaryAccent : theme.accent,
+                  }}
+                >
+                  {formatCountdown(remaining)}
+                </span>
+              </>
+            )}
+          </span>
+
+          {mobile && (
+            <button
+              className="utControl"
+              onClick={() => setShowJoinPanel((previous) => !previous)}
+              aria-expanded={showJoinPanel}
+              aria-label="Show the join code and QR"
+              title="Join code"
+              style={button({
+                padding: "0.5em 0.8em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.5em",
+              })}
+            >
+              <FontAwesomeIcon icon={faQrcode} />
+              {session.code}
+            </button>
+          )}
+
+          <button
+            className="utControl"
+            onClick={bridge.leave}
+            aria-label={
+              session.role === "owner"
+                ? "End session and delete files"
+                : "Leave session"
+            }
+            title={
+              session.role === "owner"
+                ? "End session and delete files"
+                : "Leave session"
+            }
+            style={button({
+              padding: "0.5em 0.9em",
+              border: `1px solid ${theme.tertiaryAccent}`,
+              background: `${theme.tertiaryAccent}1A`,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5em",
+            })}
+          >
+            <FontAwesomeIcon icon={faPowerOff} />
+            {mobile ? "End" : session.role === "owner" ? "End session" : "Leave"}
+          </button>
+        </div>
+      ) : (
+        <header style={{ marginBottom: "1.8em" }}>
+          <a
+            className="utHome utControl"
+            href={homeHref()}
+            style={{
+              ...noSelect,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5em",
+              marginBottom: "0.9em",
+              fontSize: "0.8rem",
+              color: theme.accent,
+              opacity: 0.65,
+              textDecoration: "none",
+            }}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} />
+            nteague.com
+          </a>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: mobile ? "1.6rem" : "2rem",
+              fontWeight: 400,
+              letterSpacing: "0.04em",
+            }}
+          >
+            uploadthat
+          </h1>
+          <p style={{ margin: "0.4em 0 0", opacity: 0.6, fontSize: "0.9rem" }}>
+            Open a session here, join it from another device, and drag files
+            across. Everything is deleted when the session ends.
+          </p>
+        </header>
+      )}
 
       {error && (
         <p
@@ -264,56 +362,56 @@ export default function UploadThat() {
 
       {session && (
         <>
-          <section
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: mobile ? "1.4em" : "2em",
-              alignItems: "center",
-              padding: "1.2em",
-              border: `1px solid ${theme.accent}26`,
-              borderRadius: 8,
-              marginBottom: "1.6em",
-            }}
-          >
-            <div style={{ flex: "1 1 200px" }}>
-              <p style={{ ...label, margin: "0 0 0.3em" }}>Join code</p>
-              <p
-                style={{
-                  margin: 0,
-                  fontFamily: "monospace",
-                  fontSize: mobile ? "2rem" : "2.6rem",
-                  letterSpacing: "0.12em",
-                  color: theme.secondary,
-                }}
-              >
-                {session.code}
-              </p>
-              <p style={{ margin: "0.6em 0 0", fontSize: "0.82rem", opacity: 0.6 }}>
-                {remaining !== null && (
-                  <>
-                    Ends in{" "}
-                    <span
-                      style={{
-                        fontFamily: "monospace",
-                        color: remaining < 60 ? theme.tertiaryAccent : "inherit",
-                      }}
-                    >
-                      {formatCountdown(remaining)}
-                    </span>
-                    {session.role === "owner" && " · kept alive while this tab is open"}
-                  </>
-                )}
-              </p>
-            </div>
-            <QrCode value={joinUrl} dark={theme.accent} light={theme.primary} size={mobile ? 132 : 156} />
-          </section>
+          {joinPanelVisible && (
+            <section
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: mobile ? "1.2em" : "2em",
+                alignItems: "center",
+                padding: "1.1em",
+                border: `1px solid ${theme.accent}26`,
+                borderRadius: 8,
+                marginBottom: "1.4em",
+              }}
+            >
+              <div style={{ flex: "1 1 180px" }}>
+                <p style={{ ...label, margin: "0 0 0.3em" }}>Join code</p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontFamily: "monospace",
+                    fontSize: mobile ? "1.9rem" : "2.6rem",
+                    letterSpacing: "0.12em",
+                    color: theme.secondary,
+                  }}
+                >
+                  {session.code}
+                </p>
+                <p style={{ margin: "0.5em 0 0", fontSize: "0.78rem", opacity: 0.55 }}>
+                  Scan or type this on the other device.
+                </p>
+              </div>
+              <QrCode
+                value={joinUrl}
+                dark={theme.accent}
+                light={theme.primary}
+                size={mobile ? 128 : 156}
+              />
+            </section>
+          )}
 
           <DropZone onFiles={bridge.send} />
 
           {transfers.map((transfer) => (
             <div key={transfer.id} style={{ marginTop: "0.8em" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: "0.82rem",
+                }}
+              >
                 <span>{transfer.name}</span>
                 <span style={{ fontFamily: "monospace", opacity: 0.7 }}>
                   {Math.round(transfer.progress * 100)}%
@@ -340,7 +438,7 @@ export default function UploadThat() {
             </div>
           ))}
 
-          <section style={{ marginTop: "2em" }}>
+          <section style={{ marginTop: "1.8em" }}>
             <h2 style={{ ...label, margin: "0 0 0.6em" }}>
               Files{manifest ? ` · ${manifest.files.length}` : ""}
             </h2>
@@ -351,86 +449,15 @@ export default function UploadThat() {
             )}
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {(manifest?.files ?? []).map((file) => (
-                <li
+                <FileRow
                   key={file.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.8em",
-                    padding: "0.7em 0",
-                    borderBottom: `1px solid ${theme.accent}14`,
-                  }}
-                >
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span
-                      style={{
-                        display: "block",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {file.name}
-                    </span>
-                    <span style={{ fontSize: "0.75rem", opacity: 0.55 }}>
-                      {formatBytes(file.size)} · from {file.uploadedBy}
-                    </span>
-                  </span>
-                  <button
-                    className="utControl"
-                    aria-label={`Download ${file.name}`}
-                    title="Download"
-                    onClick={async () => {
-                      const blob = await downloadFile(session, file.id);
-                      saveBlob(blob, file.name);
-                    }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: theme.accent,
-                      fontSize: "1rem",
-                      padding: "0.3em",
-                    }}
-                  >
-                    <FontAwesomeIcon icon={faDownload} />
-                  </button>
-                  <button
-                    className="utControl"
-                    aria-label={`Remove ${file.name}`}
-                    title="Remove"
-                    onClick={() => bridge.remove(file.id)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: `${theme.accent}99`,
-                      fontSize: "0.95rem",
-                      padding: "0.3em",
-                    }}
-                  >
-                    <FontAwesomeIcon icon={faTrashCan} />
-                  </button>
-                </li>
+                  session={session}
+                  file={file}
+                  onRemove={bridge.remove}
+                />
               ))}
             </ul>
           </section>
-
-          <button
-            className="utControl"
-            onClick={bridge.leave}
-            style={button({
-              marginTop: "2em",
-              border: `1px solid ${theme.tertiaryAccent}`,
-              background: `${theme.tertiaryAccent}1A`,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.6em",
-            })}
-          >
-            <FontAwesomeIcon icon={faPowerOff} />
-            {session.role === "owner" ? "End session and delete files" : "Leave session"}
-          </button>
         </>
       )}
     </div>

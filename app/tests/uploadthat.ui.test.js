@@ -44,13 +44,14 @@ function routeFetch(routes) {
       status: result.status ?? 200,
       headers: { get: (name) => (result.headers || {})[name] ?? null },
       json: () => Promise.resolve(result.body ?? {}),
+      blob: () => Promise.resolve(result.blob),
     });
   });
 }
 
-const mount = () =>
+const mount = (mobile = false) =>
   render(
-    <MobileContext.Provider value={false}>
+    <MobileContext.Provider value={mobile}>
       <ThemeProvider>
         <UploadThat />
       </ThemeProvider>
@@ -187,6 +188,62 @@ describe("joining", () => {
   });
 });
 
+describe("on a phone", () => {
+  const started = () =>
+    routeFetch({
+      "/manifest": () => ({
+        body: {
+          version: 1,
+          expiresAt: SESSION.expiresAt,
+          files: [
+            {
+              id: "f1",
+              size: 2048,
+              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
+              uploadedBy: "Device 2",
+            },
+          ],
+        },
+      }),
+      "/api/session": () => ({ status: 201, body: SESSION }),
+    });
+
+  it("folds the join code away and leads with the files", async () => {
+    started();
+    mount(true);
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    expect(await screen.findByText("holiday.jpg")).toBeInTheDocument();
+
+    // The code is on the button that reveals the panel, not spelled out below.
+    expect(screen.queryByText("Join code")).toBeNull();
+    expect(screen.queryByRole("img", { name: /QR code/i })).toBeNull();
+  });
+
+  it("shows the code and QR on demand", async () => {
+    started();
+    mount(true);
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+
+    userEvent.click(screen.getByRole("button", { name: /Show the join code/i }));
+    expect(screen.getByText("Join code")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
+  });
+
+  it("keeps ending the session reachable, away from the theme toggle", async () => {
+    started();
+    mount(true);
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+
+    // The theme toggle is pinned to the bottom left of the viewport, so this
+    // one lives in the bar at the top.
+    const end = screen.getByRole("button", { name: /End session and delete files/ });
+    expect(end).toBeInTheDocument();
+    expect(end.textContent).toContain("End");
+  });
+});
+
 describe("the file list", () => {
   const withFiles = (files) =>
     routeFetch({
@@ -213,6 +270,50 @@ describe("the file list", () => {
     expect(await screen.findByText("holiday.jpg")).toBeInTheDocument();
     expect(screen.getByText("2 KB · from Device 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download holiday.jpg" })).toBeInTheDocument();
+  });
+
+  it("previews an image, and leaves other files to their icon", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    global.URL.createObjectURL = jest.fn(() => "blob:preview");
+    global.URL.revokeObjectURL = jest.fn();
+
+    routeFetch({
+      "/files/": () => ({ status: 200, blob: { arrayBuffer: async () => bytes.buffer } }),
+      "/manifest": () => ({
+        body: {
+          version: 1,
+          expiresAt: SESSION.expiresAt,
+          files: [
+            {
+              id: "img",
+              size: 2048,
+              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
+              uploadedBy: "Device 2",
+            },
+            {
+              id: "doc",
+              size: 900,
+              meta: encodeMeta({ name: "notes.txt", type: "text/plain" }),
+              uploadedBy: "Device 1",
+            },
+          ],
+        },
+      }),
+      "/api/session": () => ({ status: 201, body: SESSION }),
+    });
+
+    mount();
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("holiday.jpg");
+
+    // The image gets a thumbnail built from its own bytes; the text file is
+    // never downloaded at all.
+    await waitFor(() => expect(global.URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(document.querySelector('img[src="blob:preview"]')).toBeInTheDocument();
+
+    const fetched = global.fetch.mock.calls.map(([url]) => url);
+    expect(fetched.some((url) => url.includes("/files/img"))).toBe(true);
+    expect(fetched.some((url) => url.includes("/files/doc"))).toBe(false);
   });
 
   it("says so when the session is empty rather than showing nothing", async () => {
