@@ -18,6 +18,7 @@ import {
 } from "../src/components/pages/title/utilities/desktopElements/CelestialSphere";
 import { nightFraction } from "../src/components/pages/title/utilities/desktopElements/Wallpaper";
 import StarField from "../src/components/pages/title/utilities/desktopElements/StarField";
+import { ridgeSlope, ridgeY } from "../src/components/pages/title/utilities/desktopElements/hill";
 import { SUBDOMAIN_APPS, appHref } from "../src/subdomains";
 
 const SCENES = ["snow", "rain", "hyperspace", "desktop"];
@@ -97,6 +98,137 @@ function stubCanvas() {
   });
   return calls;
 }
+
+describe("poking the sun and moon", () => {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  afterEach(() => {
+    HTMLCanvasElement.prototype.getContext = originalGetContext;
+  });
+
+  const grab = () => document.querySelector("[data-celestial-grab]");
+  const body = () => document.querySelector(".celestialBody");
+  const mouth = () => document.querySelector("[data-mouth]").getAttribute("d");
+  const SIZE = 132;
+  /** Where it is now, which is where you would actually take hold of it. */
+  const centre = () => ({
+    clientX: parseFloat(body().style.left) + SIZE / 2,
+    clientY: parseFloat(body().style.top) + SIZE / 2,
+  });
+
+  /** A press and a release in the same place, which is a poke and not a drag. */
+  const prod = (at = { clientX: 900, clientY: 90 }) => {
+    fireEvent.mouseDown(grab(), { ...at, button: 0 });
+    fireEvent.mouseUp(window, at);
+  };
+
+  it("scowls when it is prodded", () => {
+    stubCanvas();
+    mount();
+    const calm = mouth();
+    expect(document.querySelector("[data-brow]")).toBeNull();
+
+    prod();
+    // The same arc turned over: the control point rises past the corners.
+    expect(mouth()).not.toBe(calm);
+    expect(document.querySelectorAll("[data-brow]")).toHaveLength(2);
+  });
+
+  it("shakes on each prod, and restarts the shake on the next one", () => {
+    stubCanvas();
+    mount();
+    const shake = () => document.querySelector(".celestialShake").style.animationName;
+    expect(shake()).toBe("none");
+
+    prod();
+    const first = shake();
+    expect(first).not.toBe("none");
+
+    // A different animation of the same shape, because re-applying the one
+    // already on the element would not play it a second time.
+    prod();
+    expect(shake()).not.toBe(first);
+    expect(shake()).not.toBe("none");
+  });
+
+  it("leaves the pointer alone", () => {
+    stubCanvas();
+    mount();
+    expect(grab()).toHaveStyle({ cursor: "default" });
+  });
+
+  it("gives up on the sky if it is prodded enough", () => {
+    stubCanvas();
+    mount();
+    // In its place: pinned to the corner by the percentages it is placed with.
+    expect(body().style.right).not.toBe("");
+    expect(body().style.left).toBe("");
+
+    for (let i = 0; i < 5; i += 1) prod();
+
+    // Out of it: carrying a position of its own, and put out about it.
+    expect(body().style.left).not.toBe("");
+    expect(body().style.right).toBe("");
+    expect(document.querySelectorAll("[data-brow]")).toHaveLength(2);
+  });
+
+  it("can be pushed around once it is on the ground", () => {
+    stubCanvas();
+    mount();
+    for (let i = 0; i < 5; i += 1) prod();
+
+    const from = parseFloat(body().style.left);
+    fireEvent.mouseDown(grab(), { ...centre(), button: 0 });
+    fireEvent.mouseMove(window, { clientX: 400, clientY: 500 });
+
+    expect(parseFloat(body().style.left)).toBeLessThan(from);
+    // And where it goes back to is offered while it is being carried.
+    expect(document.querySelector("[data-celestial-home]")).toBeInTheDocument();
+
+    fireEvent.mouseUp(window, { clientX: 400, clientY: 500 });
+    expect(document.querySelector("[data-celestial-home]")).toBeNull();
+  });
+
+  it("goes back to being the sky's again when it is put back", () => {
+    stubCanvas();
+    mount();
+    for (let i = 0; i < 5; i += 1) prod();
+    expect(body().style.left).not.toBe("");
+
+    // Its place is the top-right corner, by the fractions it is placed with.
+    const home = {
+      clientX: window.innerWidth * (1 - 0.09) - SIZE / 2,
+      clientY: window.innerHeight * 0.07 + SIZE / 2,
+    };
+    // Taken hold of, carried off somewhere else, and then put back.
+    fireEvent.mouseDown(grab(), { ...centre(), button: 0 });
+    fireEvent.mouseMove(window, { clientX: 300, clientY: 600 });
+    fireEvent.mouseMove(window, { clientX: home.clientX, clientY: home.clientY });
+    fireEvent.mouseUp(window, { clientX: home.clientX, clientY: home.clientY });
+
+    // Back on its percentages, and over whatever it was sulking about.
+    expect(body().style.right).not.toBe("");
+    expect(body().style.left).toBe("");
+    expect(document.querySelector("[data-brow]")).toBeNull();
+  });
+});
+
+describe("the hill it lands on", () => {
+  it("is the same curve the wallpaper draws", () => {
+    // Both ends of the ridge, off the path the sky is painted with.
+    expect(ridgeY(0)).toBeCloseTo(206);
+    expect(ridgeY(1200)).toBeCloseTo(172);
+  });
+
+  it("crests left of centre and falls away to the right", () => {
+    // Smaller y is higher up, so the crest is the lowest number.
+    expect(ridgeY(500)).toBeLessThan(ridgeY(0));
+    expect(ridgeY(500)).toBeLessThan(ridgeY(1200));
+    // Which is a ball rolling backwards on the near slope and forwards on the
+    // far one, rather than off in one direction whatever it is dropped on.
+    expect(ridgeSlope(100)).toBeLessThan(0);
+    expect(ridgeSlope(900)).toBeGreaterThan(0);
+  });
+});
 
 describe("the wallpaper", () => {
   const originalGetContext = HTMLCanvasElement.prototype.getContext;
@@ -186,6 +318,57 @@ describe("the wallpaper", () => {
 
     expect(before.length).toBeGreaterThan(100);
     expect(after.slice(0, 110)).toEqual(before.slice(0, 110));
+  });
+
+  it("puts clouds in the day sky and only there", () => {
+    stubCanvas();
+    const { container } = mount();
+    const [day, dusk] = container.querySelectorAll(".utWallpaperLayer");
+
+    expect(day.querySelectorAll("[data-cloud]").length).toBeGreaterThan(2);
+    // Night gets the stars instead; a cloud drawn there would sit over them.
+    expect(dusk.querySelectorAll("[data-cloud]")).toHaveLength(0);
+  });
+
+  it("holds the clouds back until the sky is properly light", () => {
+    stubCanvas();
+    const { container } = mount();
+    // Dark theme by default. Day is drawn underneath night rather than beside
+    // it, so without this the clouds show through the moment night starts to
+    // thin — long before the sky looks like daytime.
+    expect(container.querySelector("[data-clouds]")).toHaveStyle({ opacity: "0" });
+  });
+
+  it("builds every cloud differently rather than resizing one shape", () => {
+    stubCanvas();
+    const { container } = mount();
+
+    const clouds = [...container.querySelectorAll("[data-cloud]")];
+    expect(clouds.length).toBeGreaterThan(2);
+
+    // No two the same size overall...
+    expect(new Set(clouds.map((cloud) => cloud.style.width)).size).toBe(clouds.length);
+
+    clouds.forEach((cloud) => {
+      const balls = [...cloud.children];
+      expect(balls.length).toBeGreaterThanOrEqual(3);
+      // ...and no cloud built out of one ball repeated, which is what the
+      // swell towards the middle of the run is there to prevent.
+      expect(new Set(balls.map((ball) => ball.style.width)).size).toBe(balls.length);
+    });
+  });
+
+  it("starts each cloud part-way across so the sky is not empty at first", () => {
+    stubCanvas();
+    const { container } = mount();
+
+    const delays = [...container.querySelectorAll(".utCloudTrack")].map((track) =>
+      parseFloat(track.style.animationDelay)
+    );
+    expect(delays.length).toBeGreaterThan(2);
+    delays.forEach((delay) => expect(delay).toBeLessThan(0));
+    // Spread rather than stacked: no two clouds arrive at the same moment.
+    expect(new Set(delays).size).toBe(delays.length);
   });
 
   it("shows one sphere whose two hemispheres are sun and moon", () => {

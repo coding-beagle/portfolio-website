@@ -169,16 +169,36 @@ export function litHemispherePath(theta) {
 /**
  * The mouth, from an easy curve at rest to a grimace under load, and the eyes
  * narrowing with it. Turning yourself half way round is work.
+ *
+ * Being prodded pulls the control point up past the corners instead, which is
+ * the same arc turned over: a frown rather than a smile, and the same curve all
+ * the way between the two so a poke reads as a face changing its mind.
  */
-export function mouthPath(effort) {
+export function mouthPath(effort, annoy = 0) {
   const corners = n(58 + 2 * effort);
-  const middle = n(64 - 9 * effort);
+  const middle = n((64 - 9 * effort) * (1 - annoy) + 51 * annoy);
   return `M43 ${corners} Q50 ${middle} 57 ${corners}`;
 }
 
-export const eyeHeight = (effort, shut) => (shut ? 0.7 : n(6 - 3.4 * effort));
+export const eyeHeight = (effort, shut, annoy = 0) =>
+  shut ? 0.7 : n((6 - 3.4 * effort) * (1 - 0.4 * annoy));
 
-function Face({ palette, projection, look, blinking, effort, craters = [], name }) {
+/** Brows, which only exist when there is something to lower them about. */
+const BROWS = [
+  { x1: 35.6, y1: 39.4, x2: 45.4, y2: 43 },
+  { x1: 64.4, y1: 39.4, x2: 54.6, y2: 43 },
+];
+
+function Face({
+  palette,
+  projection,
+  look,
+  blinking,
+  effort,
+  annoy = 0,
+  craters = [],
+  name,
+}) {
   if (!projection.facing) return null;
   // Already screwed shut with effort, so a blink on top would read as a glitch.
   const shut = blinking && effort < 0.15;
@@ -194,7 +214,7 @@ function Face({ palette, projection, look, blinking, effort, craters = [], name 
             cx={cx}
             cy="46"
             rx="4.6"
-            ry={eyeHeight(effort, shut)}
+            ry={eyeHeight(effort, shut, annoy)}
             fill={palette.face}
           />
           {!shut && (
@@ -207,10 +227,25 @@ function Face({ palette, projection, look, blinking, effort, craters = [], name 
           )}
         </g>
       ))}
+      {annoy > 0 &&
+        BROWS.map((brow) => (
+          <line
+            key={brow.x1}
+            data-brow=""
+            x1={brow.x1}
+            y1={n(brow.y1 + 3 * (1 - annoy))}
+            x2={brow.x2}
+            y2={n(brow.y2 + 3 * (1 - annoy))}
+            stroke={palette.face}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            opacity={n(annoy)}
+          />
+        ))}
       {/* A single arc for a mouth — anything more stops reading as minimal. */}
       <path
         data-mouth=""
-        d={mouthPath(effort)}
+        d={mouthPath(effort, annoy)}
         fill="none"
         stroke={palette.face}
         strokeWidth="2.4"
@@ -220,7 +255,14 @@ function Face({ palette, projection, look, blinking, effort, craters = [], name 
   );
 }
 
-export default function CelestialSphere({ size, theta, effort = 0, sun, moon }) {
+export default function CelestialSphere({
+  size,
+  theta,
+  effort = 0,
+  annoy = 0,
+  sun,
+  moon,
+}) {
   const wrapper = useRef(null);
   const look = useEyeTracking(wrapper);
   const blinking = useBlink();
@@ -274,6 +316,7 @@ export default function CelestialSphere({ size, theta, effort = 0, sun, moon }) 
             look={look}
             blinking={blinking}
             effort={effort}
+            annoy={annoy}
           />
           <Face
             name="moon"
@@ -282,6 +325,7 @@ export default function CelestialSphere({ size, theta, effort = 0, sun, moon }) 
             look={look}
             blinking={blinking}
             effort={effort}
+            annoy={annoy}
             craters={[
               [36, 34, 5],
               [64, 30, 3.4],

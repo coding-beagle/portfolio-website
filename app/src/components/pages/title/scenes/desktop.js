@@ -356,7 +356,11 @@ export default function Desktop({
   // that control's business.
   const beginMarquee = (event) => {
     if (event.button !== 0) return;
-    if (event.target.closest(".desktopIcon, [role='dialog'], [role='menu'], .startOrb, .taskbarButton"))
+    if (
+      event.target.closest(
+        ".desktopIcon, .celestialBody, [role='dialog'], [role='menu'], .startOrb, .taskbarButton"
+      )
+    )
       return;
     setSelected([]);
     const bounds = surface.current.getBoundingClientRect();

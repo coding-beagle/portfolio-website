@@ -6,7 +6,10 @@ import { scaleColour } from "../usefulFunctions";
 import { MobileContext } from "../../../../../contexts/MobileContext";
 import { hillColours, lunaPalette, skyGradient } from "./luna";
 import StarField from "./StarField";
-import CelestialSphere, { SPIN_MS, spinEase } from "./CelestialSphere";
+import { HILL_PATH, HILL_RIM, HILL_VIEW } from "./hill";
+import Clouds from "./Clouds";
+import { SPIN_MS, spinEase } from "./CelestialSphere";
+import CelestialBody from "./CelestialBody";
 
 /**
  * Bliss, more or less: a graded sky with one long green hill rolling across the
@@ -46,14 +49,14 @@ function Sky({ dusk, green, opacity, mobile, children }) {
     >
       {children}
       <svg
-        viewBox="0 0 1200 400"
+        viewBox={`0 0 ${HILL_VIEW.width} ${HILL_VIEW.height}`}
         preserveAspectRatio="none"
         style={{
           position: "absolute",
           left: 0,
           bottom: 0,
           width: "100%",
-          height: mobile ? "34%" : "46%",
+          height: `${(mobile ? HILL_BAND.mobile : HILL_BAND.desktop) * 100}%`,
           display: "block",
         }}
       >
@@ -64,13 +67,10 @@ function Sky({ dusk, green, opacity, mobile, children }) {
             <stop offset="100%" stopColor={hill.foot} />
           </linearGradient>
         </defs>
-        <path
-          d="M0,400 L0,206 C180,126 372,72 606,112 C818,148 1012,204 1200,172 L1200,400 Z"
-          fill={`url(#${gradientId})`}
-        />
+        <path d={HILL_PATH} fill={`url(#${gradientId})`} />
         {/* The sunlit rim along the ridge, which is what makes it read as grass. */}
         <path
-          d="M0,206 C180,126 372,72 606,112 C818,148 1012,204 1200,172"
+          d={HILL_RIM}
           fill="none"
           stroke={hill.rim}
           strokeWidth="7"
@@ -106,6 +106,9 @@ const CELESTIAL = {
   desktop: { size: 132, top: 0.07, right: 0.09 },
   mobile: { size: 92, top: 0.05, right: 0.06 },
 };
+
+/** How much of the screen the hill takes, which is what a fallen body lands on. */
+const HILL_BAND = { desktop: 0.46, mobile: 0.34 };
 
 /**
  * How far into night the sky is, taken from the sphere's own angle rather than
@@ -210,33 +213,35 @@ export default function Wallpaper() {
         Day is the ground the night is drawn over, so there is never a frame
         part-way through where both are half-there and the hill goes pale.
       */}
-      <Sky dusk={false} green={theme.secondaryAccent} opacity={1} mobile={mobile} />
+      <Sky dusk={false} green={theme.secondaryAccent} opacity={1} mobile={mobile}>
+        {/* Squared like the stars, and for the same reason: day is drawn under
+            night rather than beside it, so clouds at full strength show through
+            a night sky that has only just begun to thin. */}
+        <Clouds opacity={(1 - night) ** 2} />
+      </Sky>
 
       <Sky dusk green={theme.secondaryAccent} opacity={night} mobile={mobile}>
         {/* Squared, so the stars hold off until the sky is properly dark
             rather than hanging in a blue one. */}
         <div className="utStars" style={{ opacity: night * night }}>
-          <StarField colour="#FFFFFF" active={dusk} />
+          {/* Kept running for as long as any of the night sky is still on
+              screen, not just while it is the theme: stopping on the toggle
+              left the comets hanging in a sky that was still fading. */}
+          <StarField colour="#FFFFFF" active={night > 0} />
         </div>
       </Sky>
 
-      <div
-        style={{
-          position: "absolute",
-          top: `${body.top * 100}%`,
-          right: `${body.right * 100}%`,
-          width: body.size,
-          height: body.size,
-        }}
-      >
-        <CelestialSphere
-          size={body.size}
-          theta={spin.theta}
-          effort={spin.effort}
-          sun={SUN}
-          moon={MOON}
-        />
-      </div>
+      <CelestialBody
+        size={body.size}
+        top={body.top}
+        right={body.right}
+        theta={spin.theta}
+        effort={spin.effort}
+        sun={SUN}
+        moon={MOON}
+        mobile={mobile}
+        hillFraction={mobile ? HILL_BAND.mobile : HILL_BAND.desktop}
+      />
     </div>
   );
 }
