@@ -1,5 +1,6 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useTheme } from "../../../themes/ThemeProvider";
+import { inkColour } from "../../../themes/ink";
 import { useState } from "react";
 
 export default function IconButton({ icon, onClick, openNewTab = true, link = null, title = null, style = {} }) {
@@ -32,7 +33,7 @@ export default function IconButton({ icon, onClick, openNewTab = true, link = nu
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        color: isHover ? theme.secondary : theme.accent,
+        color: isHover ? theme.secondary : inkColour(theme),
         cursor: "pointer",
         fontSize: "inherit",
         ...style, // Apply custom styles

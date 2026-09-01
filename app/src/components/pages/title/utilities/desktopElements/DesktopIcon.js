@@ -4,6 +4,7 @@ import { useTheme } from "../../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../../contexts/MobileContext";
 import { noSelect } from "../valueChangerElements/styles";
 import { lunaPalette } from "./luna";
+import ShortcutArrow from "./ShortcutArrow";
 
 export const ICON_WIDTH = 84;
 export const ICON_HEIGHT = 92;
@@ -21,11 +22,15 @@ export const ICON_HEIGHT = 92;
  * arrives with `detail === 0`) is let through.
  *
  * On touch there is no hover and no comfortable double-tap, so one tap opens.
+ * A touch that travels is a drag rather than a tap, which is why the press is
+ * reported from `touchstart` as well: a phone never sends `mousedown` until the
+ * finger has already come back up, far too late to drag anything with.
  */
 export default function DesktopIcon({
   icon,
   label,
   href = null,
+  shortcut = false,
   selected = false,
   position,
   onSelect,
@@ -65,6 +70,7 @@ export default function DesktopIcon({
       // Without this the browser's own image/link dragging fights ours.
       draggable={false}
       onMouseDown={onGrab?.start}
+      onTouchStart={onGrab?.start}
       onClick={handleClick}
       onDoubleClick={activate}
       onMouseEnter={() => setHovered(true)}
@@ -86,6 +92,9 @@ export default function DesktopIcon({
         padding: "8px 4px 4px",
         boxSizing: "border-box",
         borderRadius: 2,
+        // The desktop does not scroll, so a finger on a shortcut is always
+        // ours to move rather than the browser's to pan with.
+        touchAction: "none",
         textDecoration: "none",
         cursor: "default",
         font: "inherit",
@@ -100,6 +109,8 @@ export default function DesktopIcon({
     >
       <span
         style={{
+          position: "relative",
+          display: "inline-flex",
           fontSize: "1.9rem",
           lineHeight: 1,
           filter: "drop-shadow(1px 1px 2px rgba(0,0,0,0.5))",
@@ -107,6 +118,9 @@ export default function DesktopIcon({
         }}
       >
         <FontAwesomeIcon icon={icon} />
+        {/* Whatever actually lives somewhere else wears the corner arrow; the
+            folder and the two controls are not shortcuts to anything. */}
+        {shortcut && <ShortcutArrow size={14} />}
       </span>
       <span
         style={{

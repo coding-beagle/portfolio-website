@@ -9,6 +9,7 @@ import {
   Suspense,
 } from "react";
 import { useTheme } from "../../../themes/ThemeProvider";
+import { inkColour } from "../../../themes/ink";
 import { MobileContext } from "../../../contexts/MobileContext";
 
 import {
@@ -243,6 +244,16 @@ export default function Title({
 
   const intervalRef = useRef(null);
 
+  // The desktop scene takes the page over: it answers the nudge itself, with a
+  // balloon out of its tray rather than a shake, and it repaints the title and
+  // the icons frame by frame to keep them with its sky.
+  const isDesktopScene = Scenes[currentScene].name === "desktop";
+  // Everything written on the page changes colour at one rate, or the scene
+  // label arrives somewhere the title is still on its way to. Short enough to
+  // keep up with a repainted sky; off that scene it is the slower fade the
+  // title's hover has always had.
+  const inkTransition = isDesktopScene ? "color 0.25s ease" : "color 0.8s ease";
+
   const triggerShake = useCallback(() => {
     const name = getShakeTransform(leftShake.current);
     animationNameRef.current = name;
@@ -250,16 +261,17 @@ export default function Title({
   }, []);
 
   useEffect(() => {
-    if (autoShake && settledUI) {
+    if (autoShake && settledUI && !isDesktopScene) {
       intervalRef.current = setInterval(() => {
         triggerShake();
       }, 500);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
       setIsHover(false);
     };
-  }, [autoShake, settledUI, triggerShake]);
+  }, [autoShake, settledUI, triggerShake, isDesktopScene]);
 
   useEffect(() => {
     if (clicked) {
@@ -326,30 +338,34 @@ export default function Title({
     );
   };
 
-  const handleLeftClickTitle = useCallback((event, overrideEvent = false) => {
+  // Whichever form the nudge is taking, using the title is what it was asking
+  // for, so it stops there.
+  const stopNudging = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
-      setAutoShake(false);
+      intervalRef.current = null;
     }
+    setAutoShake(false);
+  }, []);
+
+  const handleLeftClickTitle = useCallback((event, overrideEvent = false) => {
+    stopNudging();
     if (event.button === 0 || overrideEvent) {
       leftShake.current = true;
       triggerShake();
       setCurrentScene((currentScene + 1) % Object.keys(Scenes).length);
     }
-  }, [currentScene, triggerShake]);
+  }, [currentScene, triggerShake, stopNudging]);
 
   const handleRightClickTitle = useCallback((event) => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      setAutoShake(false);
-    }
+    stopNudging();
     if (event) event.preventDefault();
     leftShake.current = false;
     triggerShake();
     setCurrentScene(
       currentScene - 1 < 0 ? Object.keys(Scenes).length - 1 : currentScene - 1
     );
-  }, [currentScene, triggerShake]);
+  }, [currentScene, triggerShake, stopNudging]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -395,7 +411,7 @@ export default function Title({
           flexDirection: "column",
           position: "relative",
           backgroundColor: theme.primary,
-          color: theme.accent,
+          color: inkColour(theme),
           fontFamily: theme.font,
           overflow: "hidden"
         }}
@@ -410,6 +426,8 @@ export default function Title({
           onOpenScene: openSceneByName,
           onToggleTheme: handleThemeToggle,
           onToggleVisibleUI: handleVisibleToggle,
+          showHint: isDesktopScene && autoShake && settledUI,
+          onDismissHint: stopNudging,
         })}
         {visibleUI && (
           <header
@@ -424,10 +442,10 @@ export default function Title({
               // larger phones without overflowing small ones.
               fontSize: mobile ? "clamp(2.2rem, 9vw, 3.6rem)" : "5em",
               textAlign: "center",
-              color: isHover ? theme.secondary : theme.accent,
+              color: isHover ? theme.secondary : inkColour(theme),
               fontWeight: "bold",
               zIndex: 10,
-              transition: "color 0.8s ease, transform 1.5s ease",
+              transition: `${inkTransition}, transform 1.5s ease`,
               position: "relative",
               cursor: "pointer",
               WebkitUserSelect: "none",
@@ -450,7 +468,9 @@ export default function Title({
             {!typingDone && (
               <span
                 style={{
-                  borderRight: `0.08em solid ${isHover ? theme.secondary : theme.accent}`,
+                  borderRight: `0.08em solid ${
+                    isHover ? theme.secondary : inkColour(theme)
+                  }`,
                   animation: "blink 0.7s step-end infinite",
                   marginLeft: "2px",
                 }}
@@ -481,6 +501,9 @@ export default function Title({
                 justifyContent: "center",
                 fontWeight: "bold",
                 fontSize: "1.5em",
+                // Stated rather than inherited from the column above, so a
+                // scene that paints the page reaches it too.
+                color: inkColour(theme),
                 WebkitUserSelect: "none",
                 WebkitTouchCallout: "none",
                 KhtmlUserSelect: "none",
@@ -490,7 +513,7 @@ export default function Title({
                 zIndex: 100,
                 paddingBottom: "0.5em",
                 opacity: sceneLabelVisible && !sceneLabelFaded ? 1 : 0,
-                transition: "opacity 1.0s ease",
+                transition: `opacity 1.0s ease, ${inkTransition}`,
               }}
               id="sceneLabel"
             >

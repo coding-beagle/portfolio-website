@@ -16,6 +16,8 @@ import {
   mouthPath,
   spinEase,
 } from "../src/components/pages/title/utilities/desktopElements/CelestialSphere";
+import { nightFraction } from "../src/components/pages/title/utilities/desktopElements/Wallpaper";
+import StarField from "../src/components/pages/title/utilities/desktopElements/StarField";
 import { SUBDOMAIN_APPS, appHref } from "../src/subdomains";
 
 const SCENES = ["snow", "rain", "hyperspace", "desktop"];
@@ -117,6 +119,73 @@ describe("the wallpaper", () => {
     // Comets are drawn as circles too, like the stars scene's — a streak drawn
     // with lineTo/stroke would mean the old, wrong one had come back.
     expect(calls.stroke).toBe(0);
+  });
+
+  it("takes the light in the sky from how far the sphere has turned", () => {
+    // Sun facing us is full day; turned right away is full night; and the limb
+    // in between is halfway, so the sky is mid-fade exactly as the sun sets.
+    expect(nightFraction(0)).toBeCloseTo(0);
+    expect(nightFraction(-Math.PI)).toBeCloseTo(1);
+    expect(nightFraction(-Math.PI / 2)).toBeCloseTo(0.5);
+    // Which way it turns cannot matter — the sun is as gone either way round.
+    expect(nightFraction(Math.PI)).toBeCloseTo(nightFraction(-Math.PI));
+  });
+
+  it("keeps day underneath so the hill never goes pale mid-fade", () => {
+    stubCanvas();
+    const { container } = mount();
+    const [day, dusk] = container.querySelectorAll(".utWallpaperLayer");
+
+    // Dark theme by default: the sphere starts turned to the moon, so the night
+    // sky is fully drawn over a day that is always at full strength.
+    expect(day).toHaveStyle({ opacity: "1" });
+    expect(dusk).toHaveStyle({ opacity: "1" });
+  });
+
+  /**
+   * The title and the icon row sit over this wallpaper, and the theme flips in
+   * an instant while the sky takes the sphere's whole turn to follow. The
+   * colour they are written in is published here so they can go with the sky.
+   */
+  it("writes the sky's ink onto the page for the title to take", () => {
+    stubCanvas();
+    const { unmount } = mount();
+
+    // Dark theme by default: the sphere is turned to the moon, so the ink has
+    // arrived at the accent the dark theme would have used anyway.
+    expect(document.documentElement.style.getPropertyValue("--scene-ink")).toBe(
+      "#f4e9cd"
+    );
+
+    // And handed back on the way out, so every other scene is written in its
+    // own theme's accent again.
+    unmount();
+    expect(document.documentElement.style.getPropertyValue("--scene-ink")).toBe("");
+  });
+
+  it("keeps the same stars and comets when the sky changes hands", () => {
+    // Positions come out as zero without a laid-out canvas; the radii are what
+    // a regenerated field would change, which is what this is watching for.
+    const arcs = [];
+    HTMLCanvasElement.prototype.getContext = () => ({
+      setTransform: () => {},
+      clearRect: () => {},
+      beginPath: () => {},
+      arc: (x, y, r) => arcs.push([x, y, r]),
+      fill: () => {},
+      set globalAlpha(value) {},
+      set fillStyle(value) {},
+    });
+
+    const { rerender } = render(<StarField colour="#FFFFFF" active={false} />);
+    const before = arcs.splice(0);
+
+    // Toggling the theme is what flips this, and it used to rebuild the field.
+    rerender(<StarField colour="#FFFFFF" active />);
+    const after = arcs.splice(0);
+
+    expect(before.length).toBeGreaterThan(100);
+    expect(after.slice(0, 110)).toEqual(before.slice(0, 110));
   });
 
   it("shows one sphere whose two hemispheres are sun and moon", () => {
@@ -294,9 +363,6 @@ describe("desktop scene", () => {
     setViewport(390, 720);
     mount({ mobile: true });
 
-    const columns = Math.floor((390 - GRID_LEFT + 6) / CELL_WIDTH);
-    expect(columns).toBeGreaterThan(1);
-
     expect(shortcut(SUBDOMAIN_APPS[0].name)).toHaveStyle({
       left: `${GRID_LEFT}px`,
       top: homeTop(0),
@@ -306,8 +372,25 @@ describe("desktop scene", () => {
       left: `${GRID_LEFT + CELL_WIDTH}px`,
       top: homeTop(0),
     });
-    // And the row wraps once it runs out of width.
-    expect(shortcut("Show Desktop")).toHaveStyle({ top: homeTop(1) });
+  });
+
+  /**
+   * The sun and moon hangs in the top-right corner, so the row stops short of
+   * it — three across and the rest wrapped onto the next row — even on a phone
+   * wide enough to fit a fourth.
+   */
+  it("stops the phone's row before the sun and moon", () => {
+    setViewport(430, 900);
+    mount({ mobile: true });
+    expect(Math.floor((430 - GRID_LEFT + 6) / CELL_WIDTH)).toBeGreaterThan(3);
+
+    const tops = [...SUBDOMAIN_APPS.map((app) => app.name), "Scenes", "Change Theme", "Show Desktop"]
+      .map((name) => parseInt(shortcut(name).style.top, 10));
+
+    expect(tops.filter((top) => top === GRID_TOP)).toHaveLength(3);
+    expect(tops.filter((top) => top === GRID_TOP + CELL_HEIGHT)).toHaveLength(
+      tops.length - 3
+    );
   });
 
   it("selects what the band covers, and keeps it after the mouse comes up", () => {
@@ -436,6 +519,51 @@ describe("desktop scene", () => {
     expect(onLaunch).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * A phone sends no mouse event until the finger has already lifted, so the
+   * gesture has to be followed in touch events or nothing can be dragged.
+   */
+  it("drags a shortcut with a finger, without opening it", () => {
+    setViewport(390, 720);
+    const { onLaunch } = mount({ mobile: true });
+    const icon = shortcut(SUBDOMAIN_APPS[0].name);
+    const from = {
+      x: parseInt(icon.style.left, 10),
+      y: parseInt(icon.style.top, 10),
+    };
+
+    // One cell across and one down, which lands on a square rather than
+    // between two, so what the drop snaps to is not what is being tested here.
+    const to = { x: from.x + CELL_WIDTH, y: from.y + CELL_HEIGHT };
+    fireEvent.touchStart(icon, { touches: [{ clientX: from.x, clientY: from.y }] });
+    fireEvent.touchMove(window, { touches: [{ clientX: to.x, clientY: to.y }] });
+    fireEvent.touchEnd(window, { changedTouches: [{ clientX: to.x, clientY: to.y }] });
+
+    expect(icon).toHaveStyle({ left: `${to.x}px`, top: `${to.y}px` });
+
+    // The finger only moved it. The mouse press a phone sends afterwards must
+    // not be taken for a fresh tap and open what was being dragged.
+    fireEvent.mouseDown(icon, { clientX: to.x, clientY: to.y, button: 0 });
+    fireEvent.mouseUp(icon);
+    fireEvent.click(icon, { detail: 1 });
+    expect(onLaunch).not.toHaveBeenCalled();
+  });
+
+  it("still opens on a tap that never travels", () => {
+    const { onLaunch } = mount({ mobile: true });
+    const icon = shortcut(SUBDOMAIN_APPS[0].name);
+
+    fireEvent.touchStart(icon, { touches: [{ clientX: 20, clientY: 20 }] });
+    fireEvent.touchMove(window, { touches: [{ clientX: 21, clientY: 21 }] });
+    fireEvent.touchEnd(window, { changedTouches: [{ clientX: 21, clientY: 21 }] });
+
+    // The tap arrives as the mouse sequence the phone echoes it with.
+    fireEvent.mouseDown(icon, { clientX: 21, clientY: 21, button: 0 });
+    fireEvent.mouseUp(icon);
+    fireEvent.click(icon, { detail: 1 });
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+  });
+
   it("resizes the folder from its corner gripper", () => {
     mount();
     fireEvent.doubleClick(shortcut("Scenes"));
@@ -465,11 +593,19 @@ describe("desktop scene", () => {
   it("carries the page's own theme and hide-UI controls as programs", () => {
     const { onToggleTheme, onToggleVisibleUI } = mount();
 
-    fireEvent.doubleClick(shortcut("Display Properties"));
+    fireEvent.doubleClick(shortcut("Change Theme"));
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
 
     fireEvent.doubleClick(shortcut("Show Desktop"));
     expect(onToggleVisibleUI).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the theme it would switch to, not the one in force", () => {
+    // Dark by default, so the shortcut holds out the sun.
+    const { container } = mount();
+    const icon = shortcut("Change Theme");
+    expect(icon.querySelector("svg")).toHaveAttribute("data-icon", "sun");
+    expect(container).toBeTruthy();
   });
 
   it("names the hide-UI program for whichever way it will go", () => {
@@ -510,6 +646,31 @@ describe("desktop scene", () => {
     expect(SCENES).toContain(onOpenScene.mock.calls[0][0]);
   });
 
+  it("stamps the apps with the shortcut arrow, and nothing that stays here", () => {
+    mount();
+    SUBDOMAIN_APPS.forEach((app) => {
+      expect(
+        shortcut(app.name).querySelector("[data-shortcut-arrow]")
+      ).toBeInTheDocument();
+    });
+    // A folder and two controls are not shortcuts to anywhere else.
+    ["Scenes", "Change Theme", "Show Desktop"].forEach((name) => {
+      expect(shortcut(name).querySelector("[data-shortcut-arrow]")).toBeNull();
+    });
+  });
+
+  it("stamps every scene in the folder with the shortcut arrow", () => {
+    mount();
+    fireEvent.doubleClick(shortcut("Scenes"));
+
+    const folder = within(folderWindow());
+    SCENES.forEach((name) => {
+      expect(
+        folder.getByTitle(new RegExp(`^${name}`)).querySelector("[data-shortcut-arrow]")
+      ).toBeInTheDocument();
+    });
+  });
+
   it("closes the start menu on escape", () => {
     mount();
     userEvent.click(screen.getByLabelText("Start"));
@@ -517,5 +678,45 @@ describe("desktop scene", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Start menu" })).toBeNull();
+  });
+});
+
+describe("the balloon tip", () => {
+  const balloon = () =>
+    screen.queryByText(/change scenes by clicking the title button/i);
+
+  it("stays away until the page asks for the nudge", () => {
+    mount();
+    expect(balloon()).toBeNull();
+  });
+
+  it("delivers the title's nudge as a notification instead", () => {
+    mount({ showHint: true });
+    expect(balloon()).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Tip");
+  });
+
+  it("has nothing to point at once the page is hidden", () => {
+    mount({ showHint: true, visibleUI: false });
+    expect(balloon()).toBeNull();
+  });
+
+  it("wears the theme's accent rather than XP's cream", () => {
+    mount({ showHint: true });
+    // Dark theme by default: the accent is the face and the primary it sits
+    // against is the border and the text.
+    expect(screen.getByRole("status")).toHaveStyle({
+      background: "#f4e9cd",
+      border: "1px solid #031926",
+      color: "#031926",
+    });
+  });
+
+  it("hands the dismissal back to the page that owns the nudge", () => {
+    const onDismissHint = jest.fn();
+    mount({ showHint: true, onDismissHint });
+
+    userEvent.click(screen.getByLabelText("Close notification"));
+    expect(onDismissHint).toHaveBeenCalledTimes(1);
   });
 });

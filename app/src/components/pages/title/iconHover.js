@@ -1,5 +1,6 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useTheme } from "../../../themes/ThemeProvider";
+import { inkColour } from "../../../themes/ink";
 import { useState } from "react";
 
 export default function IconHover({ icon, link, openNewTab = true }) {
@@ -12,7 +13,7 @@ export default function IconHover({ icon, link, openNewTab = true }) {
       target={openNewTab ? "_blank" : "_self"}
       rel="noopener noreferrer"
       style={{
-        color: isHover ? theme.secondary : theme.accent,
+        color: isHover ? theme.secondary : inkColour(theme),
         cursor: "pointer",
         // Matches IconButton's tap target so the row stays evenly spaced.
         minWidth: 44,

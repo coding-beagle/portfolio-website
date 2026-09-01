@@ -1,5 +1,8 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../../../themes/ThemeProvider";
+import { themes } from "../../../../../themes/themes";
+import { INK_VAR } from "../../../../../themes/ink";
+import { scaleColour } from "../usefulFunctions";
 import { MobileContext } from "../../../../../contexts/MobileContext";
 import { hillColours, lunaPalette, skyGradient } from "./luna";
 import StarField from "./StarField";
@@ -19,11 +22,13 @@ import CelestialSphere, { SPIN_MS, spinEase } from "./CelestialSphere";
  * The cost of that is one idle canvas; the star field only animates when it is
  * the sky you can actually see.
  *
- * The sun and the moon are two hemispheres of one sphere, which turns.
+ * The sun and the moon are two hemispheres of one sphere, which turns — and the
+ * fade is that turn rather than a transition of its own, so the light in the
+ * sky is the light the sphere is actually showing.
  */
 
 /** One sky: its gradient and its hill. */
-function Sky({ dusk, green, active, mobile, children }) {
+function Sky({ dusk, green, opacity, mobile, children }) {
   const hill = hillColours(green, dusk);
   const gradientId = dusk ? "lunaHillDusk" : "lunaHillDay";
 
@@ -36,7 +41,7 @@ function Sky({ dusk, green, active, mobile, children }) {
         inset: 0,
         overflow: "hidden",
         background: skyGradient(dusk),
-        opacity: active ? 1 : 0,
+        opacity,
       }}
     >
       {children}
@@ -92,12 +97,44 @@ const MOON = {
   face: "#33415C",
 };
 
+/**
+ * Where the sphere hangs, as the fractions of the viewport it is placed by. It
+ * keeps to the top-right corner, which is why a phone's shortcuts stop three
+ * across rather than running a fourth one under it.
+ */
+const CELESTIAL = {
+  desktop: { size: 132, top: 0.07, right: 0.09 },
+  mobile: { size: 92, top: 0.05, right: 0.06 },
+};
+
+/**
+ * How far into night the sky is, taken from the sphere's own angle rather than
+ * from a clock of its own.
+ *
+ * The sun faces us at 0 and has turned right away at ±π, so what is left of the
+ * daylight is the fraction of the sunlit hemisphere still pointing this way.
+ * Cosine rather than the raw angle, because that is how much of a turning ball
+ * you can actually see — the light holds while the sun crosses the front and
+ * then goes quickly as it drops over the limb.
+ */
+export const nightFraction = (theta) => (1 - Math.cos(theta)) / 2;
+
+/**
+ * The colour the page's title and icons take over this wallpaper.
+ *
+ * Both ends are the accent the theme would have settled on anyway, so at rest
+ * this is exactly the colour everything else on the site is written in; it is
+ * only the journey between them that belongs to the sky.
+ */
+const inkFor = (night) =>
+  scaleColour(themes.light.accent, themes.dark.accent, night);
+
 export default function Wallpaper() {
   const { theme, themeName } = useTheme();
   const mobile = useContext(MobileContext);
   const luna = lunaPalette(themeName);
   const dusk = luna.dusk;
-  const bodySize = mobile ? 92 : 132;
+  const body = mobile ? CELESTIAL.mobile : CELESTIAL.desktop;
 
   /*
    * A single turn, driven frame by frame rather than by a CSS transition: the
@@ -147,20 +184,38 @@ export default function Wallpaper() {
     };
   }, [target]);
 
+  const night = nightFraction(spin.theta);
+  const ink = inkFor(night);
+
+  // The title and the icon row sit over this wallpaper but are siblings of the
+  // scene, so the colour reaches them as a custom property on the document.
+  useEffect(() => {
+    document.documentElement.style.setProperty(INK_VAR, ink);
+  }, [ink]);
+
+  // Handed back when the desktop is left, so every other scene is written in
+  // the theme's own accent again.
+  useEffect(
+    () => () => document.documentElement.style.removeProperty(INK_VAR),
+    []
+  );
+
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       <style>{`
-        .utWallpaperLayer { transition: opacity 900ms ease; }
-        .utStars { position: absolute; inset: 0; transition: opacity 1100ms ease 200ms; }
-        @media (prefers-reduced-motion: reduce) {
-          .utWallpaperLayer, .utStars { transition-duration: 1ms; }
-        }
+        .utStars { position: absolute; inset: 0; }
       `}</style>
 
-      <Sky dusk={false} green={theme.secondaryAccent} active={!dusk} mobile={mobile} />
+      {/*
+        Day is the ground the night is drawn over, so there is never a frame
+        part-way through where both are half-there and the hill goes pale.
+      */}
+      <Sky dusk={false} green={theme.secondaryAccent} opacity={1} mobile={mobile} />
 
-      <Sky dusk green={theme.secondaryAccent} active={dusk} mobile={mobile}>
-        <div className="utStars" style={{ opacity: dusk ? 1 : 0 }}>
+      <Sky dusk green={theme.secondaryAccent} opacity={night} mobile={mobile}>
+        {/* Squared, so the stars hold off until the sky is properly dark
+            rather than hanging in a blue one. */}
+        <div className="utStars" style={{ opacity: night * night }}>
           <StarField colour="#FFFFFF" active={dusk} />
         </div>
       </Sky>
@@ -168,14 +223,14 @@ export default function Wallpaper() {
       <div
         style={{
           position: "absolute",
-          top: mobile ? "5%" : "7%",
-          right: mobile ? "6%" : "9%",
-          width: bodySize,
-          height: bodySize,
+          top: `${body.top * 100}%`,
+          right: `${body.right * 100}%`,
+          width: body.size,
+          height: body.size,
         }}
       >
         <CelestialSphere
-          size={bodySize}
+          size={body.size}
           theta={spin.theta}
           effort={spin.effort}
           sun={SUN}

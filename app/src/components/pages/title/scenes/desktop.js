@@ -5,7 +5,8 @@ import {
   faEye,
   faEyeSlash,
   faFolder,
-  faPalette,
+  faMoon,
+  faSun,
 } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../../themes/ThemeProvider";
 import { MobileContext } from "../../../../contexts/MobileContext";
@@ -13,6 +14,7 @@ import { noSelect } from "../utilities/valueChangerElements/styles";
 import { SUBDOMAIN_APPS, appHref, launchApp } from "../../../../subdomains";
 import { lunaPalette } from "../utilities/desktopElements/luna";
 import Wallpaper from "../utilities/desktopElements/Wallpaper";
+import ShortcutArrow from "../utilities/desktopElements/ShortcutArrow";
 import DesktopIcon, {
   DesktopIconStyles,
   ICON_HEIGHT,
@@ -25,9 +27,12 @@ import Taskbar, { TASKBAR_HEIGHT } from "../utilities/desktopElements/Taskbar";
 import StartMenu, {
   StartMenuStyles,
 } from "../utilities/desktopElements/StartMenu";
+import BalloonTip, {
+  BalloonTipStyles,
+} from "../utilities/desktopElements/BalloonTip";
 
 const SCENES_FOLDER = "scenes";
-const DISPLAY_PROPERTIES = "display";
+const CHANGE_THEME = "changeTheme";
 const SHOW_DESKTOP = "showDesktop";
 const GRID_GAP = 6;
 // Once the pointer crosses back over where the drag started, the band collapses
@@ -41,28 +46,44 @@ const CELL_WIDTH = ICON_WIDTH + GRID_GAP;
 const CELL_HEIGHT = ICON_HEIGHT + GRID_GAP;
 // A press has to travel this far before it counts as a drag rather than a click.
 const DRAG_THRESHOLD = 4;
+// A finger that lifts is followed by a mouse press in the same place, which is
+// how a phone lets pages that only know about mice work at all. This is how
+// long that echo is watched for.
+const TOUCH_ECHO_MS = 700;
+
+/** The point a press or a move is at, whether a mouse or a finger carried it. */
+const pointOf = (event) =>
+  event.touches?.[0] ?? event.changedTouches?.[0] ?? event;
+
+// A phone's row stops at three even where a fourth would fit, because the sun
+// and moon hangs in the top-right corner and the fourth icon lands on its face.
+const MOBILE_COLUMNS = 3;
 
 /** How many shortcuts fit across and down, once the taskbar is accounted for. */
-const measureGrid = () => ({
-  columns: Math.max(
+const measureGrid = (mobile) => {
+  const across = Math.max(
     1,
     Math.floor((window.innerWidth - GRID_LEFT + GRID_GAP) / CELL_WIDTH)
-  ),
-  rows: Math.max(
-    1,
-    Math.floor(
-      (window.innerHeight - TASKBAR_HEIGHT - GRID_TOP + GRID_GAP) / CELL_HEIGHT
-    )
-  ),
-});
+  );
+  return {
+    columns: mobile ? Math.min(MOBILE_COLUMNS, across) : across,
+    rows: Math.max(
+      1,
+      Math.floor(
+        (window.innerHeight - TASKBAR_HEIGHT - GRID_TOP + GRID_GAP) / CELL_HEIGHT
+      )
+    ),
+  };
+};
 
-function useGridExtent() {
-  const [extent, setExtent] = useState(measureGrid);
+function useGridExtent(mobile) {
+  const [extent, setExtent] = useState(() => measureGrid(mobile));
   useEffect(() => {
-    const onResize = () => setExtent(measureGrid());
+    const onResize = () => setExtent(measureGrid(mobile));
+    onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [mobile]);
   return extent;
 }
 
@@ -74,9 +95,9 @@ function useGridExtent() {
  * column runs off the bottom while the whole width goes unused, so there the
  * icons fill a row at a time instead.
  */
-const homePosition = (index, extent, rowFirst) => {
-  const column = rowFirst ? index % extent.columns : Math.floor(index / extent.rows);
-  const row = rowFirst ? Math.floor(index / extent.columns) : index % extent.rows;
+const homePosition = (index, extent, mobile) => {
+  const column = mobile ? index % extent.columns : Math.floor(index / extent.rows);
+  const row = mobile ? Math.floor(index / extent.columns) : index % extent.rows;
   return { x: GRID_LEFT + column * CELL_WIDTH, y: GRID_TOP + row * CELL_HEIGHT };
 };
 
@@ -120,6 +141,10 @@ const rectBetween = (from, to) => ({
  *
  * `onOpenScene` comes from the title page, which owns the scene registry. The
  * launcher is a prop so a test can watch it rather than navigate the runner.
+ *
+ * Every other scene nudges a first-time visitor by shaking the title. A title
+ * jittering over a desktop read as a glitch rather than an invitation, so here
+ * the same nudge arrives as XP always delivered one: a balloon out of the tray.
  */
 export default function Desktop({
   sceneNames = [],
@@ -129,6 +154,8 @@ export default function Desktop({
   visibleUI = true,
   onToggleTheme = () => {},
   onToggleVisibleUI = () => {},
+  showHint = false,
+  onDismissHint = () => {},
 }) {
   const { themeName } = useTheme();
   const mobile = useContext(MobileContext);
@@ -138,10 +165,13 @@ export default function Desktop({
   // that selection on release was why dragging a band appeared to do nothing.
   const [selected, setSelected] = useState([]);
   const [positions, setPositions] = useState({});
-  const extent = useGridExtent();
+  const extent = useGridExtent(mobile);
   // The press in progress, and whether it has travelled far enough to be a drag.
   const iconDrag = useRef(null);
   const draggedRef = useRef(false);
+  // When a finger last touched anything, so the mouse press it echoes can be
+  // told apart from a real one.
+  const lastTouch = useRef(0);
   const [startOpen, setStartOpen] = useState(false);
   const [folder, setFolder] = useState(null); // null | "open" | "minimized"
   const [marquee, setMarquee] = useState(null);
@@ -160,9 +190,11 @@ export default function Desktop({
       description: `${sceneNames.length} scenes`,
     },
     {
-      key: DISPLAY_PROPERTIES,
-      name: "Display Properties",
-      icon: faPalette,
+      key: CHANGE_THEME,
+      name: "Change Theme",
+      // The glyph is the theme being offered rather than the one in force, the
+      // same way round as the page's own toggle.
+      icon: themeName === "dark" ? faSun : faMoon,
       description: "Switch between light and dark",
       run: onToggleTheme,
     },
@@ -187,7 +219,17 @@ export default function Desktop({
    */
   const grabHandlers = (entry, index) => ({
     start: (event) => {
-      if (event.button !== 0) return;
+      if (event.type === "touchstart") {
+        lastTouch.current = Date.now();
+      } else {
+        // A finger that lifts is followed by a mouse press in the same place.
+        // Letting that echo start a second gesture would clear the drag the
+        // icon is about to swallow its click with, and the shortcut would open
+        // under a finger that had only moved it.
+        if (Date.now() - lastTouch.current < TOUCH_ECHO_MS) return;
+        if (event.button !== 0) return;
+      }
+      const point = pointOf(event);
 
       // Dragging an icon that is part of a selection takes the whole selection
       // with it, which is what a selection is for. Dragging one that is not
@@ -206,8 +248,8 @@ export default function Desktop({
         primary: entry.key,
         keys: group,
         origins,
-        originX: event.clientX,
-        originY: event.clientY,
+        originX: point.clientX,
+        originY: point.clientY,
       };
       draggedRef.current = false;
     },
@@ -222,15 +264,20 @@ export default function Desktop({
     const move = (event) => {
       const active = iconDrag.current;
       if (!active) return;
+      const point = pointOf(event);
+      if (point.clientX === undefined) return;
       if (
         !draggedRef.current &&
-        Math.hypot(event.clientX - active.originX, event.clientY - active.originY) <
+        Math.hypot(point.clientX - active.originX, point.clientY - active.originY) <
           DRAG_THRESHOLD
       )
         return;
       draggedRef.current = true;
-      const dx = event.clientX - active.originX;
-      const dy = event.clientY - active.originY;
+      // Once it is a drag the finger belongs to the icon; without this the page
+      // rubber-bands under it and the browser sends a click afterwards anyway.
+      if (event.cancelable) event.preventDefault();
+      const dx = point.clientX - active.originX;
+      const dy = point.clientY - active.originY;
       setPositions((prev) => {
         const next = { ...prev };
         active.keys.forEach((key) => {
@@ -240,7 +287,8 @@ export default function Desktop({
         return next;
       });
     };
-    const end = () => {
+    const end = (event) => {
+      if (event?.type?.startsWith("touch")) lastTouch.current = Date.now();
       const active = iconDrag.current;
       iconDrag.current = null;
       if (!active || !draggedRef.current) return;
@@ -263,11 +311,20 @@ export default function Desktop({
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", end);
+    // A phone sends no mouse event until the finger has already come back up,
+    // which is far too late to drag anything with, so the same gesture is
+    // followed in touch events as well.
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", end);
+    window.addEventListener("touchcancel", end);
     return () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", end);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
     };
-  }, []);
+  }, [mobile]);
 
   const open = useCallback(
     (entry) => {
@@ -394,6 +451,7 @@ export default function Desktop({
       <DesktopIconStyles hoverColour={luna.hover} />
       <LunaWindowStyles />
       <StartMenuStyles />
+      <BalloonTipStyles />
 
       <div style={{ position: "absolute", inset: 0, zIndex: 1 }}>
         {shortcuts.map((entry, index) => (
@@ -402,6 +460,7 @@ export default function Desktop({
             icon={entry.icon}
             label={entry.name}
             href={entry.url ? appHref(entry) : null}
+            shortcut={Boolean(entry.url)}
             selected={isSelected(entry)}
             position={positionOf(entry, index)}
             onSelect={() => setSelected([entry.key])}
@@ -475,10 +534,15 @@ export default function Desktop({
                     border: `1px solid ${current ? luna.selectionEdge : "transparent"}`,
                   }}
                 >
-                  <FontAwesomeIcon
-                    icon={faDisplay}
-                    style={{ fontSize: "1.4rem", color: luna.frame }}
-                  />
+                  {/* Every scene in here is a shortcut to somewhere else, and
+                      Windows said so with a corner arrow. */}
+                  <span style={{ position: "relative", display: "inline-flex" }}>
+                    <FontAwesomeIcon
+                      icon={faDisplay}
+                      style={{ fontSize: "1.4rem", color: luna.frame }}
+                    />
+                    <ShortcutArrow size={11} />
+                  </span>
                   <span
                     style={{ wordBreak: "break-word", textAlign: "center" }}
                   >
@@ -505,6 +569,21 @@ export default function Desktop({
         title sits at z-index 10 in this same stacking context and the icon row
         at 100. The site's corner buttons stay above everything at 9999.
       */}
+      {/*
+        The hint only makes sense while the title is actually on screen — with
+        the page hidden there is nothing for it to point at.
+      */}
+      {showHint && visibleUI && (
+        <BalloonTip
+          title="Tip"
+          bottomInset={TASKBAR_HEIGHT}
+          onClose={onDismissHint}
+        >
+          Hey, do you know that you can change scenes by clicking the title
+          button?
+        </BalloonTip>
+      )}
+
       <Taskbar
         startOpen={startOpen}
         onToggleStart={() => setStartOpen((prev) => !prev)}

@@ -38,7 +38,10 @@ export function spinEase(t) {
     return -WIND_BACK * (1 - (1 - u) ** 3);
   }
   const u = (t - WIND_UNTIL) / (1 - WIND_UNTIL);
-  const cubic = u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2;
+
+  const cubic = u < 0.5
+    ? (1 - Math.sqrt(1 - Math.pow(2 * u, 2))) / 2
+    : (Math.sqrt(1 - Math.pow(-2 * u + 2, 2)) + 1) / 2;
   return -WIND_BACK + (1 + WIND_BACK) * cubic;
 }
 
