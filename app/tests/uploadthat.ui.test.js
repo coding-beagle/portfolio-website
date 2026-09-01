@@ -222,6 +222,38 @@ describe("files", () => {
   });
 });
 
+describe("leaving", () => {
+  jest.setTimeout(15000);
+
+  it("only offers to end the session to the device that opened it", async () => {
+    await openSession(true);
+    // The owner really can end it, on a phone as much as anywhere.
+    expect(
+      screen.getByRole("button", { name: /End session and delete files/ })
+    ).toHaveTextContent("End");
+  });
+});
+
+describe("the gate", () => {
+  jest.setTimeout(15000);
+
+  it("stays gone once the device has been let in", async () => {
+    await openSession();
+    const phone = await server.joinAsOtherDevice();
+    await findGate();
+
+    userEvent.click(screen.getByRole("button", { name: /let it in/i }));
+    await waitFor(async () => expect(await phone.sessionKey()).not.toBeNull(), POLL_GRACE);
+
+    // The manifest that still lists the join is up to a poll out of date, and
+    // the gate used to be rebuilt from it the instant it was dismissed.
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    expect(
+      screen.queryByRole("dialog", { name: /Confirm the other device/i })
+    ).toBeNull();
+  });
+});
+
 describe("the shared note", () => {
   it("sends what is typed, encrypted, after a pause", async () => {
     jest.useFakeTimers();

@@ -68,6 +68,10 @@ export default function useBridge() {
   const publicKeyRef = useRef(null);
   const noteSentRef = useRef("");
   const noteDirtyRef = useRef(false);
+  // Joins already answered. The manifest that still lists one is up to two
+  // seconds stale, and without this the gate reappears the moment it is
+  // dismissed — cleared and then immediately rebuilt from the old poll.
+  const handledJoins = useRef(new Set());
   sessionRef.current = session;
 
   const reset = useCallback(() => {
@@ -78,6 +82,7 @@ export default function useBridge() {
     publicKeyRef.current = null;
     noteSentRef.current = "";
     noteDirtyRef.current = false;
+    handledJoins.current = new Set();
     setSession(null);
     setManifest(null);
     setHandshake(null);
@@ -265,7 +270,8 @@ export default function useBridge() {
   }, [session, reset]);
 
   // --- the owner deciding who gets in ----------------------------------
-  const pending = manifest?.joins?.[0] ?? null;
+  const pending =
+    (manifest?.joins ?? []).find((join) => !handledJoins.current.has(join.id)) ?? null;
   useEffect(() => {
     if (!pending || !session || session.role !== "owner") return;
     if (handshake?.join?.id === pending.id) return;
@@ -297,6 +303,7 @@ export default function useBridge() {
   const admit = useCallback(async () => {
     const current = sessionRef.current;
     if (!current || !handshake?.join) return;
+    handledJoins.current.add(handshake.join.id);
     try {
       const wrapped = await wrapSessionKey(handshake.wrappingKey, keyRef.current);
       await approveJoin(current, handshake.join.id, wrapped);
@@ -310,6 +317,7 @@ export default function useBridge() {
   const turnAway = useCallback(async () => {
     const current = sessionRef.current;
     if (!current || !handshake?.join) return;
+    handledJoins.current.add(handshake.join.id);
     try {
       await rejectJoin(current, handshake.join.id);
       setHandshake(null);

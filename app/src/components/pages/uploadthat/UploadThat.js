@@ -220,11 +220,13 @@ export default function UploadThat() {
             })}
           >
             <FontAwesomeIcon icon={faPowerOff} />
-            {mobile
-              ? "End"
-              : session.role === "owner"
-                ? "End session"
-                : "Leave"}
+            {/* A guest cannot end anything: leaving is all it does, on any
+                screen size. */}
+            {session.role !== "owner"
+              ? "Leave"
+              : mobile
+                ? "End"
+                : "End session"}
           </button>
         </div>
       ) : (

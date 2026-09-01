@@ -76,7 +76,7 @@ export default function HandshakeGate({ handshake, onAdmit, onTurnAway }) {
 
       <p style={{ margin: "0 0 1em", fontSize: "0.86rem", opacity: 0.75, maxWidth: "42em" }}>
         {isOwner
-          ? "Check the other device is showing these same four digits, then let it in. If they differ, something is sitting between you — turn it away."
+          ? "Check the other device is showing these same four digits, then let it in. If they differ, something is sitting between you, so turn it away."
           : "Check the device that started the session is showing these same four digits. It has to let you in before anything is shared."}
       </p>
 
@@ -91,7 +91,7 @@ export default function HandshakeGate({ handshake, onAdmit, onTurnAway }) {
             })}
           >
             <FontAwesomeIcon icon={faCheck} />
-            They match — let it in
+            They match, let it in
           </button>
           <button
             className="utControl"
