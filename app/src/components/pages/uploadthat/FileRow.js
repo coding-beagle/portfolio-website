@@ -8,7 +8,7 @@ import {
   faTrashCan,
 } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "../../../themes/ThemeProvider";
-import { downloadFile, saveBlob } from "./api";
+import { saveBlob } from "./api";
 import { canPreview, isImage, loadPreview } from "./preview";
 import ImageLightbox from "./ImageLightbox";
 
@@ -27,7 +27,7 @@ const formatBytes = (bytes) => {
  * so nothing downloads megabytes over mobile data that nobody wanted to see.
  * Either way the bytes are fetched once and reused for both sizes.
  */
-function Thumbnail({ session, file }) {
+function Thumbnail({ session, file, getFile }) {
   const { theme } = useTheme();
   const [url, setUrl] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -38,7 +38,7 @@ function Thumbnail({ session, file }) {
   useEffect(() => {
     if (!previewable) return undefined;
     let live = true;
-    loadPreview(session, file).then((next) => {
+    loadPreview(session, file, getFile).then((next) => {
       if (live) setUrl(next);
     });
     return () => {
@@ -54,7 +54,7 @@ function Thumbnail({ session, file }) {
       return;
     }
     setLoading(true);
-    const next = await loadPreview(session, file);
+    const next = await loadPreview(session, file, getFile);
     setLoading(false);
     if (next) {
       setUrl(next);
@@ -113,7 +113,7 @@ function Thumbnail({ session, file }) {
 }
 
 /** One file in the session: what it is, and the two things you can do to it. */
-export default function FileRow({ session, file, onRemove }) {
+export default function FileRow({ session, file, getFile, onRemove }) {
   const { theme } = useTheme();
   const [busy, setBusy] = useState(false);
 
@@ -140,7 +140,7 @@ export default function FileRow({ session, file, onRemove }) {
         borderBottom: `1px solid ${theme.accent}14`,
       }}
     >
-      <Thumbnail session={session} file={file} />
+      <Thumbnail session={session} file={file} getFile={getFile} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           style={{
@@ -164,7 +164,7 @@ export default function FileRow({ session, file, onRemove }) {
         onClick={async () => {
           setBusy(true);
           try {
-            saveBlob(await downloadFile(session, file.id), file.name);
+            saveBlob(await getFile(file), file.name);
           } finally {
             setBusy(false);
           }

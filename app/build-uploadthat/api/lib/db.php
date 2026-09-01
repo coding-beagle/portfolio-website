@@ -92,9 +92,26 @@ function ut_migrate(PDO $pdo): void
         )
     SQL);
 
+    // Columns added after the first deploy. CREATE TABLE IF NOT EXISTS does
+    // nothing to a table that already exists, so anything new has to be added
+    // explicitly or an upgraded install quietly runs without it.
+    ut_add_column($pdo, 'sessions', 'note', "TEXT NOT NULL DEFAULT ''");
+
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_members_token ON members(token)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_files_session ON files(session_id)');
+}
+
+/** Adds a column if the table does not have it yet. */
+function ut_add_column(PDO $pdo, string $table, string $column, string $definition): void
+{
+    $statement = $pdo->query('PRAGMA table_info(' . $table . ')');
+    foreach ($statement->fetchAll() as $row) {
+        if ($row['name'] === $column) {
+            return;
+        }
+    }
+    $pdo->exec("ALTER TABLE $table ADD COLUMN $column $definition");
 }
 
 /** A v4 UUID from real randomness. */

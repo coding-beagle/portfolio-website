@@ -110,7 +110,17 @@ PHP over SQLite in `php/uploadthat`, copied into the build output by
 `scripts/finish-uploadthat-build.js` — the deploy target wipes the document
 root, so the API has to arrive as build output rather than be placed there once.
 
-The design, including the phase 2 encryption work, is written up separately.
+Files, their names and the shared note are encrypted in the browser and never
+reach the server in the clear. The session key is generated on the device that
+opens the session and never sent: a joining device gets it wrapped to a secret
+the two devices derive between them over ECDH, and both show four digits from
+the same transcript so a person can confirm nothing altered the exchange. A
+join code on its own is not a credential — a device that presents one is
+*pending*, and its token opens nothing until the owner admits it.
+
+That means a lost tab is lost files: the key lives in memory only, so a reload
+ends the session. It also means you cannot see what is passing through, which
+is the deliberate trade for making it public.
 
 ### Setting it up on the server
 

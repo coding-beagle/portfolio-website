@@ -94,7 +94,7 @@ foreach ($sources as $source) {
 echo "\nuploadthat store\n";
 
 // --- sessions ----------------------------------------------------------
-$session = ut_create_session('anon');
+$session = ut_create_session('anon', 'b3duZXIta2V5');
 checkThat('a new session gets a six-digit code', (bool) preg_match('/^[1-9]\d{5}$/', $session['code']));
 checkThat('a new session gets a token', strlen($session['token']) > 30);
 check('the clock starts at the tier window', $session['expires_at'] - $session['created_at'], 900);
@@ -107,8 +107,8 @@ check('as the owner', $auth['role'], 'owner');
 check('a token that was never issued does not authenticate', ut_authenticate('nonsense'), null);
 check('nor does no token at all', ut_authenticate(null), null);
 
-// --- joining -----------------------------------------------------------
-$joined = ut_join_session($session['code']);
+// --- joining and the handshake ----------------------------------------
+$joined = ut_join_session($session['code'], 'am9pbmVyLWtleQ==');
 checkThat('a live code can be joined', $joined !== null);
 check('the joiner lands in the same session', $joined['session']['id'], $session['id']);
 $guest = ut_authenticate($joined['token']);
@@ -116,6 +116,50 @@ check('the joiner is a guest', $guest['role'], 'guest');
 check('and is labelled as the second device', $guest['label'], 'Device 2');
 checkThat('the two devices get different tokens', $joined['token'] !== $session['token']);
 check('an unknown code cannot be joined', ut_join_session('000000'), null);
+
+// A code alone gets you a token that opens nothing: this is what makes
+// guessing one pointless, and it is the whole security of a six-digit code.
+check('a joiner starts out pending, not admitted', $guest['status'], 'pending');
+check('and has no wrapped key to open anything with', $guest['wrapped_key'], null);
+check('the owner sees it waiting', count(ut_pending_joins($session['id'])), 1);
+check(
+    'along with the public key it offered',
+    ut_pending_joins($session['id'])[0]['pubkey'],
+    'am9pbmVyLWtleQ=='
+);
+check('the owner carries its own public key', $auth['owner_pubkey'], 'b3duZXIta2V5');
+
+checkThat(
+    'approving hands over the wrapped key',
+    ut_approve_join($session['id'], $joined['member_id'], 'd3JhcHBlZA==')
+);
+$guest = ut_authenticate($joined['token']);
+check('and the joiner is in', $guest['status'], 'active');
+check('with the key waiting for it', $guest['wrapped_key'], 'd3JhcHBlZA==');
+check(
+    'nothing is left waiting afterwards',
+    count(ut_pending_joins($session['id'])),
+    0
+);
+check(
+    'approving twice does nothing the second time',
+    ut_approve_join($session['id'], $joined['member_id'], 'd3JhcHBlZA=='),
+    false
+);
+
+$rejected = ut_join_session($session['code'], 'cmVqZWN0ZWQ=');
+checkThat('a join can be turned away instead', ut_reject_join($session['id'], $rejected['member_id']));
+check('which removes it entirely', ut_authenticate($rejected['token']), null);
+
+// --- the shared note ---------------------------------------------------
+check('a session starts with an empty note', ut_manifest($session['id'])['note'], '');
+$noteVersion = ut_manifest($session['id'])['version'];
+ut_set_note($session['id'], 'Y2lwaGVydGV4dA==');
+check('the note is stored as it arrived', ut_manifest($session['id'])['note'], 'Y2lwaGVydGV4dA==');
+checkThat(
+    'and changing it bumps the version the poll watches',
+    ut_manifest($session['id'])['version'] > $noteVersion
+);
 
 // --- files -------------------------------------------------------------
 $meta = base64_encode(json_encode(['name' => 'notes.txt', 'type' => 'text/plain']));

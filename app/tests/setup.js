@@ -8,3 +8,10 @@ import "@testing-library/jest-dom";
 const { TextEncoder, TextDecoder } = require("util");
 if (typeof global.TextEncoder === "undefined") global.TextEncoder = TextEncoder;
 if (typeof global.TextDecoder === "undefined") global.TextDecoder = TextDecoder;
+
+// jsdom provides no `crypto` at all. Node's WebCrypto is the same API the
+// browser exposes, so the encryption is exercised for real rather than mocked.
+const { webcrypto } = require("crypto");
+if (typeof global.crypto === "undefined" || !global.crypto.subtle) {
+  Object.defineProperty(global, "crypto", { value: webcrypto, configurable: true });
+}

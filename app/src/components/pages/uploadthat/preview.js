@@ -1,9 +1,10 @@
 /**
  * Thumbnails for image files.
  *
- * There is no URL a browser can put straight into an `<img>`: downloads need an
- * Authorization header, so a preview means fetching the bytes and building an
- * object URL from them. That is the same shape phase 2 will need — fetch, then
+ * There is no URL a browser can put straight into an `<img>`: a download needs
+ * an Authorization header and arrives as ciphertext, so a preview means
+ * fetching, decrypting, and building an object URL from the result. Only that
+ * first part is passed in — nothing here touches a key. That is the same shape phase 2 will need — fetch, then
  * decrypt, then build the URL — so nothing here has to change when encryption
  * lands, only what happens in between.
  *
@@ -11,7 +12,6 @@
  * the cache the two-second manifest poll would re-fetch every image on every
  * tick.
  */
-import { downloadFile } from "./api";
 
 // Beyond this, fetching a thumbnail nobody asked for is not worth the download,
 // least of all on a phone using mobile data. It is a cap on what loads *by
@@ -39,15 +39,17 @@ const keyOf = (session, file) => `${session.sessionId}:${file.id}`;
  * application/octet-stream so nothing can render inline on the domain. Only
  * `image/*` is honoured, and only ever inside an `<img>`.
  */
-export function loadPreview(session, file) {
+export function loadPreview(session, file, getFile) {
   const key = keyOf(session, file);
   if (cache.has(key)) {
     return cache.get(key);
   }
 
-  const pending = downloadFile(session, file.id)
-    .then((blob) => blob.arrayBuffer())
-    .then((bytes) => URL.createObjectURL(new Blob([bytes], { type: file.type })))
+  // `getFile` returns a Blob already decrypted and typed from the file's own
+  // description — not from the response, which is deliberately
+  // application/octet-stream so nothing can render inline on the domain.
+  const pending = getFile(file)
+    .then((blob) => URL.createObjectURL(blob))
     .catch(() => null);
 
   cache.set(key, pending);

@@ -4,8 +4,6 @@
  */
 import {
   ApiError,
-  decodeMeta,
-  encodeMeta,
   fetchManifest,
   createSession,
   joinSession,
@@ -38,31 +36,6 @@ afterEach(() => {
   delete global.fetch;
 });
 
-describe("file metadata", () => {
-  it("round-trips a name and type", () => {
-    const encoded = encodeMeta({ name: "notes.txt", type: "text/plain" });
-    expect(decodeMeta(encoded)).toEqual({ name: "notes.txt", type: "text/plain" });
-  });
-
-  it("survives names btoa alone would choke on", () => {
-    // btoa throws on anything outside Latin-1, which is most of the world's
-    // filenames — the encoder goes through UTF-8 bytes for exactly this.
-    const meta = { name: "résumé — 履歴書.pdf", type: "application/pdf" };
-    expect(decodeMeta(encodeMeta(meta))).toEqual(meta);
-  });
-
-  it("is base64, which is what the server checks and never decodes", () => {
-    expect(encodeMeta({ name: "a.txt" })).toMatch(/^[A-Za-z0-9+/]+=*$/);
-  });
-
-  it("shows an unreadable description as a file rather than blanking the list", () => {
-    expect(decodeMeta("not base64 at all!!")).toEqual({
-      name: "Unreadable file",
-      type: "",
-    });
-  });
-});
-
 describe("errors", () => {
   it("carries the server's code so the UI can act on it", async () => {
     stubFetch([{ status: 429, body: { error: { code: "rate_limited", message: "Too many." } } }]);
@@ -87,26 +60,30 @@ describe("errors", () => {
 });
 
 describe("session calls", () => {
-  it("only sends an operator key when there is one", async () => {
+  it("always sends a public key, and an operator key only when there is one", async () => {
     const calls = stubFetch([{ status: 201, body: { sessionId: "s" } }]);
-    await createSession();
-    expect(JSON.parse(calls[0].options.body)).toEqual({});
+    await createSession({ publicKey: "pubA" });
+    expect(JSON.parse(calls[0].options.body)).toEqual({ publicKey: "pubA" });
 
     const withKey = stubFetch([{ status: 201, body: { sessionId: "s" } }]);
-    await createSession({ operatorKey: "hunter2" });
-    expect(JSON.parse(withKey[0].options.body)).toEqual({ operatorKey: "hunter2" });
+    await createSession({ operatorKey: "hunter2", publicKey: "pubA" });
+    expect(JSON.parse(withKey[0].options.body)).toEqual({
+      operatorKey: "hunter2",
+      publicKey: "pubA",
+    });
   });
 
-  it("posts the code to join", async () => {
+  it("posts the code and the joining device's key", async () => {
     const calls = stubFetch([{ status: 200, body: { sessionId: "s", token: "t" } }]);
-    await joinSession("482913");
+    await joinSession("482913", "pubB");
     expect(calls[0].url).toBe("/api/join/482913");
     expect(calls[0].options.method).toBe("POST");
+    expect(JSON.parse(calls[0].options.body)).toEqual({ publicKey: "pubB" });
   });
 });
 
 describe("the polled manifest", () => {
-  it("decodes each file's description into a usable name", async () => {
+  it("passes descriptions through untouched — they are ciphertext here", async () => {
     stubFetch([
       {
         status: 200,
@@ -114,21 +91,16 @@ describe("the polled manifest", () => {
         body: {
           version: 3,
           expiresAt: 100,
-          files: [
-            { id: "f1", size: 12, meta: encodeMeta({ name: "a.txt", type: "text/plain" }), uploadedBy: "Device 2" },
-          ],
+          files: [{ id: "f1", size: 12, meta: "c2VhbGVk", uploadedBy: "Device 2" }],
         },
       },
     ]);
 
     const manifest = await fetchManifest(session);
     expect(manifest.etag).toBe('"v3-1111"');
-    expect(manifest.files[0]).toMatchObject({
-      id: "f1",
-      name: "a.txt",
-      type: "text/plain",
-      uploadedBy: "Device 2",
-    });
+    // No decoding here: only the hook has the key.
+    expect(manifest.files[0].meta).toBe("c2VhbGVk");
+    expect(manifest.files[0].name).toBeUndefined();
   });
 
   it("sends the etag back and reports an unchanged session as null", async () => {

@@ -6,10 +6,14 @@
  * end, so there is no CORS here by design; if you ever need it, that is a sign
  * something is being served from the wrong place.
  *
- * Phase 1 carries plaintext: `meta` holds readable JSON and no key material
- * moves. The shape is already phase 2's — the server treats `meta` as opaque
- * and never looks inside it — so adding encryption changes the client and two
- * new endpoints, not this file's contract.
+ * Nothing here can read anything it stores. File bodies, their descriptions and
+ * the shared note all arrive encrypted and leave the same way; the only key
+ * material that passes through is public keys and a key wrapped to a secret
+ * this server cannot derive.
+ *
+ * A join code is not a credential. Presenting one gets a device a token that
+ * opens nothing — it is *pending* until the owner approves it and hands over
+ * the wrapped key, which is why guessing a live code is not worth doing.
  */
 
 declare(strict_types=1);
@@ -91,6 +95,21 @@ function ut_handle_request(): void
         if ($action === 'files' && $method === 'POST') {
             ut_route_upload($sessionId);
         }
+        if ($action === 'handshake' && $method === 'GET') {
+            ut_route_handshake($sessionId);
+        }
+        if ($action === 'note' && $method === 'POST') {
+            ut_route_note($sessionId);
+        }
+    }
+
+    if (preg_match('#^/session/([0-9a-f-]{36})/joins/([0-9a-f-]{36})$#', $path, $matches) === 1) {
+        if ($method === 'POST') {
+            ut_route_approve($matches[1], $matches[2]);
+        }
+        if ($method === 'DELETE') {
+            ut_route_reject($matches[1], $matches[2]);
+        }
     }
 
     if (preg_match('#^/session/([0-9a-f-]{36})/files/([0-9a-f-]{36})$#', $path, $matches) === 1) {
@@ -117,14 +136,36 @@ function ut_route_path(): string
     return $path === '' ? '/' : $path;
 }
 
-/** The caller, or a 401. */
-function ut_require_auth(string $sessionId): array
+/** The caller, whatever state it is in, or a 401. */
+function ut_require_member(string $sessionId): array
 {
     $auth = ut_authenticate(ut_bearer());
     if ($auth === null || $auth['s_id'] !== $sessionId) {
         ut_fail(401, 'unauthorised', 'This session has ended, or the link is not valid.');
     }
     return $auth;
+}
+
+/**
+ * The caller, and only once it is really in. A device that has joined but not
+ * been approved holds a token that reaches nothing but the handshake.
+ */
+function ut_require_auth(string $sessionId): array
+{
+    $auth = ut_require_member($sessionId);
+    if ($auth['status'] !== 'active') {
+        ut_fail(403, 'pending', 'Waiting for the other device to let you in.');
+    }
+    return $auth;
+}
+
+/** Public keys and wrapped keys: base64, and no bigger than they should be. */
+function ut_require_base64(string $value, int $max, string $what): string
+{
+    if ($value === '' || strlen($value) > $max || base64_decode($value, true) === false) {
+        ut_fail(400, 'bad_request', $what);
+    }
+    return $value;
 }
 
 function ut_route_create(): void
@@ -173,7 +214,13 @@ function ut_route_create(): void
         }
     }
 
-    $session = ut_create_session($tier);
+    $publicKey = ut_require_base64(
+        (string) ($body['publicKey'] ?? ''),
+        200,
+        'A public key is required to open a session.'
+    );
+
+    $session = ut_create_session($tier, $publicKey);
 
     ut_json(201, [
         'sessionId' => $session['id'],
@@ -181,6 +228,7 @@ function ut_route_create(): void
         'token' => $session['token'],
         'memberId' => $session['member_id'],
         'role' => 'owner',
+        'status' => 'active',
         'label' => 'Device 1',
         'tier' => $tier,
         'expiresAt' => $session['expires_at'],
@@ -195,7 +243,13 @@ function ut_route_join(string $code): void
         ut_fail(429, 'rate_limited', 'Too many join attempts. Try again later.');
     }
 
-    $joined = ut_join_session($code);
+    $publicKey = ut_require_base64(
+        (string) (ut_body()['publicKey'] ?? ''),
+        200,
+        'A public key is required to join a session.'
+    );
+
+    $joined = ut_join_session($code, $publicKey);
     if ($joined === null) {
         // Deliberately the same answer for "never existed" and "already over",
         // so the endpoint cannot be used to map which codes are live.
@@ -208,11 +262,79 @@ function ut_route_join(string $code): void
         'token' => $joined['token'],
         'memberId' => $joined['member_id'],
         'role' => 'guest',
+        // Nothing but the handshake works until the owner approves it.
+        'status' => 'pending',
+        'ownerPublicKey' => (string) $joined['session']['owner_pubkey'],
         'tier' => $joined['session']['tier'],
         'expiresAt' => (int) $joined['session']['expires_at'],
         'ceilingAt' => (int) $joined['session']['ceiling_at'],
         'limits' => ut_tier($joined['session']['tier']),
     ]);
+}
+
+/**
+ * What a device that has joined is waiting for: whether it has been let in and,
+ * once it has, the session key wrapped for it.
+ *
+ * The one endpoint a pending token reaches, which is what lets a device poll
+ * for its own approval without being able to read anything yet.
+ */
+function ut_route_handshake(string $sessionId): void
+{
+    $auth = ut_require_member($sessionId);
+    ut_json(200, [
+        'status' => $auth['status'],
+        'ownerPublicKey' => (string) $auth['owner_pubkey'],
+        'wrappedKey' => $auth['wrapped_key'] === null ? null : (string) $auth['wrapped_key'],
+    ]);
+}
+
+function ut_route_approve(string $sessionId, string $memberId): void
+{
+    $auth = ut_require_auth($sessionId);
+    if ($auth['role'] !== 'owner') {
+        ut_fail(403, 'not_owner', 'Only the device that opened the session can admit others.');
+    }
+
+    $wrapped = ut_require_base64(
+        (string) (ut_body()['wrappedKey'] ?? ''),
+        512,
+        'A wrapped key is required to admit a device.'
+    );
+
+    if (!ut_approve_join($sessionId, $memberId, $wrapped)) {
+        ut_fail(404, 'no_join', 'That device is no longer waiting.');
+    }
+    ut_json(200, ['approved' => true]);
+}
+
+function ut_route_reject(string $sessionId, string $memberId): void
+{
+    $auth = ut_require_auth($sessionId);
+    if ($auth['role'] !== 'owner') {
+        ut_fail(403, 'not_owner', 'Only the device that opened the session can admit others.');
+    }
+    if (!ut_reject_join($sessionId, $memberId)) {
+        ut_fail(404, 'no_join', 'That device is no longer waiting.');
+    }
+    ut_json(200, ['rejected' => true]);
+}
+
+/**
+ * The shared note. Stored exactly as it arrives — base64 of ciphertext — and
+ * checked only for being that, because reading it is not this server's business.
+ */
+function ut_route_note(string $sessionId): void
+{
+    ut_require_auth($sessionId);
+
+    $note = (string) (ut_body()['note'] ?? '');
+    if ($note !== '' && (strlen($note) > 65536 || base64_decode($note, true) === false)) {
+        ut_fail(400, 'bad_note', 'That note is too large, or not in the expected form.');
+    }
+
+    ut_set_note($sessionId, $note);
+    ut_json(200, ['saved' => true]);
 }
 
 function ut_route_heartbeat(string $sessionId): void
@@ -255,7 +377,27 @@ function ut_route_manifest(string $sessionId): void
 {
     $auth = ut_require_auth($sessionId);
     $manifest = ut_manifest($sessionId);
-    $manifest['you'] = ['memberId' => $auth['id'], 'label' => $auth['label'], 'role' => $auth['role']];
+    $manifest['you'] = [
+        'memberId' => $auth['id'],
+        'label' => $auth['label'],
+        'role' => $auth['role'],
+        'status' => $auth['status'],
+    ];
+
+    // Devices waiting to be let in ride along with the poll the owner is
+    // already making, rather than costing an endpoint and a request of their
+    // own. Only the owner can admit anyone, so only the owner is told.
+    if ($auth['role'] === 'owner') {
+        $manifest['joins'] = array_map(
+            static fn(array $row): array => [
+                'id' => $row['id'],
+                'label' => $row['label'],
+                'publicKey' => (string) $row['pubkey'],
+                'createdAt' => (int) $row['created_at'],
+            ],
+            ut_pending_joins($sessionId)
+        );
+    }
 
     $etag = '"v' . $manifest['version'] . '-' . substr($sessionId, 0, 8) . '"';
     $sent = trim((string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));

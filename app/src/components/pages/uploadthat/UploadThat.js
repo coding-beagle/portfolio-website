@@ -14,6 +14,8 @@ import { releasePreviews } from "./preview";
 import QrCode from "./QrCode";
 import DropZone from "./DropZone";
 import FileRow, { formatBytes } from "./FileRow";
+import HandshakeGate from "./HandshakeGate";
+import { forgetKey, rememberKey, rememberedKey } from "./operatorKey";
 import ThemeToggle from "../../common/ThemeToggle";
 
 /** The code in the address bar, if someone arrived from a QR scan. */
@@ -34,7 +36,10 @@ export { formatBytes };
 function useCountdown(expiresAt) {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
-    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    const timer = setInterval(
+      () => setNow(Math.floor(Date.now() / 1000)),
+      1000,
+    );
     return () => clearInterval(timer);
   }, []);
   return expiresAt ? Math.max(0, expiresAt - now) : null;
@@ -44,11 +49,18 @@ export default function UploadThat() {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
   const bridge = useBridge();
-  const { session, manifest, error, busy, transfers } = bridge;
+  const { session, manifest, error, busy, transfers, handshake } = bridge;
 
   const [code, setCode] = useState("");
-  const [operatorKey, setOperatorKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  // A key that has worked before comes back with the field already open, so it
+  // is one button to start a session rather than three.
+  const [operatorKey, setOperatorKey] = useState(rememberedKey);
+  const [showKey, setShowKey] = useState(() => rememberedKey() !== "");
+
+  // Only remembered once the server has accepted it, so a typo never sticks.
+  useEffect(() => {
+    if (session?.tier === "operator" && operatorKey) rememberKey(operatorKey);
+  }, [session, operatorKey]);
   // On a phone the code and QR are what you needed a minute ago, not what you
   // need now, so they fold away behind a button and the files get the screen.
   const [showJoinPanel, setShowJoinPanel] = useState(false);
@@ -71,13 +83,13 @@ export default function UploadThat() {
     () => () => {
       if (sessionId) releasePreviews(sessionId);
     },
-    [sessionId]
+    [sessionId],
   );
 
   const remaining = useCountdown(manifest?.expiresAt ?? session?.expiresAt);
   const joinUrl = useMemo(
     () => (session ? `${window.location.origin}/#/j/${session.code}` : ""),
-    [session]
+    [session],
   );
   const joinPanelVisible = !mobile || showJoinPanel;
 
@@ -147,7 +159,9 @@ export default function UploadThat() {
           {/* Kept at the far end from the destructive button, so the two are
               never a mis-tap apart. */}
           <ThemeToggle />
-          <span style={{ flex: 1, minWidth: 0, fontSize: "0.8rem", opacity: 0.7 }}>
+          <span
+            style={{ flex: 1, minWidth: 0, fontSize: "0.8rem", opacity: 0.7 }}
+          >
             {remaining !== null && (
               <>
                 ends in{" "}
@@ -164,7 +178,7 @@ export default function UploadThat() {
             )}
           </span>
 
-          {mobile && (
+          {mobile && session.status !== "pending" && (
             <button
               className="utControl"
               onClick={() => setShowJoinPanel((previous) => !previous)}
@@ -206,7 +220,11 @@ export default function UploadThat() {
             })}
           >
             <FontAwesomeIcon icon={faPowerOff} />
-            {mobile ? "End" : session.role === "owner" ? "End session" : "Leave"}
+            {mobile
+              ? "End"
+              : session.role === "owner"
+                ? "End session"
+                : "Leave"}
           </button>
         </div>
       ) : (
@@ -286,30 +304,60 @@ export default function UploadThat() {
             </button>
             <div style={{ marginTop: "0.9em" }}>
               {showKey ? (
-                <input
-                  value={operatorKey}
-                  onChange={(event) => setOperatorKey(event.target.value)}
-                  type="password"
-                  placeholder="operator key"
-                  aria-label="Operator key"
-                  style={{
-                    width: "100%",
-                    maxWidth: 280,
-                    boxSizing: "border-box",
-                    padding: "0.55em 0.7em",
-                    fontFamily: "monospace",
-                    fontSize: "0.9rem",
-                    color: theme.accent,
-                    background: `${theme.accent}0D`,
-                    border: `1px solid ${theme.accent}33`,
-                    borderRadius: 6,
-                    outline: "none",
-                  }}
-                />
+                <>
+                  <input
+                    value={operatorKey}
+                    onChange={(event) => setOperatorKey(event.target.value)}
+                    type="password"
+                    placeholder="operator key"
+                    aria-label="Operator key"
+                    autoComplete="current-password"
+                    style={{
+                      width: "100%",
+                      maxWidth: 280,
+                      boxSizing: "border-box",
+                      padding: "0.55em 0.7em",
+                      fontFamily: "monospace",
+                      fontSize: "0.9rem",
+                      color: theme.accent,
+                      background: `${theme.accent}0D`,
+                      border: `1px solid ${theme.accent}33`,
+                      borderRadius: 6,
+                      outline: "none",
+                    }}
+                  />
+                  {operatorKey !== "" && (
+                    <button
+                      className="utControl"
+                      onClick={() => {
+                        forgetKey();
+                        setOperatorKey("");
+                        setShowKey(false);
+                      }}
+                      style={{
+                        ...noSelect,
+                        display: "block",
+                        marginTop: "0.5em",
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        fontSize: "0.74rem",
+                        color: theme.accent,
+                        opacity: 0.55,
+                        textDecoration: "underline dotted",
+                        textUnderlineOffset: "0.3em",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Forget this key on this device
+                    </button>
+                  )}
+                </>
               ) : (
                 <button
                   className="utControl"
                   onClick={() => setShowKey(true)}
+                  data-reveal-key=""
                   style={{
                     ...noSelect,
                     background: "none",
@@ -365,7 +413,9 @@ export default function UploadThat() {
                 className="utControl"
                 type="submit"
                 disabled={busy || !/^\d{6}$/.test(code)}
-                style={button({ opacity: busy || !/^\d{6}$/.test(code) ? 0.5 : 1 })}
+                style={button({
+                  opacity: busy || !/^\d{6}$/.test(code) ? 0.5 : 1,
+                })}
               >
                 Join
               </button>
@@ -374,7 +424,15 @@ export default function UploadThat() {
         </>
       )}
 
-      {session && (
+      {session && handshake && (
+        <HandshakeGate
+          handshake={handshake}
+          onAdmit={bridge.admit}
+          onTurnAway={bridge.turnAway}
+        />
+      )}
+
+      {session && session.status !== "pending" && (
         <>
           {joinPanelVisible && (
             <section
@@ -402,7 +460,13 @@ export default function UploadThat() {
                 >
                   {session.code}
                 </p>
-                <p style={{ margin: "0.5em 0 0", fontSize: "0.78rem", opacity: 0.55 }}>
+                <p
+                  style={{
+                    margin: "0.5em 0 0",
+                    fontSize: "0.78rem",
+                    opacity: 0.55,
+                  }}
+                >
                   Scan or type this on the other device.
                 </p>
               </div>
@@ -414,6 +478,32 @@ export default function UploadThat() {
               />
             </section>
           )}
+
+          <section style={{ marginBottom: "1.2em" }}>
+            <h2 style={{ ...label, margin: "0 0 0.5em" }}>Shared note</h2>
+            <textarea
+              value={bridge.note}
+              onChange={(event) => bridge.editNote(event.target.value)}
+              aria-label="Shared note"
+              placeholder="Type here and it appears on the other device."
+              rows={mobile ? 3 : 4}
+              spellCheck={false}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                resize: "vertical",
+                padding: "0.7em 0.8em",
+                fontFamily: "monospace",
+                fontSize: "0.9rem",
+                lineHeight: 1.5,
+                color: theme.accent,
+                background: `${theme.accent}0D`,
+                border: `1px solid ${theme.accent}33`,
+                borderRadius: 6,
+                outline: "none",
+              }}
+            />
+          </section>
 
           <DropZone onFiles={bridge.send} />
 
@@ -467,6 +557,7 @@ export default function UploadThat() {
                   key={file.id}
                   session={session}
                   file={file}
+                  getFile={bridge.getFile}
                   onRemove={bridge.remove}
                 />
               ))}

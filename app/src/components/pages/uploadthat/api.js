@@ -4,9 +4,10 @@
  * Kept free of React so the awkward parts — the metadata encoding, the error
  * shape, the conditional manifest fetch — can be tested directly.
  *
- * One contract detail matters more than it looks: `meta` is a base64 string the
- * server stores and returns without ever decoding. Phase 1 puts JSON in it.
- * Phase 2 puts ciphertext in it, and nothing on the server changes.
+ * Nothing here knows what any of it means. File bodies, their descriptions and
+ * the shared note are ciphertext by the time they get here and stay that way
+ * until they are back in the hook that holds the key — this layer only moves
+ * opaque bytes, which is the same thing the server does with them.
  */
 
 const BASE = "/api";
@@ -17,28 +18,6 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.code = code;
     this.status = status;
-  }
-}
-
-/** Base64 that survives non-ASCII filenames, which `btoa` alone does not. */
-export function encodeMeta(meta) {
-  const bytes = new TextEncoder().encode(JSON.stringify(meta));
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
-}
-
-export function decodeMeta(encoded) {
-  try {
-    const binary = atob(encoded);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return JSON.parse(new TextDecoder().decode(bytes));
-  } catch (error) {
-    // A file whose description will not decode is still a file; showing it as
-    // unnamed beats blanking the whole list.
-    return { name: "Unreadable file", type: "" };
   }
 }
 
@@ -90,17 +69,49 @@ async function request(path, { method = "GET", body, session, headers = {} } = {
   return { status: response.status, data, response };
 }
 
-export async function createSession({ operatorKey } = {}) {
+export async function createSession({ operatorKey, publicKey } = {}) {
   const { data } = await request("/session", {
     method: "POST",
-    body: operatorKey ? { operatorKey } : {},
+    body: operatorKey ? { operatorKey, publicKey } : { publicKey },
   });
   return data;
 }
 
-export async function joinSession(code) {
-  const { data } = await request(`/join/${code}`, { method: "POST" });
+export async function joinSession(code, publicKey) {
+  const { data } = await request(`/join/${code}`, {
+    method: "POST",
+    body: { publicKey },
+  });
   return data;
+}
+
+/** What a device that has joined is waiting for: whether it is in yet. */
+export async function fetchHandshake(session) {
+  const { data } = await request(`/session/${session.sessionId}/handshake`, { session });
+  return data;
+}
+
+export async function approveJoin(session, joinId, wrappedKey) {
+  await request(`/session/${session.sessionId}/joins/${joinId}`, {
+    method: "POST",
+    session,
+    body: { wrappedKey },
+  });
+}
+
+export async function rejectJoin(session, joinId) {
+  await request(`/session/${session.sessionId}/joins/${joinId}`, {
+    method: "DELETE",
+    session,
+  });
+}
+
+export async function saveNote(session, note) {
+  await request(`/session/${session.sessionId}/note`, {
+    method: "POST",
+    session,
+    body: { note },
+  });
 }
 
 export async function heartbeat(session) {
@@ -127,26 +138,21 @@ export async function fetchManifest(session, etag) {
   if (status === 304) {
     return null;
   }
-  return {
-    etag: response.headers.get("ETag"),
-    ...data,
-    files: (data.files || []).map((file) => ({
-      ...file,
-      ...decodeMeta(file.meta),
-    })),
-  };
+  // Descriptions come back as they went out: ciphertext. Turning them into
+  // names is the hook's job, because only the hook has the key.
+  return { etag: response.headers.get("ETag"), ...data };
 }
 
 /**
- * Uploads one file. XHR rather than fetch because fetch still cannot report
- * upload progress, and a progress bar is most of what makes a slow phone
- * upload bearable.
+ * Uploads one already-encrypted body. XHR rather than fetch because fetch still
+ * cannot report upload progress, and a progress bar is most of what makes a
+ * slow phone upload bearable.
  */
-export function uploadFile(session, file, { onProgress } = {}) {
+export function uploadFile(session, body, meta, { onProgress } = {}) {
   return new Promise((resolve, reject) => {
     const form = new FormData();
-    form.append("meta", encodeMeta({ name: file.name, type: file.type || "" }));
-    form.append("file", file, "blob");
+    form.append("meta", meta);
+    form.append("file", new Blob([body]), "blob");
 
     const request_ = new XMLHttpRequest();
     request_.open("POST", `${BASE}/session/${session.sessionId}/files`);
@@ -188,6 +194,7 @@ export function uploadFile(session, file, { onProgress } = {}) {
   });
 }
 
+/** The stored ciphertext, for the hook to decrypt. */
 export async function downloadFile(session, fileId) {
   const response = await fetch(`${BASE}/session/${session.sessionId}/files/${fileId}`, {
     headers: authHeaders(session),
@@ -195,7 +202,7 @@ export async function downloadFile(session, fileId) {
   if (!response.ok) {
     throw new ApiError("no_file", "That file is no longer in the session.", response.status);
   }
-  return response.blob();
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 export async function deleteFile(session, fileId) {

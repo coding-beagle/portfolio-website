@@ -101,8 +101,14 @@ fi
 echo
 echo "a session"
 
-body='{}'
-[ -n "$OPERATOR_KEY" ] && body=$(php -r 'echo json_encode(["operatorKey" => $argv[1]]);' "$OPERATOR_KEY")
+# Stand-in public keys: the server checks these are base64 and the right sort
+# of size, and relays them. It cannot do anything with them, which is the point.
+OWNER_KEY=$(php -r 'echo base64_encode(random_bytes(65));')
+GUEST_KEY=$(php -r 'echo base64_encode(random_bytes(65));')
+WRAPPED=$(php -r 'echo base64_encode(random_bytes(60));')
+
+body=$(php -r 'echo json_encode(["publicKey" => $argv[1]]);' "$OWNER_KEY")
+[ -n "$OPERATOR_KEY" ] && body=$(php -r 'echo json_encode(["operatorKey" => $argv[1], "publicKey" => $argv[2]]);' "$OPERATOR_KEY" "$OWNER_KEY")
 
 call -X POST "$BASE/api/session" -H 'Content-Type: application/json' -d "$body"
 created="$REPLY_BODY"
@@ -130,7 +136,8 @@ printf '       tier: %s, code: %s\n' "$TIER" "$CODE"
 # An explicit empty body, not a bodiless POST: curl sends no Content-Length for
 # the latter, and ModSecurity rejects that with a 403 before it reaches PHP.
 # Browsers always send Content-Length: 0, so this matches what the app does.
-call -X POST "$BASE/api/join/$CODE" -H 'Content-Type: application/json' -d '{}' 
+call -X POST "$BASE/api/join/$CODE" -H 'Content-Type: application/json' \
+  -d "$(php -r 'echo json_encode(["publicKey" => $argv[1]]);' "$GUEST_KEY")" 
 joined="$REPLY_BODY"
 GUEST=$(printf '%s' "$joined" | json token)
 if [ "$(printf '%s' "$joined" | json sessionId)" = "$SID" ]; then
@@ -139,6 +146,43 @@ else
   bad "a second device can join with the code" "HTTP $REPLY_STATUS — $(why "$joined")"
 fi
 
+# A code alone must not be enough to read anything: the joiner is pending until
+# the owner hands over the wrapped key, and its token should open nothing.
+check "a joining device starts out pending" "$(printf '%s' "$joined" | json status)" "pending"
+check "and is given the owner's public key to work with" \
+  "$(printf '%s' "$joined" | json ownerPublicKey)" "$OWNER_KEY"
+
+status=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$BASE/api/session/$SID/manifest" \
+  -H "Authorization: Bearer $GUEST")
+check "a pending token cannot read the session" "$status" "403"
+
+call "$BASE/api/session/$SID/manifest" -H "Authorization: Bearer $TOKEN"
+check "the owner is told a device is waiting" \
+  "$(printf '%s' "$REPLY_BODY" | json joins.0.publicKey)" "$GUEST_KEY"
+JOIN_ID=$(printf '%s' "$REPLY_BODY" | json joins.0.id)
+
+call -X POST "$BASE/api/session/$SID/joins/$JOIN_ID" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "$(php -r 'echo json_encode(["wrappedKey" => $argv[1]]);' "$WRAPPED")"
+check "the owner can let it in" "$(printf '%s' "$REPLY_BODY" | json approved)" "1"
+
+call "$BASE/api/session/$SID/handshake" -H "Authorization: Bearer $GUEST"
+check "and the wrapped key is waiting for it" "$(printf '%s' "$REPLY_BODY" | json wrappedKey)" "$WRAPPED"
+
+echo
+echo "the shared note"
+
+NOTE=$(php -r 'echo base64_encode("pretend ciphertext");')
+call -X POST "$BASE/api/session/$SID/note" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "$(php -r 'echo json_encode(["note" => $argv[1]]);' "$NOTE")"
+check "a note can be saved" "$(printf '%s' "$REPLY_BODY" | json saved)" "1"
+
+call "$BASE/api/session/$SID/manifest" -H "Authorization: Bearer $GUEST"
+check "and the other device reads it back unchanged" \
+  "$(printf '%s' "$REPLY_BODY" | json note)" "$NOTE"
+
+echo
 # The heartbeat is a bodiless POST like the two ModSecurity rejected, and the
 # app sends one every 30 seconds — a rule catching it would look like sessions
 # timing out early rather than like a blocked request.

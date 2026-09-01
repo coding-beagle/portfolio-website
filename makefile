@@ -34,6 +34,13 @@ URL ?= https://uploadthat.nteague.com
 smoke_uploadthat:
 	php/uploadthat/tests/smoke.sh "$(URL)" "$(OPERATOR_KEY)"
 
+# run the same HTTP checks locally, against php -S, without deploying anything
+test_uploadthat_http:
+	php/uploadthat/tests/local.sh
+
+# every uploadthat test there is: the store, then the whole API over HTTP
+test_uploadthat_all: test_uploadthat test_uploadthat_http
+
 # clean node modules and build folders
 clean:
 	rm -rf app/node_modules

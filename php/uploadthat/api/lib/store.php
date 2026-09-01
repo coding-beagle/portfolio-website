@@ -30,7 +30,7 @@ function ut_allocate_code(PDO $pdo): string
     throw new RuntimeException('No join code available');
 }
 
-function ut_create_session(string $tier): array
+function ut_create_session(string $tier, string $ownerPublicKey = ''): array
 {
     $pdo = ut_db();
     $limits = ut_tier($tier);
@@ -49,12 +49,13 @@ function ut_create_session(string $tier): array
     $pdo->beginTransaction();
     try {
         $pdo->prepare(
-            'INSERT INTO sessions (id, code, owner_token, tier, version, bytes_used, created_at, expires_at, ceiling_at)
-             VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)'
+            'INSERT INTO sessions (id, code, owner_token, owner_pubkey, tier, version, bytes_used, created_at, expires_at, ceiling_at)
+             VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)'
         )->execute([
             $session['id'],
             $session['code'],
             ut_hash_token($ownerToken),
+            $ownerPublicKey,
             $tier,
             $session['created_at'],
             $session['expires_at'],
@@ -63,9 +64,18 @@ function ut_create_session(string $tier): array
 
         $memberId = ut_uuid();
         $pdo->prepare(
-            'INSERT INTO members (id, session_id, token, role, label, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$memberId, $session['id'], ut_hash_token($ownerToken), 'owner', 'Device 1', 'active', $now]);
+            'INSERT INTO members (id, session_id, token, role, label, pubkey, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $memberId,
+            $session['id'],
+            ut_hash_token($ownerToken),
+            'owner',
+            'Device 1',
+            $ownerPublicKey,
+            'active',
+            $now,
+        ]);
 
         $pdo->commit();
         $session['member_id'] = $memberId;
@@ -79,8 +89,16 @@ function ut_create_session(string $tier): array
     return $session;
 }
 
-/** Adds a device to a session, given its code. Returns null if no such code. */
-function ut_join_session(string $code): ?array
+/**
+ * Adds a device to a session, given its code.
+ *
+ * It arrives *pending*: it has a token, but that token opens nothing until the
+ * owner has approved it and handed over the wrapped key. A code alone is not
+ * enough to read anything, which is what makes guessing one useless.
+ *
+ * @return array|null null if no live session has that code
+ */
+function ut_join_session(string $code, string $publicKey = ''): ?array
 {
     $pdo = ut_db();
     $statement = $pdo->prepare('SELECT * FROM sessions WHERE code = ? AND expires_at > ?');
@@ -97,18 +115,21 @@ function ut_join_session(string $code): ?array
     $token = ut_token();
     $memberId = ut_uuid();
     $pdo->prepare(
-        'INSERT INTO members (id, session_id, token, role, label, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO members (id, session_id, token, role, label, pubkey, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )->execute([
         $memberId,
         $session['id'],
         ut_hash_token($token),
         'guest',
         'Device ' . $ordinal,
-        'active',
+        $publicKey,
+        'pending',
         time(),
     ]);
 
+    // So the owner's next poll actually returns something: the manifest is
+    // ETag'd on the version, and a device waiting to be let in is a change.
     ut_bump_version($session['id']);
 
     return [
@@ -132,7 +153,7 @@ function ut_authenticate(?string $token): ?array
     $hash = ut_hash_token($token);
     $statement = ut_db()->prepare(
         'SELECT m.*, s.id AS s_id, s.code, s.tier, s.version, s.bytes_used,
-                s.created_at AS s_created_at, s.expires_at, s.ceiling_at
+                s.owner_pubkey, s.created_at AS s_created_at, s.expires_at, s.ceiling_at
          FROM members m JOIN sessions s ON s.id = m.session_id
          WHERE m.token = ?'
     );
@@ -145,6 +166,55 @@ function ut_authenticate(?string $token): ?array
         return null;
     }
     return $row;
+}
+
+/** The joins waiting on the owner, with the public key each one offered. */
+function ut_pending_joins(string $sessionId): array
+{
+    $statement = ut_db()->prepare(
+        'SELECT id, label, pubkey, created_at FROM members
+         WHERE session_id = ? AND status = ? ORDER BY created_at ASC'
+    );
+    $statement->execute([$sessionId, 'pending']);
+    return $statement->fetchAll();
+}
+
+/**
+ * Lets a pending device in, storing the key the owner wrapped for it.
+ *
+ * The server keeps the wrapped key only long enough to hand it over. It cannot
+ * unwrap it: doing that needs a private key that never left either device.
+ */
+function ut_approve_join(string $sessionId, string $memberId, string $wrappedKey): bool
+{
+    $pdo = ut_db();
+    $statement = $pdo->prepare(
+        'UPDATE members SET status = ?, wrapped_key = ?
+         WHERE id = ? AND session_id = ? AND status = ?'
+    );
+    $statement->execute(['active', $wrappedKey, $memberId, $sessionId, 'pending']);
+    if ($statement->rowCount() === 0) {
+        return false;
+    }
+    ut_bump_version($sessionId);
+    return true;
+}
+
+function ut_reject_join(string $sessionId, string $memberId): bool
+{
+    $statement = ut_db()->prepare(
+        'DELETE FROM members WHERE id = ? AND session_id = ? AND status = ?'
+    );
+    $statement->execute([$memberId, $sessionId, 'pending']);
+    return $statement->rowCount() > 0;
+}
+
+/** The shared note: one opaque string the server stores and never reads. */
+function ut_set_note(string $sessionId, string $note): void
+{
+    $pdo = ut_db();
+    $pdo->prepare('UPDATE sessions SET note = ?, version = version + 1 WHERE id = ?')
+        ->execute([$note, $sessionId]);
 }
 
 function ut_bump_version(string $sessionId): int
@@ -170,7 +240,9 @@ function ut_manifest(string $sessionId): array
 {
     $pdo = ut_db();
 
-    $statement = $pdo->prepare('SELECT version, expires_at, bytes_used, tier FROM sessions WHERE id = ?');
+    $statement = $pdo->prepare(
+        'SELECT version, expires_at, bytes_used, tier, note FROM sessions WHERE id = ?'
+    );
     $statement->execute([$sessionId]);
     $session = $statement->fetch();
     if ($session === false) {
@@ -204,6 +276,9 @@ function ut_manifest(string $sessionId): array
         'expiresAt' => (int) $session['expires_at'],
         'bytesUsed' => (int) $session['bytes_used'],
         'limits' => $limits,
+        // Opaque, like the file descriptions: ciphertext going out, ciphertext
+        // coming back, and nothing in between that can read it.
+        'note' => (string) ($session['note'] ?? ''),
         'files' => $files,
     ];
 }

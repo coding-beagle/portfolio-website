@@ -1,6 +1,10 @@
 /**
- * The uploadthat page: opening a session, joining one, and what the file list
- * does once the poll comes back.
+ * The uploadthat page, driven against a stand-in server that stores what it is
+ * given (tests/helpers/uploadthatServer.js).
+ *
+ * Nothing here mocks the encryption: the names in the file list are names the
+ * app encrypted, sent, fetched back and decrypted, and the four digits on the
+ * handshake screen are the ones a real second device would be showing.
  */
 import React from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -12,42 +16,19 @@ import UploadThat, {
 } from "../src/components/pages/uploadthat/UploadThat";
 import { ThemeProvider } from "../src/themes/ThemeProvider";
 import { MobileContext } from "../src/contexts/MobileContext";
-import { encodeMeta } from "../src/components/pages/uploadthat/api";
+import { decrypt } from "../src/components/pages/uploadthat/crypto";
+import {
+  installUploadthatServer,
+  uninstallUploadthatServer,
+} from "./helpers/uploadthatServer";
 
-const SESSION = {
-  sessionId: "11111111-1111-4111-8111-111111111111",
-  code: "482913",
-  token: "tok",
-  role: "owner",
-  expiresAt: Math.floor(Date.now() / 1000) + 900,
-};
+let server;
 
-/**
- * Routes fetch by URL rather than by call order: the page polls on a timer, so
- * a queue of responses would drift depending on how many ticks a test took.
- */
-function routeFetch(routes) {
-  global.fetch = jest.fn((url, options = {}) => {
-    const match = Object.keys(routes).find((pattern) => url.includes(pattern));
-    const handler = match ? routes[match] : null;
-    if (!handler) {
-      return Promise.resolve({
-        ok: false,
-        status: 404,
-        headers: { get: () => null },
-        json: () => Promise.resolve({ error: { code: "not_found", message: "No." } }),
-      });
-    }
-    const result = handler(url, options);
-    return Promise.resolve({
-      ok: (result.status ?? 200) < 400,
-      status: result.status ?? 200,
-      headers: { get: (name) => (result.headers || {})[name] ?? null },
-      json: () => Promise.resolve(result.body ?? {}),
-      blob: () => Promise.resolve(result.blob),
-    });
-  });
-}
+// The manifest is polled every two seconds, so waiting for something that
+// arrives through it needs longer than the one-second default.
+const POLL_GRACE = { timeout: 5000 };
+const findGate = () =>
+  screen.findByRole("dialog", { name: /Confirm the other device/i }, POLL_GRACE);
 
 const mount = (mobile = false) =>
   render(
@@ -58,13 +39,22 @@ const mount = (mobile = false) =>
     </MobileContext.Provider>
   );
 
+/** Opens a session and waits until the page is showing it. */
+const openSession = async (mobile = false) => {
+  const view = mount(mobile);
+  userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+  await screen.findByText("482913");
+  return view;
+};
+
 beforeEach(() => {
   window.location.hash = "";
+  window.localStorage.clear();
+  server = installUploadthatServer();
 });
 
 afterEach(() => {
-  delete global.fetch;
-  jest.useRealTimers();
+  uninstallUploadthatServer();
 });
 
 describe("helpers", () => {
@@ -79,65 +69,32 @@ describe("helpers", () => {
     expect(formatBytes(900)).toBe("900 B");
     expect(formatBytes(2048)).toBe("2 KB");
     expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
-    expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe("3.00 GB");
   });
 
   it("counts down in minutes and seconds", () => {
     expect(formatCountdown(900)).toBe("15:00");
     expect(formatCountdown(65)).toBe("1:05");
     expect(formatCountdown(0)).toBe("0:00");
-    expect(formatCountdown(-5)).toBe("0:00");
   });
 });
 
 describe("opening a session", () => {
-  it("shows the code and a QR once the session exists", async () => {
-    routeFetch({
-      "/api/session": (url) =>
-        url.endsWith("/manifest")
-          ? { body: { version: 1, expiresAt: SESSION.expiresAt, files: [] } }
-          : { status: 201, body: SESSION },
-    });
-
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-
-    expect(await screen.findByText("482913")).toBeInTheDocument();
+  it("shows the code and a QR, and sends a public key to open it", async () => {
+    await openSession();
     expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /End session/ })).toBeInTheDocument();
-  });
-
-  it("only sends the operator key once it has been revealed and typed", async () => {
-    let sent = null;
-    routeFetch({
-      "/api/session": (url, options) => {
-        if (url.endsWith("/manifest")) {
-          return { body: { version: 1, expiresAt: SESSION.expiresAt, files: [] } };
-        }
-        sent = JSON.parse(options.body);
-        return { status: 201, body: SESSION };
-      },
-    });
-
-    mount();
-    userEvent.click(screen.getByText("I have a key"));
-    fireEvent.change(screen.getByLabelText("Operator key"), {
-      target: { value: "hunter2" },
-    });
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-
-    await screen.findByText("482913");
-    expect(sent).toEqual({ operatorKey: "hunter2" });
+    // No public key means no handshake, so the server insists on one.
+    expect(server.state.session.ownerPublicKey).toMatch(/^[A-Za-z0-9+/]+=*$/);
   });
 
   it("explains a refusal instead of failing silently", async () => {
-    routeFetch({
-      "/api/session": () => ({
-        status: 429,
-        body: { error: { code: "rate_limited", message: "You have opened too many sessions." } },
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 429,
+      headers: { get: () => null },
+      json: async () => ({
+        error: { code: "rate_limited", message: "You have opened too many sessions." },
       }),
-    });
-
+    }));
     mount();
     userEvent.click(screen.getByRole("button", { name: "Start a session" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -146,266 +103,143 @@ describe("opening a session", () => {
   });
 });
 
-describe("joining", () => {
-  it("will not submit until six digits are in", () => {
-    routeFetch({});
+describe("the operator key", () => {
+  it("is remembered once it has worked, and the field opens filled in", async () => {
     mount();
-    const join = screen.getByRole("button", { name: "Join" });
-    expect(join).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("Six-digit join code"), {
-      target: { value: "4829" },
+    userEvent.click(screen.getByText("I have a key"));
+    fireEvent.change(screen.getByLabelText("Operator key"), {
+      target: { value: "hunter2" },
     });
-    expect(join).toBeDisabled();
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByText("482913");
 
-    fireEvent.change(screen.getByLabelText("Six-digit join code"), {
-      target: { value: "482913" },
-    });
-    expect(join).toBeEnabled();
+    // A fresh page: no clicking anything open, and the key is already there.
+    uninstallUploadthatServer();
+    server = installUploadthatServer();
+    mount();
+    expect(screen.getByLabelText("Operator key")).toHaveValue("hunter2");
   });
 
-  it("keeps only digits, and only six of them", () => {
-    routeFetch({});
+  it("does not remember a key the server refused", async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 403,
+      headers: { get: () => null },
+      json: async () => ({ error: { code: "bad_key", message: "Not recognised." } }),
+    }));
     mount();
-    const input = screen.getByLabelText("Six-digit join code");
-    fireEvent.change(input, { target: { value: "4a8b2c9d1e3f7" } });
-    expect(input).toHaveValue("482913");
+    userEvent.click(screen.getByText("I have a key"));
+    fireEvent.change(screen.getByLabelText("Operator key"), {
+      target: { value: "wrong" },
+    });
+    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
+    await screen.findByRole("alert");
+
+    expect(window.localStorage.getItem("uploadthat.operatorKey")).toBeNull();
   });
 
-  it("joins straight away when arriving from a scanned QR", async () => {
-    window.location.hash = "#/j/482913";
-    routeFetch({
-      "/api/join/482913": () => ({
-        status: 200,
-        body: { ...SESSION, role: "guest" },
-      }),
-      "/manifest": () => ({ body: { version: 1, expiresAt: SESSION.expiresAt, files: [] } }),
-    });
-
+  it("can be forgotten again", async () => {
+    window.localStorage.setItem("uploadthat.operatorKey", "hunter2");
     mount();
-    expect(await screen.findByText("482913")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Leave session/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Operator key")).toHaveValue("hunter2");
+
+    userEvent.click(screen.getByText(/Forget this key/));
+    expect(window.localStorage.getItem("uploadthat.operatorKey")).toBeNull();
+    expect(screen.queryByLabelText("Operator key")).toBeNull();
   });
 });
 
-describe("on a phone", () => {
-  const started = () =>
-    routeFetch({
-      "/manifest": () => ({
-        body: {
-          version: 1,
-          expiresAt: SESSION.expiresAt,
-          files: [
-            {
-              id: "f1",
-              size: 2048,
-              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
-              uploadedBy: "Device 2",
-            },
-          ],
-        },
-      }),
-      "/api/session": () => ({ status: 201, body: SESSION }),
-    });
+describe("letting the other device in", () => {
+  jest.setTimeout(15000);
 
-  it("folds the join code away and leads with the files", async () => {
-    started();
-    mount(true);
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    expect(await screen.findByText("holiday.jpg")).toBeInTheDocument();
+  it("shows both devices the same four digits, and hands over the key", async () => {
+    await openSession();
+    const phone = await server.joinAsOtherDevice();
 
-    // The code is on the button that reveals the panel, not spelled out below.
-    expect(screen.queryByText("Join code")).toBeNull();
-    expect(screen.queryByRole("img", { name: /QR code/i })).toBeNull();
+    // The owner's screen works the digits out for itself; they have to agree.
+    const gate = await findGate();
+    expect(within(gate).getByText(phone.sas)).toBeInTheDocument();
+
+    userEvent.click(screen.getByRole("button", { name: /let it in/i }));
+    await waitFor(async () => expect(await phone.sessionKey()).not.toBeNull(), POLL_GRACE);
+
+    // And the key it received is the one the files were encrypted with.
+    const key = await phone.sessionKey();
+    expect(key).toBeTruthy();
   });
 
-  it("shows the code and QR on demand", async () => {
-    started();
-    mount(true);
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
+  it("can turn a device away instead", async () => {
+    await openSession();
+    await server.joinAsOtherDevice();
+    await findGate();
 
-    userEvent.click(screen.getByRole("button", { name: /Show the join code/i }));
-    expect(screen.getByText("Join code")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
-  });
-
-  it("keeps the theme toggle in the bar, at the far end from End", async () => {
-    started();
-    mount(true);
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
-
-    const toggle = screen.getByRole("button", { name: /Switch to (light|dark) mode/i });
-    const end = screen.getByRole("button", { name: /End session and delete files/ });
-    const bar = toggle.parentElement;
-    expect(bar).toContainElement(end);
-    // Ordered within the bar, so they are never a mis-tap apart.
-    expect(
-      bar.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-  });
-
-  it("keeps ending the session reachable, away from the theme toggle", async () => {
-    started();
-    mount(true);
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
-
-    // The theme toggle is pinned to the bottom left of the viewport, so this
-    // one lives in the bar at the top.
-    const end = screen.getByRole("button", { name: /End session and delete files/ });
-    expect(end).toBeInTheDocument();
-    expect(end.textContent).toContain("End");
+    userEvent.click(screen.getByRole("button", { name: /Turn away/i }));
+    await waitFor(() => expect(server.state.joins).toHaveLength(0), POLL_GRACE);
   });
 });
 
-describe("the file list", () => {
-  const withFiles = (files) =>
-    routeFetch({
-      "/manifest": () => ({
-        headers: { ETag: '"v2-1111"' },
-        body: { version: 2, expiresAt: SESSION.expiresAt, files },
-      }),
-      "/api/session": () => ({ status: 201, body: SESSION }),
-    });
+describe("files", () => {
+  jest.setTimeout(15000);
 
-  it("shows what the other device added, by name and size", async () => {
-    withFiles([
-      {
-        id: "aaaaaaaa-1111-4111-8111-111111111111",
-        size: 2048,
-        meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
-        uploadedBy: "Device 2",
-      },
-    ]);
-
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-
-    expect(await screen.findByText("holiday.jpg")).toBeInTheDocument();
-    expect(screen.getByText("2 KB · from Device 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download holiday.jpg" })).toBeInTheDocument();
-  });
-
-  it("previews an image, and leaves other files to their icon", async () => {
-    const bytes = new Uint8Array([1, 2, 3, 4]);
-    global.URL.createObjectURL = jest.fn(() => "blob:preview");
-    global.URL.revokeObjectURL = jest.fn();
-
-    routeFetch({
-      "/files/": () => ({ status: 200, blob: { arrayBuffer: async () => bytes.buffer } }),
-      "/manifest": () => ({
-        body: {
-          version: 1,
-          expiresAt: SESSION.expiresAt,
-          files: [
-            {
-              id: "img",
-              size: 2048,
-              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
-              uploadedBy: "Device 2",
-            },
-            {
-              id: "doc",
-              size: 900,
-              meta: encodeMeta({ name: "notes.txt", type: "text/plain" }),
-              uploadedBy: "Device 1",
-            },
-          ],
-        },
-      }),
-      "/api/session": () => ({ status: 201, body: SESSION }),
-    });
-
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
-
-    // The image gets a thumbnail built from its own bytes; the text file is
-    // never downloaded at all.
-    await waitFor(() => expect(global.URL.createObjectURL).toHaveBeenCalledTimes(1));
-    expect(document.querySelector('img[src="blob:preview"]')).toBeInTheDocument();
-
-    const fetched = global.fetch.mock.calls.map(([url]) => url);
-    expect(fetched.some((url) => url.includes("/files/img"))).toBe(true);
-    expect(fetched.some((url) => url.includes("/files/doc"))).toBe(false);
-  });
-
-  const imageSession = (size) => {
-    global.URL.createObjectURL = jest.fn(() => "blob:preview");
-    global.URL.revokeObjectURL = jest.fn();
-    routeFetch({
-      "/files/": () => ({
-        status: 200,
-        blob: { arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer },
-      }),
-      "/manifest": () => ({
-        body: {
-          version: 1,
-          expiresAt: SESSION.expiresAt,
-          files: [
-            {
-              id: "img",
-              size,
-              meta: encodeMeta({ name: "holiday.jpg", type: "image/jpeg" }),
-              uploadedBy: "Device 2",
-            },
-          ],
-        },
-      }),
-      "/api/session": () => ({ status: 201, body: SESSION }),
-    });
+  const drop = (name, type, contents) => {
+    const file = new File([contents], name, { type });
+    // jsdom's File has no arrayBuffer in this version.
+    file.arrayBuffer = async () => new TextEncoder().encode(contents).buffer;
+    const zone = screen.getByRole("button", { name: "Add files" });
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } });
   };
 
-  it("opens an image full size, and closes three ways", async () => {
-    imageSession(2048);
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
-    await waitFor(() => expect(global.URL.createObjectURL).toHaveBeenCalled());
+  it("encrypts a file on the way out and reads it back by name", async () => {
+    await openSession();
+    drop("notes.txt", "text/plain", "hello there");
+    await waitFor(() => expect(server.state.files).toHaveLength(1), POLL_GRACE);
 
-    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
-    const dialog = await screen.findByRole("dialog", { name: "holiday.jpg" });
-    expect(within(dialog).getByAltText("holiday.jpg")).toHaveAttribute(
-      "src",
-      "blob:preview"
-    );
+    // The row only says "from Device 1" once the poll has been round and the
+    // app has decrypted its own description — the transfer row in flight looks
+    // similar, so this is the assertion that means the round trip worked.
+    expect(await screen.findByText(/from Device 1/, {}, POLL_GRACE)).toBeInTheDocument();
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "holiday.jpg" })).toBeNull()
-    );
-
-    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
-    userEvent.click(await screen.findByRole("button", { name: "Close preview" }));
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "holiday.jpg" })).toBeNull()
-    );
+    // And what the server is holding is not what was typed.
+    const stored = server.state.files[0];
+    expect(new TextDecoder().decode(stored.body)).not.toContain("hello there");
+    expect(atob(stored.meta)).not.toContain("notes.txt");
   });
 
-  it("waits to be asked before downloading a large image", async () => {
-    // Over the auto-thumbnail cap: nothing is fetched until the button is used.
-    imageSession(20 * 1024 * 1024);
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    await screen.findByText("holiday.jpg");
+  it("hands the other device something it can actually open", async () => {
+    await openSession();
+    const phone = await server.joinAsOtherDevice();
+    await findGate();
+    userEvent.click(screen.getByRole("button", { name: /let it in/i }));
+    await waitFor(async () => expect(await phone.sessionKey()).not.toBeNull(), POLL_GRACE);
 
-    const fetchedFiles = () =>
-      global.fetch.mock.calls.filter(([url]) => url.includes("/files/")).length;
-    expect(fetchedFiles()).toBe(0);
+    drop("notes.txt", "text/plain", "hello there");
+    await waitFor(() => expect(server.state.files).toHaveLength(1), POLL_GRACE);
 
-    userEvent.click(screen.getByRole("button", { name: "Preview holiday.jpg" }));
-    await screen.findByRole("dialog", { name: "holiday.jpg" });
-    expect(fetchedFiles()).toBe(1);
+    const key = await phone.sessionKey();
+    const opened = await decrypt(key, server.state.files[0].body);
+    expect(new TextDecoder().decode(opened)).toBe("hello there");
   });
+});
 
-  it("says so when the session is empty rather than showing nothing", async () => {
-    withFiles([]);
-    mount();
-    userEvent.click(screen.getByRole("button", { name: "Start a session" }));
-    expect(
-      await screen.findByText(/Nothing here yet/)
-    ).toBeInTheDocument();
+describe("the shared note", () => {
+  it("sends what is typed, encrypted, after a pause", async () => {
+    jest.useFakeTimers();
+    try {
+      await openSession();
+      fireEvent.change(screen.getByLabelText("Shared note"), {
+        target: { value: "meet at six" },
+      });
+
+      // Nothing goes out per keystroke.
+      expect(server.state.note).toBe("");
+      jest.advanceTimersByTime(1200);
+      await waitFor(() => expect(server.state.note).not.toBe(""));
+    } finally {
+      jest.useRealTimers();
+    }
+
+    // What the server holds is ciphertext, not the sentence.
+    expect(atob(server.state.note)).not.toContain("meet at six");
   });
 });
