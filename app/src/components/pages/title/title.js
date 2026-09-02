@@ -53,6 +53,7 @@ import Backrooms from "./scenes/backrooms";
 import BZ from "./scenes/bz";
 import Hyperspace from "./scenes/hyperspace";
 import Desktop from "./scenes/desktop";
+import Lissajous from "./scenes/lissajous";
 
 // Split out: react-markdown is a large dependency and the panel sits behind a
 // click, so it is only fetched once the blog is opened for the first time.
@@ -88,6 +89,7 @@ const Scenes = {
   26: { component: Hyperspace, name: "hyperspace" },
   27: { component: WindTunnel, name: "windtunnel" },
   28: { component: Desktop, name: "desktop" },
+  29: { component: Lissajous, name: "lissajous" },
 };
 
 export default function Title({
