@@ -2,6 +2,10 @@ import React, { useContext, useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
+  faCheck,
+  faChevronDown,
+  faChevronRight,
+  faCopy,
   faPowerOff,
   faQrcode,
 } from "@fortawesome/free-solid-svg-icons";
@@ -64,6 +68,11 @@ export default function UploadThat() {
   // On a phone the code and QR are what you needed a minute ago, not what you
   // need now, so they fold away behind a button and the files get the screen.
   const [showJoinPanel, setShowJoinPanel] = useState(false);
+  const [noteCopied, setNoteCopied] = useState(false);
+  // A phone is nearly always the second device. Joining is what it came here to
+  // do, so that goes first and opening a session — which you do from whichever
+  // machine the files are on — folds away behind a button.
+  const [showStart, setShowStart] = useState(false);
 
   useEffect(() => {
     const scanned = codeFromHash(window.location.hash);
@@ -92,6 +101,16 @@ export default function UploadThat() {
     [session],
   );
   const joinPanelVisible = !mobile || showJoinPanel;
+  const startVisible = !mobile || showStart;
+
+  const copyNote = () => {
+    navigator.clipboard?.writeText(bridge.note);
+    setNoteCopied(true);
+    setTimeout(() => setNoteCopied(false), 1200);
+  };
+
+  // A tick left over from the old note would read as a copy of the new one.
+  useEffect(() => setNoteCopied(false), [bridge.note]);
 
   const label = {
     ...noSelect,
@@ -114,6 +133,175 @@ export default function UploadThat() {
     transition: "background 0.2s ease",
     ...extra,
   });
+
+  const startBlock = (
+    <section key="start" style={{ marginBottom: mobile ? 0 : "2.4em" }}>
+      {mobile ? (
+        <button
+          className="utControl"
+          onClick={() => setShowStart((previous) => !previous)}
+          aria-expanded={showStart}
+          style={{
+            ...noSelect,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.6em",
+            background: "none",
+            border: "none",
+            padding: 0,
+            fontFamily: "inherit",
+            ...label,
+            opacity: 0.75,
+            cursor: "pointer",
+            color: theme.accent,
+          }}
+        >
+          <FontAwesomeIcon
+            icon={showStart ? faChevronDown : faChevronRight}
+            style={{ fontSize: "0.62rem" }}
+          />
+          Or start a session
+        </button>
+      ) : (
+        <h2 style={{ ...label, margin: "0 0 0.8em" }}>Start a session</h2>
+      )}
+
+      {startVisible && (
+        <div style={{ marginTop: mobile ? "1em" : 0 }}>
+          <button
+            className="utControl"
+            onClick={() => bridge.open(operatorKey)}
+            disabled={busy}
+            style={button({ opacity: busy ? 0.6 : 1 })}
+          >
+            {busy ? "Opening…" : "Start a session"}
+          </button>
+          <div style={{ marginTop: "0.9em" }}>
+            {showKey ? (
+              <>
+                <input
+                  value={operatorKey}
+                  onChange={(event) => setOperatorKey(event.target.value)}
+                  type="password"
+                  placeholder="operator key"
+                  aria-label="Operator key"
+                  autoComplete="current-password"
+                  style={{
+                    width: "100%",
+                    maxWidth: 280,
+                    boxSizing: "border-box",
+                    padding: "0.55em 0.7em",
+                    fontFamily: "monospace",
+                    fontSize: "0.9rem",
+                    color: theme.accent,
+                    background: `${theme.accent}0D`,
+                    border: `1px solid ${theme.accent}33`,
+                    borderRadius: 6,
+                    outline: "none",
+                  }}
+                />
+                {operatorKey !== "" && (
+                  <button
+                    className="utControl"
+                    onClick={() => {
+                      forgetKey();
+                      setOperatorKey("");
+                      setShowKey(false);
+                    }}
+                    style={{
+                      ...noSelect,
+                      display: "block",
+                      marginTop: "0.5em",
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      fontSize: "0.74rem",
+                      color: theme.accent,
+                      opacity: 0.55,
+                      textDecoration: "underline dotted",
+                      textUnderlineOffset: "0.3em",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Forget this key on this device
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                className="utControl"
+                onClick={() => setShowKey(true)}
+                data-reveal-key=""
+                style={{
+                  ...noSelect,
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  fontSize: "0.78rem",
+                  color: theme.accent,
+                  opacity: 0.6,
+                  textDecoration: "underline dotted",
+                  textUnderlineOffset: "0.3em",
+                  cursor: "pointer",
+                }}
+              >
+                I have a key
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+
+  const joinBlock = (
+    <section key="join" style={{ marginBottom: mobile ? "2.4em" : 0 }}>
+      <h2 style={{ ...label, margin: "0 0 0.8em" }}>
+        {mobile ? "Join a session" : "Or join one"}
+      </h2>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (/^\d{6}$/.test(code)) bridge.join(code);
+        }}
+        style={{ display: "flex", flexWrap: "wrap", gap: "0.6em" }}
+      >
+        <input
+          value={code}
+          onChange={(event) =>
+            setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+          }
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          placeholder="000000"
+          aria-label="Six-digit join code"
+          style={{
+            width: "6.5em",
+            padding: "0.55em 0.7em",
+            fontFamily: "monospace",
+            fontSize: "1.3rem",
+            letterSpacing: "0.2em",
+            textAlign: "center",
+            color: theme.accent,
+            background: `${theme.accent}0D`,
+            border: `1px solid ${theme.accent}33`,
+            borderRadius: 6,
+            outline: "none",
+          }}
+        />
+        <button
+          className="utControl"
+          type="submit"
+          disabled={busy || !/^\d{6}$/.test(code)}
+          style={button({
+            opacity: busy || !/^\d{6}$/.test(code) ? 0.5 : 1,
+          })}
+        >
+          Join
+        </button>
+      </form>
+    </section>
+  );
 
   const pad = mobile ? "1em" : "2em";
 
@@ -292,139 +480,7 @@ export default function UploadThat() {
         </p>
       )}
 
-      {!session && (
-        <>
-          <section style={{ marginBottom: "2.4em" }}>
-            <h2 style={{ ...label, margin: "0 0 0.8em" }}>Start a session</h2>
-            <button
-              className="utControl"
-              onClick={() => bridge.open(operatorKey)}
-              disabled={busy}
-              style={button({ opacity: busy ? 0.6 : 1 })}
-            >
-              {busy ? "Opening…" : "Start a session"}
-            </button>
-            <div style={{ marginTop: "0.9em" }}>
-              {showKey ? (
-                <>
-                  <input
-                    value={operatorKey}
-                    onChange={(event) => setOperatorKey(event.target.value)}
-                    type="password"
-                    placeholder="operator key"
-                    aria-label="Operator key"
-                    autoComplete="current-password"
-                    style={{
-                      width: "100%",
-                      maxWidth: 280,
-                      boxSizing: "border-box",
-                      padding: "0.55em 0.7em",
-                      fontFamily: "monospace",
-                      fontSize: "0.9rem",
-                      color: theme.accent,
-                      background: `${theme.accent}0D`,
-                      border: `1px solid ${theme.accent}33`,
-                      borderRadius: 6,
-                      outline: "none",
-                    }}
-                  />
-                  {operatorKey !== "" && (
-                    <button
-                      className="utControl"
-                      onClick={() => {
-                        forgetKey();
-                        setOperatorKey("");
-                        setShowKey(false);
-                      }}
-                      style={{
-                        ...noSelect,
-                        display: "block",
-                        marginTop: "0.5em",
-                        background: "none",
-                        border: "none",
-                        padding: 0,
-                        fontSize: "0.74rem",
-                        color: theme.accent,
-                        opacity: 0.55,
-                        textDecoration: "underline dotted",
-                        textUnderlineOffset: "0.3em",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Forget this key on this device
-                    </button>
-                  )}
-                </>
-              ) : (
-                <button
-                  className="utControl"
-                  onClick={() => setShowKey(true)}
-                  data-reveal-key=""
-                  style={{
-                    ...noSelect,
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    fontSize: "0.78rem",
-                    color: theme.accent,
-                    opacity: 0.6,
-                    textDecoration: "underline dotted",
-                    textUnderlineOffset: "0.3em",
-                    cursor: "pointer",
-                  }}
-                >
-                  I have a key
-                </button>
-              )}
-            </div>
-          </section>
-
-          <section>
-            <h2 style={{ ...label, margin: "0 0 0.8em" }}>Or join one</h2>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (/^\d{6}$/.test(code)) bridge.join(code);
-              }}
-              style={{ display: "flex", flexWrap: "wrap", gap: "0.6em" }}
-            >
-              <input
-                value={code}
-                onChange={(event) =>
-                  setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder="000000"
-                aria-label="Six-digit join code"
-                style={{
-                  width: "6.5em",
-                  padding: "0.55em 0.7em",
-                  fontFamily: "monospace",
-                  fontSize: "1.3rem",
-                  letterSpacing: "0.2em",
-                  textAlign: "center",
-                  color: theme.accent,
-                  background: `${theme.accent}0D`,
-                  border: `1px solid ${theme.accent}33`,
-                  borderRadius: 6,
-                  outline: "none",
-                }}
-              />
-              <button
-                className="utControl"
-                type="submit"
-                disabled={busy || !/^\d{6}$/.test(code)}
-                style={button({
-                  opacity: busy || !/^\d{6}$/.test(code) ? 0.5 : 1,
-                })}
-              >
-                Join
-              </button>
-            </form>
-          </section>
-        </>
-      )}
+      {!session && (mobile ? [joinBlock, startBlock] : [startBlock, joinBlock])}
 
       {session && handshake && (
         <HandshakeGate
@@ -482,7 +538,46 @@ export default function UploadThat() {
           )}
 
           <section style={{ marginBottom: "1.2em" }}>
-            <h2 style={{ ...label, margin: "0 0 0.5em" }}>Shared note</h2>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.8em",
+                margin: "0 0 0.5em",
+              }}
+            >
+              <h2 style={{ ...label, margin: 0 }}>Shared note</h2>
+              <button
+                className="utControl"
+                onClick={copyNote}
+                disabled={bridge.note === ""}
+                aria-label="Copy all text"
+                title="Copy all text"
+                style={{
+                  ...noSelect,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.5em",
+                  background: "none",
+                  border: "none",
+                  padding: "0 0.2em",
+                  fontFamily: "inherit",
+                  fontSize: "0.74rem",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  cursor: bridge.note === "" ? "default" : "pointer",
+                  opacity: bridge.note === "" ? 0.3 : 1,
+                  color: noteCopied
+                    ? theme.secondaryAccent
+                    : `${theme.accent}A6`,
+                  transition: "color 0.2s ease",
+                }}
+              >
+                <FontAwesomeIcon icon={noteCopied ? faCheck : faCopy} />
+                {noteCopied ? "Copied" : "Copy all text"}
+              </button>
+            </div>
             <textarea
               value={bridge.note}
               onChange={(event) => bridge.editNote(event.target.value)}

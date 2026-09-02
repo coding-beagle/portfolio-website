@@ -162,6 +162,13 @@ one of the three anonymous sessions an IP gets per hour.
 Two terminals: `make run_uploadthat_api` serves the PHP on :8787, and
 `make run_uploadthat` starts the dev server, which proxies `/api` to it.
 
+`make uploadthat_duo` does both in one terminal against a throwaway data
+directory, and opens two windows — `localhost:3000` and `127.0.0.1:3000`, which
+the browser treats as two origins and therefore as two devices — so the join
+code, the handshake and the shared note can be driven end to end without a
+second machine. Ctrl-C stops both servers and deletes the database, so every
+run starts with an empty store and empty rate limits.
+
 ## Make Commands:
 
 `make install` -> Install JS deps

@@ -25,6 +25,10 @@ run_uploadthat_api:
 	php -S localhost:8787 -t . api/index.php; \
 	cd -; \
 
+# two uploadthat clients against a throwaway API, deleted when you Ctrl-C
+uploadthat_duo:
+	php/uploadthat/tests/duo.sh
+
 # run the uploadthat API's own tests (needs php on PATH)
 test_uploadthat:
 	php php/uploadthat/tests/run.php

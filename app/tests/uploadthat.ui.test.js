@@ -42,6 +42,10 @@ const mount = (mobile = false) =>
 /** Opens a session and waits until the page is showing it. */
 const openSession = async (mobile = false) => {
   const view = mount(mobile);
+  // On a phone the button is folded away: joining is what the screen is for.
+  if (mobile) {
+    userEvent.click(screen.getByRole("button", { name: "Or start a session" }));
+  }
   userEvent.click(screen.getByRole("button", { name: "Start a session" }));
   await screen.findByText("482913");
   return view;
@@ -222,6 +226,38 @@ describe("files", () => {
   });
 });
 
+describe("on a phone", () => {
+  it("leads with joining and folds the start button away", () => {
+    mount(true);
+
+    expect(
+      screen.queryByRole("button", { name: "Start a session" })
+    ).toBeNull();
+
+    // The six digits are the first thing on the screen, ahead of the fold.
+    const join = screen.getByLabelText("Six-digit join code");
+    const fold = screen.getByRole("button", { name: "Or start a session" });
+    expect(
+      join.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    userEvent.click(fold);
+    expect(
+      screen.getByRole("button", { name: "Start a session" })
+    ).toBeInTheDocument();
+  });
+
+  it("leaves it in the open on a desktop", () => {
+    mount(false);
+    expect(
+      screen.getByRole("button", { name: "Start a session" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Or start a session" })
+    ).toBeNull();
+  });
+});
+
 describe("leaving", () => {
   jest.setTimeout(15000);
 
@@ -273,5 +309,26 @@ describe("the shared note", () => {
 
     // What the server holds is ciphertext, not the sentence.
     expect(atob(server.state.note)).not.toContain("meet at six");
+  });
+
+  it("copies the whole note to the clipboard", async () => {
+    const writeText = jest.fn();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    await openSession();
+    const copy = screen.getByRole("button", { name: "Copy all text" });
+    // Nothing to copy yet, so the button is not offering to.
+    expect(copy).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Shared note"), {
+      target: { value: "meet at six" },
+    });
+    userEvent.click(screen.getByRole("button", { name: "Copy all text" }));
+
+    expect(writeText).toHaveBeenCalledWith("meet at six");
+    await screen.findByText("Copied");
   });
 });
