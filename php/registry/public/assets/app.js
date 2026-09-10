@@ -51,6 +51,13 @@
       body = JSON.stringify(options.json);
     } else if (options.form) {
       body = options.form; // fetch sets the multipart boundary itself
+    } else if (method === 'POST') {
+      // A POST always carries a body, even where the endpoint ignores it.
+      // Shared hosts commonly run a WAF that rejects bodyless POSTs before PHP
+      // ever sees them — this one answers with a 403 HTML page — which would
+      // break logging out in production and nowhere else.
+      headers['Content-Type'] = 'application/json';
+      body = '{}';
     }
 
     return fetch(API + path, { method: method, headers: headers, body: body })

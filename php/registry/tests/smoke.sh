@@ -195,8 +195,18 @@ else
   echo "       NOTE: the repo '$REPO' may be left behind on the server."
 fi
 
-call -X POST "$BASE/api/auth/logout" -H "Authorization: Bearer $TOKEN"
-check "the smoke test's token is revoked" "$(printf '%s' "$REPLY_BODY" | json revoked)" "1"
+# A body is sent even though the endpoint ignores it. A POST with no body at
+# all is unusual enough that proxies and WAF rules in front of a shared host
+# sometimes reject it outright, and this is the only request here that would
+# otherwise make one.
+call -X POST "$BASE/api/auth/logout" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+if [ "$(printf '%s' "$REPLY_BODY" | json revoked)" = "1" ]; then
+  ok "the smoke test's token is revoked"
+else
+  bad "the smoke test's token is revoked" "HTTP $REPLY_STATUS — $(why "$REPLY_BODY")"
+  echo "       NOTE: the token stays valid until it expires. Revoke it in the UI."
+fi
 
 call "$BASE/api/repos" -H "Authorization: Bearer $TOKEN"
 check "and stops working immediately" "$REPLY_STATUS" "401"

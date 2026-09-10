@@ -149,10 +149,21 @@ class HttpTransport(Transport):
             headers["Content-Type"] = body.content_type
             headers["Content-Length"] = str(len(body))
             data = body
-        elif request.body is not None:
-            data = json.dumps(request.body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-            headers["Content-Length"] = str(len(data))
+        else:
+            payload = request.body
+
+            # A POST always carries a body, even when the endpoint ignores it.
+            # Shared hosts commonly run a WAF that rejects bodyless POSTs
+            # outright — api.nteague.com answers one with a 403 HTML page that
+            # never reaches PHP — so `nt auth logout` would fail in production
+            # and nowhere else. An empty object costs two bytes.
+            if payload is None and request.method.upper() == "POST":
+                payload = {}
+
+            if payload is not None:
+                data = json.dumps(payload).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+                headers["Content-Length"] = str(len(data))
 
         return urllib.request.Request(
             self._url(request), data=data, headers=headers, method=request.method.upper()

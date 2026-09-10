@@ -33,6 +33,43 @@ def free_port():
         return sock.getsockname()[1]
 
 
+class RequestShapeTest(unittest.TestCase):
+    """What goes on the wire, without needing anything to receive it."""
+
+    def test_every_post_carries_a_body(self):
+        """Regression: a bodyless POST is rejected by the deployed host.
+
+        api.nteague.com runs a WAF that answers a POST with no body with a 403
+        HTML page, before PHP is reached. `nt auth logout` sends no body of its
+        own, so it worked everywhere except production — the one place it
+        mattered. Nothing local reproduces that, so this pins the invariant at
+        the point the request is built instead.
+        """
+        from nt.transport import Request
+
+        transport = HttpTransport("https://registry.test", token="t")
+        prepared = transport._build(Request(method="POST", path="/auth/logout"))
+
+        self.assertEqual(prepared.data, b"{}")
+        self.assertEqual(prepared.headers["Content-length"], "2")
+        self.assertEqual(prepared.headers["Content-type"], "application/json")
+
+    def test_a_real_body_is_left_alone(self):
+        from nt.transport import Request
+
+        transport = HttpTransport("https://registry.test", token="t")
+        prepared = transport._build(Request(method="POST", path="/repos", body={"name": "x"}))
+        self.assertEqual(json.loads(prepared.data), {"name": "x"})
+
+    def test_a_get_sends_no_body(self):
+        # The rule is about POST specifically; inventing a body for a GET would
+        # be its own kind of wrong.
+        from nt.transport import Request
+
+        transport = HttpTransport("https://registry.test", token="t")
+        self.assertIsNone(transport._build(Request(method="GET", path="/repos")).data)
+
+
 @unittest.skipUnless(php_available(), "needs php on PATH to run the API")
 class HttpTest(unittest.TestCase):
     """One `php -S` for the whole class: starting it is the slow part."""

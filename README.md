@@ -207,8 +207,9 @@ and the client in [`cli/README.md`](cli/README.md).
    nothing can log in and only `/api/health` answers — the right failure mode
    for an update server with a missing config.
 3. `make deploy_registry`, then `php ~/public_api_html/api/cli/doctor.php`.
-4. Add a cron job: `17 * * * * php ~/public_api_html/api/cli/sweep.php`. It
-   clears expired tokens and orphaned files, and never touches a release.
+4. Add an hourly cron job for `api/cli/sweep.php` — expired tokens and
+   orphaned files, never a release. Check the cron PHP is 8.1+, and send its
+   stderr to a log so a failure is not silent; see the registry README.
 
 ### Checking it works
 

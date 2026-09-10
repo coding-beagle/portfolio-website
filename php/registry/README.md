@@ -116,10 +116,6 @@ that every artifact row still has its bytes on disk.
 
 ### 4. The sweeper
 
-```
-17 * * * * /usr/local/bin/php ~/public_api_html/api/cli/sweep.php
-```
-
 Clears expired tokens, stale rate-limit rows, and blob directories with no row
 behind them. Optional — ordinary requests do a little of this on the way past —
 but without it the orphan cleanup never runs.
@@ -127,6 +123,42 @@ but without it the orphan cleanup never runs.
 It never touches a release. Artifacts are permanent until something asks for
 them to go; a release that vanished on its own would break every client still
 on it.
+
+First find a PHP binary that is 8.1 or newer. `/usr/local/bin/php` is whatever
+cPanel's *default* is, which is often older than the version you set for the
+subdomain — and this script loads the same 8.1 code the API does:
+
+```sh
+/usr/local/bin/php -v                          # the default
+ls -d /opt/cpanel/ea-php8*/root/usr/bin/php    # the versions installed
+```
+
+Then:
+
+```
+17 * * * * /usr/local/bin/php ~/public_api_html/api/cli/sweep.php >/dev/null 2>>$HOME/registry_sweep.log
+```
+
+`~` and `$HOME` are expanded by the shell cron runs the job with, so they are
+fine as long as `SHELL` is bash or sh — which it is by default. Substitute an
+absolute path to the binary if the default PHP is too old.
+
+The redirects matter more than they look. The script prints a summary on
+success and writes to *stderr* only when something has gone wrong, so sending
+stdout to `/dev/null` and stderr to a file means the log stays empty until
+there is something in it worth reading:
+
+```sh
+test -s ~/registry_sweep.log && tail ~/registry_sweep.log    # anything to see?
+```
+
+Without the stderr redirect this depends on cron mail. If the crontab sets
+`MAILTO=""` — as it does on this account — nothing is mailed at all, and a
+sweeper that dies does so completely silently. That is the failure this job
+exists to prevent, so give its errors somewhere to land.
+
+Check it by running the same command by hand first; it should print one line
+and exit zero.
 
 ---
 
@@ -583,6 +615,30 @@ nt repo beagle-cli remove -v 0.9.0 -y
 | | |
 | --- | --- |
 | Every request is 401 | The `Authorization` header is not reaching PHP. `make smoke_registry` says so explicitly. |
+| A `403` with an HTML body, not JSON | Something in front of PHP refused the request. On this host the WAF rejects any POST with **no body** — see below. |
 | Large uploads fail at exactly the same size | `post_max_size` / `upload_max_filesize`. `GET /api/health` reports the live values. |
 | `not_configured` on login | No `admin_password_hash`. |
 | 500 on everything | `doctor.php`. Usually `data_dir` not writable, or `pdo_sqlite` not enabled. |
+
+### Bodyless POSTs are rejected by the host
+
+`api.nteague.com` sits behind a WAF that answers a POST carrying no request
+body with a `403` and an HTML error page, before the request reaches PHP at
+all. A `GET`, a `DELETE`, and a POST *with* a body are all fine.
+
+Only one endpoint would naturally make such a request — `POST /auth/logout`
+ignores its body — so this failed in production and nowhere else, which is the
+worst shape a bug can have. Both clients now send `{}` on any POST that has
+nothing else to send, at the transport layer rather than at that one call site,
+so a future bodyless POST cannot reintroduce it.
+
+If you write your own client, send a body on every POST:
+
+```sh
+curl -X POST "$BASE/api/auth/logout" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+The rule can probably be disabled in cPanel's *ModSecurity Tools*, but leaving
+it on and sending a body is the more portable answer — the next host will have
+its own rules.
