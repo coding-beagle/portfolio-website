@@ -1,0 +1,13 @@
+# Deployed to the subdomain document root (api.nteague.com).
+Options -Indexes
+
+# HTTPS is not optional here: a login posts a password and every other request
+# carries a bearer token, and neither belongs on the wire in clear.
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# HSTS, so a client that has been here once never tries plain HTTP again.
+<IfModule mod_headers.c>
+  Header always set Strict-Transport-Security "max-age=31536000"
+</IfModule>

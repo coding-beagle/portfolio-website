@@ -25,6 +25,20 @@ run_uploadthat_api:
 	php -S localhost:8787 -t . api/index.php; \
 	cd -; \
 
+# Seeds a few releases and deletes everything on Ctrl-C. REGISTRY_DEV_DATA
+# keeps the data, NO_SEED starts empty, PORT moves it.
+# run the whole registry locally: API, UI, and a throwaway password
+registry_dev:
+	php/registry/tests/dev.sh
+
+# Nothing can log in without an admin_password_hash, so use registry_dev
+# instead unless you specifically want to point at your own data.
+# serve the registry bare on :8788, against your own config
+run_registry:
+	cd ./php/registry; \
+	php -S localhost:8788 -t public tests/dev-router.php; \
+	cd -; \
+
 # two uploadthat clients against a throwaway API, deleted when you Ctrl-C
 uploadthat_duo:
 	php/uploadthat/tests/duo.sh
@@ -44,6 +58,37 @@ test_uploadthat_http:
 
 # every uploadthat test there is: the store, then the whole API over HTTP
 test_uploadthat_all: test_uploadthat test_uploadthat_http
+
+# run the registry API's own tests, in-process (needs php on PATH)
+test_registry:
+	php php/registry/tests/run.php
+
+# the same checks over HTTP against php -S, without deploying anything
+test_registry_http:
+	php/registry/tests/local.sh
+
+# The whole command surface against the real API with no server, plus the real
+# transport against php -S. Needs php and python3.
+# run the nt CLI's tests
+test_nt:
+	cd ./cli/tests; \
+	python3 -m unittest discover -s . -p 'test_*.py'; \
+	cd -; \
+
+# every registry test there is: the API, then HTTP, then the CLI
+test_registry_all: test_registry test_registry_http test_nt
+
+# Pass the password by environment rather than as an argument, which would show
+# up in ps and in your shell history. Without one, only the public checks run:
+#   make smoke_registry REGISTRY_URL=https://... REGISTRY_PASSWORD=...
+# check a DEPLOYED registry over real HTTP
+REGISTRY_URL ?= https://api.nteague.com
+smoke_registry:
+	php/registry/tests/smoke.sh "$(REGISTRY_URL)" "$(REGISTRY_PASSWORD)"
+
+# install the nt CLI into the current environment, editable
+install_nt:
+	pip install -e ./cli
 
 # clean node modules and build folders
 clean:
@@ -130,5 +175,20 @@ deploy_uploadthat:
 	cp -r app/build-uploadthat/. $(UPLOADTHAT_DEPLOYPATH)/; \
 	echo "Deployed uploadthat to $(UPLOADTHAT_DEPLOYPATH)"; \
 
+# The data directory is deliberately NOT under this path: releases have to
+# survive the wipe, and artifacts under the document root would be downloadable
+# by URL with no token at all.
+#
+# public/ holds the management UI and becomes the document root; api/ goes
+# under it. tests/ and config.sample.php are not deployed.
+# prod only, sends the registry (API + UI) to its subdomain
+REGISTRY_DEPLOYPATH ?= /home/nteagvxe/public_api_html
+deploy_registry:
+	test -d $(REGISTRY_DEPLOYPATH) || { echo "No such directory: $(REGISTRY_DEPLOYPATH)"; exit 1; }; \
+	rm -rf $(REGISTRY_DEPLOYPATH)/*; \
+	cp -r php/registry/public/. $(REGISTRY_DEPLOYPATH)/; \
+	cp -r php/registry/api $(REGISTRY_DEPLOYPATH)/; \
+	echo "Deployed registry to $(REGISTRY_DEPLOYPATH)"; \
+
 # prod only, deploys the main site and every subdomain
-deploy: deploy_manual deploy_hextool deploy_uploadthat
+deploy: deploy_manual deploy_hextool deploy_uploadthat deploy_registry

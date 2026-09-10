@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nt-registry-cli"
+version = "1.0.0"
+description = "Command line client for a private release registry"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Nicholas Teague" }]
+keywords = ["registry", "releases", "artifacts", "auto-update"]
+
+# Deliberately none. This gets installed on build machines and in CI images
+# where the fewest moving parts wins, and everything it needs is in the stdlib.
+dependencies = []
+
+[project.scripts]
+nt = "nt.cli:main"
+
+[tool.setuptools]
+packages = ["nt"]

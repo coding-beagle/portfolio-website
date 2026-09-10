@@ -1,0 +1,392 @@
+"""The `nt` command line, end to end against the real API.
+
+Every case here runs a real command against a real registry — real routing,
+real auth, real semver resolution, real bytes on disk — with no server running
+and no network involved. See support.py for how.
+
+    python3 -m unittest discover -s cli/tests    (or: make test_nt)
+"""
+
+import io
+import json
+import os
+import unittest
+
+from support import PhpTransport, Registry, php_available
+
+from nt.cli import normalise, run
+from nt.config import Config
+from nt.errors import NtError
+
+
+@unittest.skipUnless(php_available(), "needs php on PATH to run the API")
+class CliTest(unittest.TestCase):
+    """Base: a fresh registry and a logged-out client for every test."""
+
+    def setUp(self):
+        self.registry = Registry()
+        self.addCleanup(self.registry.close)
+
+        # The CLI's own config is redirected into the temp directory, so a test
+        # run can never read or overwrite the developer's real token.
+        self._environment = dict(os.environ)
+        os.environ["NT_CONFIG"] = str(self.registry.nt_config)
+        os.environ["NT_URL"] = "https://registry.test"
+        os.environ.pop("NT_TOKEN", None)
+        self.addCleanup(self._restore_environment)
+
+    def _restore_environment(self):
+        os.environ.clear()
+        os.environ.update(self._environment)
+
+    # -- running commands --------------------------------------------------
+
+    def nt(self, *argv, expect=0):
+        """Runs one command, returning its stdout."""
+        out = io.StringIO()
+        transport = PhpTransport(self.registry.config_path, token=Config.load().token)
+        code = run(list(argv), transport=transport, out=out)
+        self.assertEqual(
+            code, expect,
+            "`nt %s` exited %d, expected %d. Output:\n%s" % (" ".join(argv), code, expect, out.getvalue()),
+        )
+        return out.getvalue()
+
+    def fails(self, *argv):
+        """Runs a command expected to raise, returning the NtError."""
+        out = io.StringIO()
+        transport = PhpTransport(self.registry.config_path, token=Config.load().token)
+        with self.assertRaises(NtError) as caught:
+            run(list(argv), transport=transport, out=out)
+        return caught.exception
+
+    def login(self):
+        self.nt("auth", "login", "--password", Registry.PASSWORD, "--label", "tests")
+
+    def json_of(self, *argv):
+        return json.loads(self.nt("--json", *argv))
+
+
+class ArgumentTest(unittest.TestCase):
+    """normalise() has no I/O, so it needs no registry and no php."""
+
+    def test_subject_first_is_rewritten_to_verb_first(self):
+        self.assertEqual(
+            normalise(["repo", "beagle", "upload", "app.bin"]),
+            ["repo", "upload", "beagle", "app.bin"],
+        )
+        self.assertEqual(normalise(["repo", "beagle", "list"]), ["repo", "list", "beagle"])
+
+    def test_verb_first_is_left_alone(self):
+        self.assertEqual(normalise(["repo", "create", "beagle"]), ["repo", "create", "beagle"])
+        self.assertEqual(normalise(["repo", "delete", "beagle"]), ["repo", "delete", "beagle"])
+
+    def test_global_flags_before_the_command_do_not_defeat_it(self):
+        # The rewrite has to survive anything argparse allows in front of the
+        # command, or `nt --json repo x list` quietly stops working.
+        self.assertEqual(
+            normalise(["--json", "repo", "beagle", "list"]),
+            ["--json", "repo", "list", "beagle"],
+        )
+        self.assertEqual(
+            normalise(["--url", "https://x", "repo", "beagle", "info"]),
+            ["--url", "https://x", "repo", "info", "beagle"],
+        )
+
+    def test_other_commands_are_untouched(self):
+        self.assertEqual(normalise(["list"]), ["list"])
+        self.assertEqual(normalise(["auth", "login"]), ["auth", "login"])
+        self.assertEqual(normalise([]), [])
+
+
+class AuthTest(CliTest):
+    def test_login_stores_a_token(self):
+        output = self.nt("auth", "login", "--password", Registry.PASSWORD)
+        self.assertIn("Logged in", output)
+
+        stored = json.loads(self.registry.nt_config.read_text())
+        self.assertTrue(stored["token"])
+        self.assertGreater(stored["expires_at"], 0)
+
+    def test_the_token_file_is_private(self):
+        # It holds a credential. On a shared machine the mode is the only thing
+        # between it and everyone else with an account.
+        self.login()
+        mode = self.registry.nt_config.stat().st_mode & 0o777
+        self.assertEqual(mode, 0o600, "config is mode %o, expected 600" % mode)
+
+    def test_a_wrong_password_is_refused(self):
+        error = self.fails("auth", "login", "--password", "hunter2")
+        self.assertEqual(error.code, "bad_password")
+        self.assertFalse(self.registry.nt_config.exists())
+
+    def test_commands_refuse_to_run_logged_out(self):
+        # Checked locally, so being logged out says so rather than round
+        # tripping to the server for a 401.
+        error = self.fails("list")
+        self.assertEqual(error.code, "unauthorised")
+        self.assertIn("nt auth login", error.hint)
+
+    def test_status_reports_both_states(self):
+        self.assertIn("Logged in: no", self.nt("auth", "status", expect=1))
+        self.login()
+        output = self.nt("auth", "status")
+        self.assertIn("Logged in: yes", output)
+        self.assertIn("tests", output)
+
+    def test_logout_revokes_the_token_server_side(self):
+        self.login()
+        token = Config.load().token
+        self.nt("auth", "logout")
+        self.assertIsNone(Config.load().token)
+
+        # Not merely forgotten locally: the token must be dead on the server,
+        # or "log out" on a shared machine would mean nothing.
+        os.environ["NT_TOKEN"] = token
+        self.assertEqual(self.fails("list").code, "unauthorised")
+
+    def test_tokens_can_be_listed_and_revoked(self):
+        self.login()
+        listing = self.json_of("auth", "tokens")
+        self.assertEqual(len(listing["tokens"]), 1)
+
+        self.nt("auth", "login", "--password", Registry.PASSWORD, "--label", "second")
+        self.assertEqual(len(self.json_of("auth", "tokens")["tokens"]), 2)
+
+        first = [t for t in self.json_of("auth", "tokens")["tokens"] if t["label"] == "tests"][0]
+        self.nt("auth", "revoke", first["id"])
+        labels = [t["label"] for t in self.json_of("auth", "tokens")["tokens"]]
+        self.assertEqual(labels, ["second"])
+
+    def test_a_token_from_the_environment_is_used(self):
+        # How a CI job authenticates: no login step, nothing written to disk.
+        self.login()
+        token = Config.load().token
+        self.registry.nt_config.unlink()
+        os.environ["NT_TOKEN"] = token
+        self.nt("list")
+
+
+class RepoTest(CliTest):
+    def setUp(self):
+        super().setUp()
+        self.login()
+
+    def test_create_and_list(self):
+        self.assertIn("No repositories yet", self.nt("list"))
+
+        self.nt("repo", "create", "beagle-cli", "-d", "The beagle tool")
+        output = self.nt("list")
+        self.assertIn("beagle-cli", output)
+        self.assertIn("The beagle tool", output)
+
+    def test_a_duplicate_name_is_refused(self):
+        self.nt("repo", "create", "beagle-cli")
+        self.assertEqual(self.fails("repo", "create", "beagle-cli").code, "exists")
+
+    def test_an_invalid_name_is_refused_with_an_explanation(self):
+        error = self.fails("repo", "create", "Beagle CLI")
+        self.assertEqual(error.code, "bad_name")
+        self.assertIn("lower case", error.message)
+
+    def test_delete_needs_confirmation_but_takes_yes(self):
+        self.nt("repo", "create", "doomed")
+        self.nt("repo", "delete", "doomed", "-y")
+        self.assertIn("No repositories yet", self.nt("list"))
+
+    def test_an_unknown_repo_is_reported_by_name(self):
+        error = self.fails("repo", "list", "ghost")
+        self.assertEqual(error.code, "no_repo")
+        self.assertIn("ghost", error.message)
+
+
+class ReleaseTest(CliTest):
+    def setUp(self):
+        super().setUp()
+        self.login()
+        self.nt("repo", "create", "beagle-cli", "-d", "The beagle tool")
+        self.binary = self.registry.file("dist/beagle", "#!/bin/sh\necho beagle\n")
+
+    def upload(self, version, platform=None, path=None, notes=None):
+        argv = ["repo", "beagle-cli", "upload", str(path or self.binary), "-v", version]
+        if platform:
+            argv += ["-p", platform]
+        if notes:
+            argv += ["-n", notes]
+        return self.nt(*argv)
+
+    # -- uploading --
+
+    def test_upload_reports_what_landed(self):
+        output = self.upload("1.0.0", "linux-x64", notes="First release")
+        self.assertIn("Uploaded", output)
+        self.assertIn("1.0.0", output)
+        self.assertIn("linux-x64", output)
+
+    def test_the_server_agrees_on_the_checksum(self):
+        import hashlib
+
+        result = json.loads(self.nt(
+            "--json", "repo", "beagle-cli", "upload", str(self.binary), "-v", "1.0.0"
+        ))
+        self.assertEqual(result["sha256"], hashlib.sha256(self.binary.read_bytes()).hexdigest())
+
+    def test_uploading_the_same_platform_replaces_it(self):
+        self.upload("1.0.0", "linux-x64")
+        again = self.registry.file("dist/beagle2", "#!/bin/sh\necho fixed\n")
+        output = self.upload("1.0.0", "linux-x64", path=again)
+        self.assertIn("Replaced", output)
+
+        version = self.json_of("repo", "beagle-cli", "info", "-v", "1.0.0")
+        self.assertEqual(len(version["artifacts"]), 1)
+
+    def test_several_platforms_live_in_one_version(self):
+        self.upload("1.0.0", "linux-x64")
+        self.upload("1.0.0", "windows")
+        self.upload("1.0.0", "macos-arm64")
+
+        version = self.json_of("repo", "beagle-cli", "info", "-v", "1.0.0")
+        self.assertEqual(
+            sorted(a["platform"] for a in version["artifacts"]),
+            ["linux-x64", "macos-arm64", "windows"],
+        )
+
+    def test_a_missing_local_file_is_caught_before_any_request(self):
+        error = self.fails("repo", "beagle-cli", "upload", "/no/such/file", "-v", "1.0.0")
+        self.assertEqual(error.code, "no_local_file")
+
+    def test_a_non_semver_version_is_refused(self):
+        error = self.fails("repo", "beagle-cli", "upload", str(self.binary), "-v", "nightly")
+        self.assertEqual(error.code, "bad_version")
+
+    # -- listing --
+
+    def test_versions_list_newest_first(self):
+        for version in ("1.0.0", "1.10.0", "1.2.0", "2.0.0-rc.1"):
+            self.upload(version, "linux-x64")
+
+        listed = [v["version"] for v in self.json_of("repo", "beagle-cli", "list")]
+        self.assertEqual(listed, ["2.0.0-rc.1", "1.10.0", "1.2.0", "1.0.0"])
+
+    def test_latest_skips_prereleases_unless_asked(self):
+        self.upload("1.2.0", "linux-x64")
+        self.upload("2.0.0-rc.1", "linux-x64")
+
+        self.assertEqual(self.json_of("repo", "beagle-cli", "info")["version"], "1.2.0")
+        self.assertEqual(
+            self.json_of("repo", "beagle-cli", "info", "--prerelease")["version"],
+            "2.0.0-rc.1",
+        )
+
+    # -- pulling --
+
+    def test_pull_writes_the_bytes_back(self):
+        self.upload("1.0.0", "linux-x64")
+        destination = self.registry.root / "out" / "beagle"
+
+        output = self.nt("repo", "beagle-cli", "pull", str(destination), "-v", "1.0.0")
+        self.assertIn("Downloaded", output)
+        self.assertEqual(destination.read_bytes(), self.binary.read_bytes())
+
+    def test_pull_defaults_to_latest(self):
+        self.upload("1.0.0", "linux-x64")
+        newer = self.registry.file("dist/beagle-new", "newer build")
+        self.upload("1.1.0", "linux-x64", path=newer)
+
+        destination = self.registry.root / "out" / "beagle"
+        self.nt("repo", "beagle-cli", "pull", str(destination))
+        self.assertEqual(destination.read_bytes(), newer.read_bytes())
+
+    def test_pull_into_a_directory_uses_the_stored_filename(self):
+        self.upload("1.0.0", "linux-x64")
+        directory = self.registry.root / "downloads"
+        directory.mkdir()
+
+        self.nt("repo", "beagle-cli", "pull", str(directory), "-v", "1.0.0")
+        self.assertEqual((directory / "beagle").read_bytes(), self.binary.read_bytes())
+
+    def test_pull_needs_a_platform_only_when_it_is_ambiguous(self):
+        self.upload("1.0.0", "linux-x64")
+        destination = self.registry.root / "out" / "beagle"
+
+        # One build: no platform needed, which is the common case.
+        self.nt("repo", "beagle-cli", "pull", str(destination), "-v", "1.0.0")
+
+        self.upload("1.0.0", "windows")
+        error = self.fails("repo", "beagle-cli", "pull", str(destination), "-v", "1.0.0")
+        self.assertEqual(error.code, "ambiguous_platform")
+        # The error has to say what to type instead, or it is just a refusal.
+        self.assertIn("linux-x64", error.hint)
+
+        self.nt("repo", "beagle-cli", "pull", str(destination), "-v", "1.0.0", "-p", "windows")
+
+    def test_pulling_an_unbuilt_platform_lists_the_real_ones(self):
+        self.upload("1.0.0", "linux-x64")
+        error = self.fails(
+            "repo", "beagle-cli", "pull",
+            str(self.registry.root / "out.bin"), "-v", "1.0.0", "-p", "solaris",
+        )
+        self.assertEqual(error.code, "no_artifact")
+        self.assertIn("linux-x64", error.hint)
+
+    def test_an_interrupted_pull_leaves_no_partial_file(self):
+        # A truncated download that looks complete is the worst outcome for a
+        # file something is about to execute, so the transport writes to a .part
+        # and renames. A failed request must leave neither behind.
+        self.upload("1.0.0", "linux-x64")
+        destination = self.registry.root / "out" / "beagle"
+        self.fails("repo", "beagle-cli", "pull", str(destination), "-v", "9.9.9")
+        self.assertFalse(destination.exists())
+        self.assertFalse(destination.with_name("beagle.part").exists())
+
+    # -- removing --
+
+    def test_remove_takes_one_platform_or_the_whole_version(self):
+        self.upload("1.0.0", "linux-x64")
+        self.upload("1.0.0", "windows")
+
+        self.nt("repo", "beagle-cli", "remove", "-v", "1.0.0", "-p", "windows", "-y")
+        version = self.json_of("repo", "beagle-cli", "info", "-v", "1.0.0")
+        self.assertEqual([a["platform"] for a in version["artifacts"]], ["linux-x64"])
+
+        self.nt("repo", "beagle-cli", "remove", "-v", "1.0.0", "-y")
+        self.assertEqual(self.fails("repo", "beagle-cli", "info", "-v", "1.0.0").code, "no_version")
+
+    def test_removing_the_last_build_removes_the_version(self):
+        self.upload("1.0.0", "linux-x64")
+        self.nt("repo", "beagle-cli", "remove", "-v", "1.0.0", "-p", "linux-x64", "-y")
+        self.assertEqual(self.json_of("repo", "beagle-cli", "list"), [])
+
+    def test_removing_a_version_that_is_not_there(self):
+        self.assertEqual(
+            self.fails("repo", "beagle-cli", "remove", "-v", "3.0.0", "-y").code,
+            "no_version",
+        )
+
+
+class ReadOnlyTest(CliTest):
+    """The kill switch, from the client's side."""
+
+    def setUp(self):
+        super().setUp()
+        self.login()
+        self.nt("repo", "create", "beagle-cli")
+        binary = self.registry.file("dist/beagle", "build")
+        self.nt("repo", "beagle-cli", "upload", str(binary), "-v", "1.0.0")
+        self.registry.write_config(accepting_writes=False)
+
+    def test_reads_keep_working(self):
+        self.assertIn("beagle-cli", self.nt("list"))
+        destination = self.registry.root / "out.bin"
+        self.nt("repo", "beagle-cli", "pull", str(destination))
+        self.assertEqual(destination.read_bytes(), b"build")
+
+    def test_writes_are_refused_with_a_usable_message(self):
+        binary = self.registry.file("dist/other", "build")
+        error = self.fails("repo", "beagle-cli", "upload", str(binary), "-v", "2.0.0")
+        self.assertEqual(error.code, "read_only")
+        self.assertIn("frozen", error.hint)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

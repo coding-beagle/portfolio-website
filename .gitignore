@@ -8,3 +8,16 @@ app/node_modules
 uploadthat_config.php
 php/uploadthat/config.php
 php/uploadthat_data/
+
+# Registry: the live config holds the admin password hash, and the data
+# directory holds tokens and every uploaded artifact. Neither belongs in a
+# public repository — note that anything committed once stays in the history.
+registry_config.php
+php/registry/config.php
+php/registry_data/
+
+# The nt CLI, installed editable.
+cli/*.egg-info/
+cli/build/
+__pycache__/
+*.pyc

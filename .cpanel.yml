@@ -8,3 +8,6 @@ deployment:
     - export HEXTOOLPATH=/home/nteagvxe/public_hextool_html
     - echo "Deploying hex tool to $HEXTOOLPATH"
     - cd $REPOPATH && make deploy_hextool
+    - export REGISTRYPATH=/home/nteagvxe/public_api_html
+    - echo "Deploying registry to $REGISTRYPATH"
+    - cd $REPOPATH && make deploy_registry
