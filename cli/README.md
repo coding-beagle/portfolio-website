@@ -11,8 +11,10 @@ pip install -e cli          # from the repository root
 nt --version
 ```
 
-No dependencies — it is stdlib only, so it installs cleanly on a build machine
-or in a CI image without a package index being reachable.
+Two dependencies, [click](https://click.palletsprojects.com) for the command
+tree and [rich](https://rich.readthedocs.io) for the output. Both are pure
+Python, so there is no compiler or system package involved. Everything that
+touches the network is stdlib.
 
 ## Getting started
 
@@ -72,11 +74,17 @@ replaces that build rather than adding a second.
 
 ## Scripting
 
-`--json` prints the raw response instead of a table:
+`--json` prints the raw response instead of a table, with no colour and no
+progress bars, so a pipe gets exactly the bytes the API sent:
 
 ```sh
 nt --json repo beagle-cli info -v latest | jq -r '.artifacts[].sha256'
 ```
+
+It has to come before the command: `nt --json repo beagle-cli info`.
+
+Colour and progress bars turn themselves off whenever output is not a terminal,
+so redirecting to a file or a CI log needs no extra flag.
 
 Downloads are written to a `.part` file and renamed into place, so an
 interrupted `pull` never leaves a truncated file that looks complete.
@@ -125,8 +133,13 @@ nt auth login
 make test_nt        # from the repository root
 ```
 
-Two suites, both needing `php` on `PATH` and both skipping themselves if there
-is none.
+Three suites. `test_ui.py` needs nothing at all; the other two need `php` on
+`PATH` and skip themselves if there is none.
+
+`test_ui.py` checks what the rendering layer puts on the stream — that a
+checksum is never cropped to fit, that `[bold]` in a description is shown
+rather than swallowed, that redirected output carries no escape codes. Both of
+the first two were real bugs.
 
 `test_cli.py` runs every command against the **real** API — real routing, real
 auth, real semver resolution, real bytes on disk — with no server running and
@@ -138,3 +151,16 @@ server and quietly stop testing anything; this cannot.
 starts `php -S` and pushes a large artifact through the streaming multipart
 body and back, comparing bytes. A boundary off by one produces a corrupted file
 rather than an error, so only comparing the bytes proves anything.
+
+## How it fits together
+
+| | |
+| --- | --- |
+| `cli.py` | The command tree. Click. Knows what commands exist. |
+| `ui.py` | Tables, colour, progress bars. Rich lives here and nowhere else. |
+| `client.py` | One method per endpoint. No opinion about output. |
+| `transport.py` | HTTP, multipart, streaming. Stdlib only. |
+| `config.py` | The saved URL and token. |
+
+The `Transport` interface at the bottom is the seam the tests use: hand in a
+different one and the whole tool runs against something that is not a network.

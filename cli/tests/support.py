@@ -60,7 +60,7 @@ class PhpTransport(Transport):
             spec["post"] = {k: v for k, v in (request.form or {}).items() if v not in (None, "")}
         return spec
 
-    def send(self, request):
+    def send(self, request, on_progress=None):
         environment = dict(os.environ, REGISTRY_CONFIG=self.config_path)
         result = subprocess.run(
             ["php", str(HANDLER)],
@@ -74,19 +74,29 @@ class PhpTransport(Transport):
             )
 
         payload = json.loads(result.stdout.decode("utf-8"))
+
+        # One process, one response: there is no streaming here to report on,
+        # so progress goes straight to done. Called at all so that a caller
+        # drawing a bar sees it finish rather than sit at zero.
+        if on_progress is not None and request.upload is not None:
+            size = request.upload.size
+            on_progress(size, size)
+
         return Response(
             status=payload["status"],
             headers={k.lower(): v for k, v in payload["headers"].items()},
             body=base64.b64decode(payload["body"]),
         )
 
-    def download(self, request, destination):
+    def download(self, request, destination, on_progress=None):
         response = self.send(request)
         if not response.ok:
             return response
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(response.body)
+        if on_progress is not None:
+            on_progress(len(response.body), len(response.body))
         return Response(response.status, response.headers, b"")
 
 

@@ -5,8 +5,9 @@ asks: your laptop, a CI job, or an application checking whether it is out of
 date. This package is the client; the server it talks to lives in
 ``php/registry`` in the same repository.
 
-Everything is stdlib. A tool you want to install on a build machine at 2am
-should not need a package index to be reachable.
+Click builds the command tree and rich draws the output; everything that
+touches the network is stdlib (urllib), so there is nothing here that needs a
+compiler or a system package to install.
 """
 
 __version__ = "1.0.0"

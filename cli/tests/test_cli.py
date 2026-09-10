@@ -14,7 +14,7 @@ import unittest
 
 from support import PhpTransport, Registry, php_available
 
-from nt.cli import normalise, run
+from nt.cli import repo as repo_group, run, subject_first
 from nt.config import Config
 from nt.errors import NtError
 
@@ -60,6 +60,23 @@ class CliTest(unittest.TestCase):
             run(list(argv), transport=transport, out=out)
         return caught.exception
 
+    def usage_fails(self, *argv):
+        """Runs a command click itself rejects, returning what it told the user.
+
+        These are usage errors, not NtErrors: click validates before the
+        command body runs, so nothing reaches the network. They print to
+        stderr and exit 2.
+        """
+        import contextlib
+
+        out = io.StringIO()
+        errors = io.StringIO()
+        transport = PhpTransport(self.registry.config_path, token=Config.load().token)
+        with contextlib.redirect_stderr(errors):
+            code = run(list(argv), transport=transport, out=out)
+        self.assertEqual(code, 2, "expected a usage error, got %d" % code)
+        return errors.getvalue()
+
     def login(self):
         self.nt("auth", "login", "--password", Registry.PASSWORD, "--label", "tests")
 
@@ -68,35 +85,40 @@ class CliTest(unittest.TestCase):
 
 
 class ArgumentTest(unittest.TestCase):
-    """normalise() has no I/O, so it needs no registry and no php."""
+    """subject_first() has no I/O, so it needs no registry and no php.
+
+    It is given the real command group's verbs rather than a handmade list, so
+    a `repo` command this does not know about cannot slip past it.
+
+    Note that global options no longer appear here at all: Click parses them
+    off in the parent group before the repo group sees its arguments, so the
+    rewrite cannot be defeated by anything in front of the command — which
+    under the old hand-rolled argv scan it could be, and was.
+    """
+
+    VERBS = repo_group.commands
+
+    def rewrite(self, args):
+        return subject_first(args, self.VERBS)
 
     def test_subject_first_is_rewritten_to_verb_first(self):
         self.assertEqual(
-            normalise(["repo", "beagle", "upload", "app.bin"]),
-            ["repo", "upload", "beagle", "app.bin"],
+            self.rewrite(["beagle", "upload", "app.bin"]),
+            ["upload", "beagle", "app.bin"],
         )
-        self.assertEqual(normalise(["repo", "beagle", "list"]), ["repo", "list", "beagle"])
+        self.assertEqual(self.rewrite(["beagle", "list"]), ["list", "beagle"])
 
     def test_verb_first_is_left_alone(self):
-        self.assertEqual(normalise(["repo", "create", "beagle"]), ["repo", "create", "beagle"])
-        self.assertEqual(normalise(["repo", "delete", "beagle"]), ["repo", "delete", "beagle"])
+        self.assertEqual(self.rewrite(["create", "beagle"]), ["create", "beagle"])
+        self.assertEqual(self.rewrite(["delete", "beagle"]), ["delete", "beagle"])
 
-    def test_global_flags_before_the_command_do_not_defeat_it(self):
-        # The rewrite has to survive anything argparse allows in front of the
-        # command, or `nt --json repo x list` quietly stops working.
-        self.assertEqual(
-            normalise(["--json", "repo", "beagle", "list"]),
-            ["--json", "repo", "list", "beagle"],
-        )
-        self.assertEqual(
-            normalise(["--url", "https://x", "repo", "beagle", "info"]),
-            ["--url", "https://x", "repo", "info", "beagle"],
-        )
+    def test_too_short_to_swap_is_left_alone(self):
+        self.assertEqual(self.rewrite(["list"]), ["list"])
+        self.assertEqual(self.rewrite([]), [])
 
-    def test_other_commands_are_untouched(self):
-        self.assertEqual(normalise(["list"]), ["list"])
-        self.assertEqual(normalise(["auth", "login"]), ["auth", "login"])
-        self.assertEqual(normalise([]), [])
+    def test_options_are_not_mistaken_for_a_name(self):
+        self.assertEqual(self.rewrite(["--help"]), ["--help"])
+        self.assertEqual(self.rewrite(["beagle", "--help"]), ["beagle", "--help"])
 
 
 class AuthTest(CliTest):
@@ -252,8 +274,23 @@ class ReleaseTest(CliTest):
         )
 
     def test_a_missing_local_file_is_caught_before_any_request(self):
-        error = self.fails("repo", "beagle-cli", "upload", "/no/such/file", "-v", "1.0.0")
-        self.assertEqual(error.code, "no_local_file")
+        # Validated by click from the argument's own type, so it fails before
+        # the command body runs and nothing is sent.
+        message = self.usage_fails(
+            "repo", "beagle-cli", "upload", "/no/such/file", "-v", "1.0.0"
+        )
+        self.assertIn("/no/such/file", message)
+        self.assertIn("does not exist", message)
+
+    def test_the_client_still_guards_a_missing_file_itself(self):
+        # The CLI is not the only caller of Client.upload, so the check there
+        # has to stand on its own rather than relying on the argument type.
+        from nt.client import Client
+
+        client = Client(PhpTransport(self.registry.config_path, token=Config.load().token))
+        with self.assertRaises(NtError) as caught:
+            client.upload("beagle-cli", "1.0.0", "/no/such/file")
+        self.assertEqual(caught.exception.code, "no_local_file")
 
     def test_a_non_semver_version_is_refused(self):
         error = self.fails("repo", "beagle-cli", "upload", str(self.binary), "-v", "nightly")

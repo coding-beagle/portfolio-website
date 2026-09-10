@@ -7,9 +7,10 @@ is not a network: the test suite points it at the real PHP API running in a
 subprocess, so the commands are exercised end to end with no server, no port
 and no deployment.
 
-``HttpTransport`` is the real one, on urllib, because a release tool that
-cannot be installed without a package index is a release tool that fails on the
-day you need it most.
+``HttpTransport`` is the real one, on urllib: nothing about moving bytes over
+HTTP needs a dependency, and keeping this layer stdlib means a release tool
+that fails to install is one fewer thing that can go wrong on the day it
+matters.
 """
 
 import io
@@ -102,14 +103,21 @@ class Response:
 
 
 class Transport(ABC):
-    """Somewhere to send a request."""
+    """Somewhere to send a request.
+
+    `on_progress` is called as `(done, total)` in bytes while a body moves in
+    either direction, for callers that want to draw a progress bar. `total` is
+    zero when the far end did not say how much there was to come. It is
+    optional everywhere: a transport that cannot report progress simply never
+    calls it, and the caller sees a bar that finishes in one step.
+    """
 
     @abstractmethod
-    def send(self, request):
+    def send(self, request, on_progress=None):
         """Perform `request` and return a :class:`Response`."""
 
     @abstractmethod
-    def download(self, request, destination):
+    def download(self, request, destination, on_progress=None):
         """Perform `request`, writing a successful body to `destination`.
 
         Separate from :meth:`send` so a real implementation can stream to disk
@@ -138,14 +146,14 @@ class HttpTransport(Transport):
                 url += "?" + urllib.parse.urlencode(pairs)
         return url
 
-    def _build(self, request):
+    def _build(self, request, on_progress=None):
         headers = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
 
         data = None
         if request.upload is not None:
-            body = _MultipartBody(request.form, request.upload)
+            body = _MultipartBody(request.form, request.upload, on_progress)
             headers["Content-Type"] = body.content_type
             headers["Content-Length"] = str(len(body))
             data = body
@@ -169,8 +177,8 @@ class HttpTransport(Transport):
             self._url(request), data=data, headers=headers, method=request.method.upper()
         )
 
-    def _open(self, request, timeout):
-        prepared = self._build(request)
+    def _open(self, request, timeout, on_progress=None):
+        prepared = self._build(request, on_progress)
         try:
             return urllib.request.urlopen(prepared, timeout=timeout, context=self._context)
         except urllib.error.HTTPError as error:
@@ -190,16 +198,16 @@ class HttpTransport(Transport):
 
     # -- sending ----------------------------------------------------------
 
-    def send(self, request):
+    def send(self, request, on_progress=None):
         timeout = TRANSFER_TIMEOUT if request.upload is not None else CONNECT_TIMEOUT
-        with self._open(request, timeout) as response:
+        with self._open(request, timeout, on_progress) as response:
             return Response(
                 status=response.status,
                 headers={k.lower(): v for k, v in response.headers.items()},
                 body=response.read(),
             )
 
-    def download(self, request, destination):
+    def download(self, request, destination, on_progress=None):
         with self._open(request, TRANSFER_TIMEOUT) as response:
             headers = {k.lower(): v for k, v in response.headers.items()}
             if not 200 <= response.status < 300:
@@ -212,6 +220,8 @@ class HttpTransport(Transport):
             destination = Path(destination)
             destination.parent.mkdir(parents=True, exist_ok=True)
             partial = destination.with_name(destination.name + ".part")
+            total = int(headers.get("content-length") or 0)
+            done = 0
             try:
                 with open(partial, "wb") as handle:
                     while True:
@@ -219,6 +229,9 @@ class HttpTransport(Transport):
                         if not chunk:
                             break
                         handle.write(chunk)
+                        done += len(chunk)
+                        if on_progress is not None:
+                            on_progress(done, total)
                 os.replace(partial, destination)
             except BaseException:
                 partial.unlink(missing_ok=True)
@@ -235,9 +248,11 @@ class _MultipartBody(io.RawIOBase):
     uploading a 500 MB build and needing 500 MB of RAM to do it.
     """
 
-    def __init__(self, fields, upload):
+    def __init__(self, fields, upload, on_progress=None):
         self.boundary = "----nt" + os.urandom(16).hex()
         self._upload = upload
+        self._on_progress = on_progress
+        self._sent = 0
 
         preamble = io.BytesIO()
         for name, value in (fields or {}).items():
@@ -302,6 +317,15 @@ class _MultipartBody(io.RawIOBase):
                     self._stage = 3
             out += chunk
             size -= len(chunk)
+
+        # Reported from here because this is the only place that knows when
+        # bytes actually leave: http.client pulls from this object at its own
+        # pace, so counting at the call site would show the whole file "sent"
+        # the instant the request was built.
+        if out and self._on_progress is not None:
+            self._sent += len(out)
+            self._on_progress(self._sent, self._length)
+
         return bytes(out)
 
     def close(self):

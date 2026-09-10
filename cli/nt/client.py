@@ -98,24 +98,27 @@ class Client:
             % (_segment(repo), _segment(version), _segment(platform)),
         )
 
-    def upload(self, repo, version, path, platform="", notes=""):
+    def upload(self, repo, version, path, platform="", notes="", on_progress=None):
         path = Path(path)
         if not path.is_file():
             raise NtError("There is no file at %s." % path, code="no_local_file")
         if path.stat().st_size == 0:
             raise NtError("%s is empty." % path, code="empty_file")
 
-        response = self.transport.send(Request(
-            method="POST",
-            path="/repos/%s/versions/%s/artifacts" % (_segment(repo), _segment(version)),
-            upload=Upload(path),
-            form={"platform": platform, "notes": notes},
-        ))
+        response = self.transport.send(
+            Request(
+                method="POST",
+                path="/repos/%s/versions/%s/artifacts" % (_segment(repo), _segment(version)),
+                upload=Upload(path),
+                form={"platform": platform, "notes": notes},
+            ),
+            on_progress=on_progress,
+        )
         if not response.ok:
             raise self._error(response)
         return response.json()
 
-    def download(self, repo, version, destination, platform="", prerelease=False):
+    def download(self, repo, version, destination, platform="", prerelease=False, on_progress=None):
         """Fetches one artifact to `destination`, which must be a file path."""
         response = self.transport.download(
             Request(
@@ -124,6 +127,7 @@ class Client:
                 query={"platform": platform, "prerelease": "1" if prerelease else ""},
             ),
             destination,
+            on_progress=on_progress,
         )
         if not response.ok:
             raise self._error(response)

@@ -182,8 +182,8 @@ target you ship. Everything needs a token; there is no anonymous read path.
 Three pieces:
 
 - **The API** — `php/registry`. PHP over SQLite, no dependencies, no build step.
-- **`nt`** — `cli/`, the command line client. Stdlib-only Python, so it
-  installs on a build machine without a package index being reachable.
+- **`nt`** — `cli/`, the command line client. Python on click and rich; the
+  network layer is stdlib, so nothing needs compiling to install it.
 - **The browser UI** — a build-free page at the root of the subdomain, using
   exactly the same API. Anything you can do there you can script, and vice
   versa.

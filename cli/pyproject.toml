@@ -12,9 +12,13 @@ license = { text = "MIT" }
 authors = [{ name = "Nicholas Teague" }]
 keywords = ["registry", "releases", "artifacts", "auto-update"]
 
-# Deliberately none. This gets installed on build machines and in CI images
-# where the fewest moving parts wins, and everything it needs is in the stdlib.
-dependencies = []
+# Two, both ubiquitous and pure Python, so `pip install` needs no compiler and
+# no system packages. Everything that touches the network is still stdlib
+# (urllib), so these are presentation only.
+dependencies = [
+    "click>=8.0",
+    "rich>=13.0",
+]
 
 [project.scripts]
 nt = "nt.cli:main"
