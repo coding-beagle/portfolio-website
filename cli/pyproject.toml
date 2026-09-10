@@ -25,3 +25,10 @@ nt = "nt.cli:main"
 
 [tool.setuptools]
 packages = ["nt"]
+
+# The integration guide ships with the client so `nt integrate` works from a
+# plain `pip install`, with no repository checked out. It is a copy of
+# php/registry/INTEGRATION.md; cli/tests/test_integrate.py fails if the two
+# ever differ, and `make sync_integration_doc` puts them back in step.
+[tool.setuptools.package-data]
+nt = ["data/*.md"]

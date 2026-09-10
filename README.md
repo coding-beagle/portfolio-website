@@ -199,7 +199,8 @@ The API is documented in full in [`php/registry/README.md`](php/registry/README.
 and the client in [`cli/README.md`](cli/README.md).
 [`php/registry/INTEGRATION.md`](php/registry/INTEGRATION.md) is a self-contained
 guide to hand to whoever — or whatever — is building an app that updates itself
-from the registry.
+from the registry; it ships inside the client too, so `nt manual` prints it
+without a checkout.
 
 ### Setting it up on the server
 

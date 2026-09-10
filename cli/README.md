@@ -43,6 +43,7 @@ the parser sees.
 | `nt auth revoke <id>` | Revoke one token — a laptop you no longer have. |
 | `nt list` | Every repository, with its latest release. |
 | `nt health` | Whether the registry is up. Needs no token. |
+| `nt manual` | Print the integration guide. Also `nt integrate`, `nt docs`. |
 | `nt repo create <repo> [-d DESC]` | Create a repository. |
 | `nt repo delete <repo> [-y]` | Delete it and every release in it. |
 | `nt repo <repo> list` | Every version, newest first. |
@@ -121,6 +122,21 @@ you are compiling into a shipped application, where rotation is not possible.
 | `NT_CONFIG` | Use a different config file entirely. |
 | `NT_PASSWORD` | Read by `auth login` instead of prompting. |
 | `--url`, `--json`, `--insecure` | Per-command overrides. |
+
+## Building a client against the registry
+
+`nt manual` prints a self-contained integration guide — the auth model, the
+auto-update flow, tested reference implementations in Python, Node and shell,
+and the rules that otherwise cost an afternoon. It ships inside the package, so
+it works from a plain `pip install` with nothing checked out.
+
+```sh
+nt manual > REGISTRY.md                    # hand this to a developer or an agent
+nt manual --example python > update.py     # a working updater to start from
+nt manual --render | less -R               # formatted for reading
+```
+
+Aliases: `nt integrate`, `nt docs`.
 
 ## Against a local registry
 

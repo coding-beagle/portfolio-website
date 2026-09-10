@@ -86,6 +86,14 @@ REGISTRY_URL ?= https://api.nteague.com
 smoke_registry:
 	php/registry/tests/smoke.sh "$(REGISTRY_URL)" "$(REGISTRY_PASSWORD)"
 
+# The guide ships inside the Python package so `nt manual` works from a plain
+# pip install, with no repository checked out. cli/tests/test_manual.py fails
+# if the two copies differ.
+# copy the integration guide into the nt package
+sync_integration_doc:
+	cp php/registry/INTEGRATION.md cli/nt/data/INTEGRATION.md
+	@echo "Synced cli/nt/data/INTEGRATION.md"
+
 # install the nt CLI into the current environment, editable
 install_nt:
 	pip install -e ./cli

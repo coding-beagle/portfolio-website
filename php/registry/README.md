@@ -7,7 +7,8 @@ themselves, checking whether they are out of date.
 > **Building a client?** [`INTEGRATION.md`](INTEGRATION.md) is a self-contained
 > guide written to be handed to another developer or coding agent: the full
 > auto-update flow, tested reference implementations in Python and Node, and
-> the three rules that will otherwise cost you an afternoon.
+> the three rules that will otherwise cost you an afternoon. It also ships with
+> the client — `nt manual` prints it, with no repository needed.
 
 - **Server** — this directory. PHP, SQLite, no dependencies, no build step.
 - **Client** — [`cli/`](../../cli), the `nt` command line tool.

@@ -39,6 +39,32 @@ def subject_first(args, commands):
     return args
 
 
+#: Alternate spellings for a command, because `manual`, `integrate` and `docs`
+#: are all things someone reaches for when they want the same document.
+ALIASES = {
+    "integrate": "manual",
+    "docs": "manual",
+}
+
+
+class AliasedGroup(click.Group):
+    """A group that answers to a few extra names.
+
+    Aliases resolve but are deliberately not listed: `--help` should show one
+    way to do each thing, not three.
+    """
+
+    def get_command(self, ctx, name):
+        return super().get_command(ctx, ALIASES.get(name, name))
+
+    def resolve_command(self, ctx, args):
+        # Click reports the name the user typed in usage strings and errors.
+        # Rewriting it here means `nt integrate --nonsense` blames `manual`,
+        # which is the command that actually has the options.
+        _, command, rest = super().resolve_command(ctx, args)
+        return command.name, command, rest
+
+
 class RepoGroup(click.Group):
     """A group that accepts its subject before its verb.
 
@@ -115,7 +141,7 @@ pass_app = click.make_pass_decorator(App)
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"], "max_content_width": 100}
 
 
-@click.group(context_settings=CONTEXT_SETTINGS)
+@click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option("--url", help="Registry to talk to. Overrides the saved one and $NT_URL.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw JSON instead of a table.")
 @click.option("--insecure", is_flag=True, help="Skip TLS verification. Test servers only.")
@@ -572,6 +598,100 @@ def repo_remove(app, name, version_spec, platform, yes):
     else:
         client.delete_version(name, version_spec)
     app.say("Removed %s." % what)
+    return 0
+
+
+# --- the manual ----------------------------------------------------------
+
+#: Where each reference implementation lives in the guide, so `--example` can
+#: lift one out. Keyed by the name a caller types.
+EXAMPLES = {
+    "python": ("## 5. Reference implementation", "python"),
+    "node": ("## 6. Reference implementation", "js"),
+    "sh": ("## 7. Shell", "sh"),
+}
+
+
+def manual_text():
+    """The integration guide, as shipped with the package.
+
+    A copy of php/registry/INTEGRATION.md, bundled so this works from a plain
+    `pip install` with no repository checked out. The two are kept identical by
+    a test rather than by good intentions.
+    """
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / "data" / "INTEGRATION.md"
+    if not path.is_file():
+        raise NtError(
+            "The integration guide is missing from this installation.",
+            hint="Reinstall with `pip install -e cli` from the repository root.",
+        )
+    return path.read_text("utf-8")
+
+
+def extract_example(text, name):
+    """Lifts one reference implementation out of the guide."""
+    import re
+
+    heading, fence = EXAMPLES[name]
+    pattern = re.compile(
+        re.escape(heading) + r".*?```" + fence + r"\n(.*?)```", re.S
+    )
+    match = pattern.search(text)
+    if match is None:
+        # Only reachable if the guide has been restructured without updating
+        # EXAMPLES, which is precisely the kind of silent breakage that would
+        # otherwise be found by a user rather than by the test suite.
+        raise NtError("The %s example is not where it should be in the guide." % name)
+    return match.group(1)
+
+
+@cli.command("manual")
+@click.option(
+    "--example", type=click.Choice(sorted(EXAMPLES)),
+    help="Print only that reference implementation, ready to save.",
+)
+@click.option(
+    "--render", is_flag=True,
+    help="Format it for reading in a terminal instead of emitting markdown.",
+)
+@click.option(
+    "-o", "--output", type=click.Path(dir_okay=False, writable=True),
+    help="Write to a file instead of stdout.",
+)
+@pass_app
+def manual(app, example, render, output):
+    """Print the integration guide, for building a client against the registry.
+
+    Written to be handed to another developer or a coding agent: the auth
+    model, the auto-update flow, tested reference implementations, and the
+    rules that otherwise cost an afternoon. Also `nt integrate`, `nt docs`.
+
+    \b
+    nt manual > REGISTRY.md
+    nt manual --example python > update.py
+    nt manual --render | less -R
+    """
+    text = extract_example(manual_text(), example) if example else manual_text()
+
+    if output:
+        from pathlib import Path
+
+        Path(output).write_text(text, encoding="utf-8")
+        app.ui.good("Wrote %s (%s)." % (output, human_bytes(len(text.encode("utf-8")))))
+        return 0
+
+    if render and not example:
+        from rich.markdown import Markdown
+
+        app.ui.console.print(Markdown(text))
+        return 0
+
+    # Raw and unmodified by default. This gets piped into files and into other
+    # tools far more often than it gets read at a prompt, and markdown that has
+    # been reflowed for a terminal is no longer the document it was.
+    app.ui.raw(text.rstrip("\n"))
     return 0
 
 
