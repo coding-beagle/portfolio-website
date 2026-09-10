@@ -11,6 +11,18 @@
  * SHA-256 and not bcrypt for the tokens, deliberately: a token is 256 bits of
  * real randomness, so there is no dictionary to slow an attacker down with,
  * and every authenticated request would have to pay the bcrypt cost.
+ *
+ * There are two kinds of token, differing only in how they are made and how
+ * long they last:
+ *
+ *   'session' — from `nt auth login` or the browser. Lives for
+ *               token_ttl_seconds, which is short enough that a leaked one
+ *               stops mattering on its own.
+ *   'named'   — minted by an already-authenticated caller with a label and an
+ *               explicit lifetime, which may be *never expires*. This is what
+ *               a CI job or a shipped auto-updater carries: it can be revoked
+ *               on its own, without disturbing anybody's session, and it does
+ *               not silently stop working three weeks into the year.
  */
 
 declare(strict_types=1);
@@ -18,6 +30,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/limits.php';
+
+/** An `expires_at` of 0 means the token never expires. */
+const REG_TOKEN_NEVER = 0;
+
+/** The longest explicit lifetime a named token may be given, in days. */
+const REG_MAX_TOKEN_DAYS = 3650;
 
 /** Whether a password has been configured at all. */
 function reg_auth_configured(): bool
@@ -60,27 +78,47 @@ function reg_login(string $password, string $label = ''): ?array
         return null;
     }
 
-    return reg_issue_token($label);
+    // Explicitly a session: it came from a password, and it should age out
+    // like one. Named tokens are minted deliberately, by an endpoint of their
+    // own, so that "long lived" is never something you get by accident.
+    return reg_issue_token($label, null, 'session');
 }
 
 /**
  * Mints a token. The plaintext is returned exactly once and never stored.
  *
- * @return array{token:string,expires_at:int,id:string}
+ * @param int|null $ttl Seconds to live. Null takes the configured default;
+ *        REG_TOKEN_NEVER (0) means the token never expires, which is only
+ *        appropriate for a named token that something is going to carry
+ *        around — and which is exactly why those have to be labelled.
+ * @return array{token:string,expires_at:int,id:string,kind:string,label:string}
  */
-function reg_issue_token(string $label = '', ?int $ttl = null): array
+function reg_issue_token(string $label = '', ?int $ttl = null, string $kind = 'session'): array
 {
     $now = time();
     $ttl ??= (int) reg_config()['token_ttl_seconds'];
+
+    // 0 in, 0 out: the sentinel is stored as-is rather than as `now + 0`,
+    // which would be a token that expired the instant it was created.
+    $expiresAt = $ttl === REG_TOKEN_NEVER ? REG_TOKEN_NEVER : $now + $ttl;
+
     $token = reg_token();
     $id = reg_uuid();
 
     reg_db()->prepare(
-        'INSERT INTO tokens (id, token_hash, label, created_at, expires_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?)'
-    )->execute([$id, reg_hash_token($token), substr($label, 0, 100), $now, $now + $ttl, $now]);
+        'INSERT INTO tokens (id, token_hash, label, kind, created_at, expires_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )->execute([
+        $id, reg_hash_token($token), substr($label, 0, 100), $kind, $now, $expiresAt, $now,
+    ]);
 
-    return ['id' => $id, 'token' => $token, 'expires_at' => $now + $ttl];
+    return [
+        'id' => $id,
+        'token' => $token,
+        'expires_at' => $expiresAt,
+        'kind' => $kind,
+        'label' => substr($label, 0, 100),
+    ];
 }
 
 /**
@@ -96,8 +134,11 @@ function reg_authenticate(?string $token): ?array
         return null;
     }
 
+    // `expires_at = 0` is the never-expires sentinel, so it has to be admitted
+    // explicitly — a plain `expires_at > ?` rejects precisely the tokens that
+    // were meant to outlast everything.
     $statement = reg_db()->prepare(
-        'SELECT * FROM tokens WHERE token_hash = ? AND expires_at > ?'
+        'SELECT * FROM tokens WHERE token_hash = ? AND (expires_at = 0 OR expires_at > ?)'
     );
     $statement->execute([reg_hash_token($token), time()]);
     $row = $statement->fetch();
@@ -145,13 +186,18 @@ function reg_revoke_all_tokens(): int
  */
 function reg_list_tokens(): array
 {
-    $rows = reg_db()->prepare('SELECT * FROM tokens WHERE expires_at > ? ORDER BY created_at DESC');
+    $rows = reg_db()->prepare(
+        'SELECT * FROM tokens WHERE expires_at = 0 OR expires_at > ? ORDER BY created_at DESC'
+    );
     $rows->execute([time()]);
 
     return array_map(static fn(array $row): array => [
         'id' => $row['id'],
         'label' => $row['label'],
+        'kind' => $row['kind'] ?? 'session',
         'createdAt' => (int) $row['created_at'],
+        // 0 means never. Clients render it, so it is passed through rather
+        // than turned into some far-future date that would only be a lie.
         'expiresAt' => (int) $row['expires_at'],
         'lastSeenAt' => (int) $row['last_seen_at'],
     ], $rows->fetchAll());
@@ -163,10 +209,14 @@ function reg_list_tokens(): array
  */
 function reg_sweep_tokens(?int $limit = null): int
 {
-    $sql = 'DELETE FROM tokens WHERE expires_at <= ?';
+    // `expires_at > 0` first, and it is not optional: without it this deletes
+    // every never-expires token on the next request, which would take out the
+    // CI jobs and every shipped updater at once.
+    $sql = 'DELETE FROM tokens WHERE expires_at > 0 AND expires_at <= ?';
     $parameters = [time()];
     if ($limit !== null && $limit > 0) {
-        $sql .= ' AND id IN (SELECT id FROM tokens WHERE expires_at <= ? LIMIT ' . (int) $limit . ')';
+        $sql .= ' AND id IN (SELECT id FROM tokens WHERE expires_at > 0 AND expires_at <= ?'
+            . ' LIMIT ' . (int) $limit . ')';
         $parameters[] = time();
     }
     $statement = reg_db()->prepare($sql);

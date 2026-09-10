@@ -41,6 +41,11 @@ function reg_migrate(PDO $pdo): void
 {
     // A token is stored only as a hash: the database is a backup away from
     // somewhere else, and a stolen copy should not hand over live credentials.
+    //
+    // `expires_at` of 0 means "never", which is what makes a token safe to
+    // compile into a shipped application. Every query that touches expiry has
+    // to say so explicitly — see reg_authenticate() and reg_sweep_tokens(),
+    // where a plain `expires_at <= time()` would delete exactly those tokens.
     $pdo->exec(<<<'SQL'
         CREATE TABLE IF NOT EXISTS tokens (
             id           TEXT PRIMARY KEY,
@@ -106,6 +111,15 @@ function reg_migrate(PDO $pdo): void
             PRIMARY KEY (bucket, window_start)
         )
     SQL);
+
+    // Columns added after the first deploy. CREATE TABLE IF NOT EXISTS does
+    // nothing to a table that already exists, so anything new has to come
+    // through here or an upgraded install quietly runs without it.
+    //
+    // 'session' is the default so that tokens issued before this column
+    // existed — every one of which came from a login — describe themselves
+    // correctly rather than as an empty string.
+    reg_add_column($pdo, 'tokens', 'kind', "TEXT NOT NULL DEFAULT 'session'");
 
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_tokens_expiry ON tokens(expires_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_versions_repo ON versions(repo_id, major, minor, patch)');

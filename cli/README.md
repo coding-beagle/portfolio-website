@@ -39,6 +39,7 @@ the parser sees.
 | `nt auth logout` | Revoke this machine's token, server-side too. |
 | `nt auth status` | Which registry, and whether you are logged in. |
 | `nt auth tokens` | Every live token, and when it was last used. |
+| `nt auth issue <label> --days N` | Mint a named token for CI or a shipped app. `--never` for one that does not expire. |
 | `nt auth revoke <id>` | Revoke one token — a laptop you no longer have. |
 | `nt list` | Every repository, with its latest release. |
 | `nt health` | Whether the registry is up. Needs no token. |
@@ -100,8 +101,15 @@ export NT_TOKEN=...                    # from `nt auth login` on your machine
 nt repo beagle-cli upload dist/beagle -v "$VERSION" -p linux-x64
 ```
 
-Mint a token for this and nothing else, so `nt auth revoke` can retire it
-without disturbing your own sessions.
+Mint a named token for this and nothing else:
+
+```sh
+nt auth issue "github actions" --days 365
+```
+
+It is shown once, carries its label in `nt auth tokens`, and `nt auth revoke`
+retires it without disturbing your own sessions. Use `--never` only for a token
+you are compiling into a shipped application, where rotation is not possible.
 
 ## Configuration
 

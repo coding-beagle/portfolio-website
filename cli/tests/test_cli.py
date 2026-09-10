@@ -180,6 +180,59 @@ class AuthTest(CliTest):
         labels = [t["label"] for t in self.json_of("auth", "tokens")["tokens"]]
         self.assertEqual(labels, ["second"])
 
+    def test_a_named_token_can_be_minted(self):
+        self.login()
+        out = self.nt("auth", "issue", "github actions", "--days", "90")
+        self.assertIn("Minted a token", out)
+        self.assertIn("only time the token is shown", out)
+
+        listed = self.json_of("auth", "tokens")["tokens"]
+        minted = [t for t in listed if t["label"] == "github actions"][0]
+        self.assertEqual(minted["kind"], "named")
+        self.assertGreater(minted["expiresAt"], 0)
+
+    def test_a_minted_token_actually_works(self):
+        self.login()
+        token = self.json_of("auth", "issue", "ci", "--days", "30")["token"]
+
+        # Used the way CI would: no config file involved at all.
+        self.registry.nt_config.unlink()
+        os.environ["NT_TOKEN"] = token
+        self.nt("list")
+
+    def test_a_never_expiring_token_says_so(self):
+        self.login()
+        result = self.json_of("auth", "issue", "beagle-cli updater", "--never")
+        self.assertTrue(result["neverExpires"])
+        self.assertEqual(result["expiresAt"], 0)
+
+        # Rendered as "never", not as a date from 1970.
+        self.assertIn("never", self.nt("auth", "tokens"))
+
+    def test_a_lifetime_is_not_chosen_for_you(self):
+        self.login()
+        error = self.fails("auth", "issue", "ci")
+        self.assertIn("how long", error.message)
+        self.assertIn("--never", error.hint)
+
+        self.assertIn(
+            "not both",
+            self.fails("auth", "issue", "ci", "--days", "30", "--never").message,
+        )
+
+    def test_revoking_a_named_token_leaves_the_others(self):
+        self.login()
+        keep = self.json_of("auth", "issue", "keep me", "--never")["token"]
+        drop = self.json_of("auth", "issue", "drop me", "--days", "30")
+
+        self.nt("auth", "revoke", drop["tokenId"])
+
+        os.environ["NT_TOKEN"] = drop["token"]
+        self.assertEqual(self.fails("list").code, "unauthorised")
+
+        os.environ["NT_TOKEN"] = keep
+        self.nt("list")
+
     def test_a_token_from_the_environment_is_used(self):
         # How a CI job authenticates: no login step, nothing written to disk.
         self.login()

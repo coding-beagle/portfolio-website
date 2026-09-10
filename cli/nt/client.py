@@ -59,6 +59,10 @@ class Client:
     def tokens(self):
         return self._call("GET", "/auth/tokens")
 
+    def issue_token(self, label, days):
+        """Mints a named token. `days` of 0 means it never expires."""
+        return self._call("POST", "/auth/tokens", body={"label": label, "days": days})
+
     def revoke(self, token_id):
         return self._call("DELETE", "/auth/tokens/" + token_id)
 

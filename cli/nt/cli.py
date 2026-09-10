@@ -233,18 +233,79 @@ def auth_tokens(app):
     rows = [
         (
             token["id"][:8],
+            token["kind"],
             token["label"] or "—",
             human_time(token["lastSeenAt"]),
-            human_time(token["expiresAt"]),
+            # An expiry of 0 is the never-expires sentinel; rendering it as a
+            # date would show 1970 and read as a bug.
+            "never" if not token["expiresAt"] else human_time(token["expiresAt"]),
             "<- this one" if token["id"] == data.get("you") else "",
         )
         for token in data["tokens"]
     ]
     app.ui.table(
-        [("ID", "dim"), ("LABEL", ""), ("LAST USED", ""), ("EXPIRES", ""), ("", "green")],
+        [
+            ("ID", "dim"),
+            ("KIND", ""),
+            ("LABEL", ""),
+            ("LAST USED", ""),
+            ("EXPIRES", ""),
+            ("", "green"),
+        ],
         rows,
         empty="No live tokens.",
     )
+    return 0
+
+
+@auth.command("issue")
+@click.argument("label")
+@click.option(
+    "--days", type=int, default=None,
+    help="How long it lives. Required unless --never.",
+)
+@click.option(
+    "--never", is_flag=True,
+    help="Never expires. For a token compiled into a shipped application.",
+)
+@pass_app
+def auth_issue(app, label, days, never):
+    """Mint a named token for CI or a shipped app.
+
+    LABEL says what will be holding it, so it can be revoked later without
+    guessing. The token is shown once and cannot be retrieved again.
+    """
+    if never and days is not None:
+        raise NtError("Pass either --days or --never, not both.")
+    if not never and days is None:
+        raise NtError(
+            "Say how long the token should live.",
+            hint="--days 90, or --never for a token you are shipping.",
+        )
+
+    result = app.connect().issue_token(label, 0 if never else days)
+
+    if app.emit(result):
+        return 0
+
+    app.ui.good("Minted a token for %s." % result["label"])
+    app.say()
+    app.ui.raw(result["token"])
+    app.say()
+    app.ui.field(
+        "Expires:  ",
+        "never" if result["neverExpires"] else human_time(result["expiresAt"]),
+        style="yellow" if result["neverExpires"] else "",
+    )
+    app.ui.field("Revoke:   ", "nt auth revoke %s" % result["tokenId"])
+    app.say()
+    # Said once, plainly, at the only moment it can still be acted on.
+    app.ui.warn("This is the only time the token is shown. Copy it now.")
+    if result["neverExpires"]:
+        app.say(
+            "It never expires, so revoking it is the only way to retire it. "
+            "Anyone holding it can read every repository."
+        )
     return 0
 
 

@@ -79,6 +79,10 @@ function reg_route_authenticated(RegRequest $request, string $path, array $auth)
         return RegResponse::json(200, ['tokens' => reg_list_tokens(), 'you' => $auth['id']]);
     }
 
+    if ($path === '/auth/tokens' && $method === 'POST') {
+        return reg_route_issue_token($request);
+    }
+
     if ($path === '/auth/tokens' && $method === 'DELETE') {
         return RegResponse::json(200, ['revoked' => reg_revoke_all_tokens()]);
     }
@@ -227,6 +231,77 @@ function reg_route_login(RegRequest $request): RegResponse
         'token' => $issued['token'],
         'tokenId' => $issued['id'],
         'expiresAt' => $issued['expires_at'],
+    ]);
+}
+
+/**
+ * Mints a named token: labelled, with an explicit lifetime, revocable on its
+ * own.
+ *
+ * This is what a CI job or a shipped auto-updater carries. A login token is
+ * the wrong thing for either: it expires on the ordinary schedule, so an
+ * embedded one stops working partway through the year, and revoking it means
+ * working out which of several unlabelled sessions it was.
+ *
+ * Minting requires an existing token rather than the password, so the password
+ * is typed in one place only and a stolen long-lived token cannot be used to
+ * mint more that outlive its own revocation... which it can, in fact, so see
+ * the note in the README about treating one as a full credential.
+ */
+function reg_route_issue_token(RegRequest $request): RegResponse
+{
+    $body = $request->json();
+
+    // Required, not optional. The entire point of a named token is being able
+    // to tell later which one it was, and an unlabelled long-lived token is
+    // one nobody will dare revoke.
+    $label = trim((string) ($body['label'] ?? ''));
+    if ($label === '') {
+        return RegResponse::error(
+            400,
+            'no_label',
+            'A named token needs a label — what is going to be holding it. '
+            . 'For example: "github actions" or "beagle-cli updater".'
+        );
+    }
+
+    $days = $body['days'] ?? null;
+    if ($days === null) {
+        return RegResponse::error(
+            400,
+            'no_lifetime',
+            'Say how long this token should live: "days": 90, or "days": 0 for a '
+            . 'token that never expires.'
+        );
+    }
+    if (!is_int($days) && !(is_string($days) && ctype_digit($days))) {
+        return RegResponse::error(400, 'bad_lifetime', '"days" must be a whole number of days.');
+    }
+
+    $days = (int) $days;
+    if ($days < 0 || $days > REG_MAX_TOKEN_DAYS) {
+        return RegResponse::error(
+            400,
+            'bad_lifetime',
+            'A token may live for 0 days (never expires) up to ' . REG_MAX_TOKEN_DAYS . '.'
+        );
+    }
+
+    $issued = reg_issue_token(
+        $label,
+        $days === 0 ? REG_TOKEN_NEVER : $days * 86400,
+        'named'
+    );
+
+    return RegResponse::json(201, [
+        'token' => $issued['token'],
+        'tokenId' => $issued['id'],
+        'label' => $issued['label'],
+        'kind' => 'named',
+        // 0 means never. Said plainly as well, because a client rendering a
+        // date from 0 would show 1970 and look like a bug.
+        'expiresAt' => $issued['expires_at'],
+        'neverExpires' => $issued['expires_at'] === REG_TOKEN_NEVER,
     ]);
 }
 

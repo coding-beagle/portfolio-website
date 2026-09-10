@@ -613,6 +613,109 @@ $stale = reg_issue_token('also short lived', 1);
 reg_db()->prepare('UPDATE tokens SET expires_at = ? WHERE id = ?')->execute([time() - 1, $stale['id']]);
 checkThat('as does the cron sweeper', reg_sweep_tokens() >= 1);
 
+// --- named tokens --------------------------------------------------------
+// The kind a CI job or a shipped auto-updater carries: labelled, with a
+// lifetime of its own, revocable without disturbing anybody's session.
+echo "\nnamed tokens\n";
+
+$token = api('POST', '/api/auth/login', [
+    'json' => ['password' => TEST_PASSWORD],
+    'ip' => '198.51.100.41',
+])->decoded()['token'];
+
+$named = api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'github actions', 'days' => 90],
+]);
+check('a named token can be minted', $named->status, 201);
+check('it says what it is', $named->decoded()['kind'], 'named');
+check('and carries its label', $named->decoded()['label'], 'github actions');
+checkThat('with an expiry about 90 days out', abs(
+    $named->decoded()['expiresAt'] - (time() + 90 * 86400)
+) < 10);
+check('and is not marked as never expiring', $named->decoded()['neverExpires'], false);
+checkThat('it actually works', api('GET', '/api/repos', [
+    'token' => $named->decoded()['token'],
+])->status === 200);
+
+$forever = api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'beagle-cli updater', 'days' => 0],
+]);
+check('a token can be minted that never expires', $forever->status, 201);
+check('which it says plainly', $forever->decoded()['neverExpires'], true);
+check('rather than as a date', $forever->decoded()['expiresAt'], 0);
+
+$foreverToken = $forever->decoded()['token'];
+check('it authenticates', api('GET', '/api/repos', ['token' => $foreverToken])->status, 200);
+
+// The trap this whole feature walks into: `expires_at` of 0 is the sentinel
+// for "never", and every query that filters on expiry reads it as "expired in
+// 1970" unless told otherwise. Getting this wrong deletes every shipped
+// updater's credential on the next request.
+reg_sweep_tokens();
+check('the sweeper does not take it', api('GET', '/api/repos', ['token' => $foreverToken])->status, 200);
+reg_sweep_tokens(5);
+check('nor does the per-request sweep', api('GET', '/api/repos', ['token' => $foreverToken])->status, 200);
+checkThat('and it is still in the listing', in_array(
+    'beagle-cli updater',
+    array_column(api('GET', '/api/auth/tokens', ['token' => $token])->decoded()['tokens'], 'label'),
+    true
+));
+
+// Meanwhile an ordinary expired token still goes.
+$doomed = reg_issue_token('doomed', 60, 'named');
+reg_db()->prepare('UPDATE tokens SET expires_at = ? WHERE id = ?')
+    ->execute([time() - 1, $doomed['id']]);
+checkThat('an expired named token is still swept', reg_sweep_tokens() >= 1);
+check('and stops working', api('GET', '/api/repos', ['token' => $doomed['token']])->status, 401);
+
+// Revoking one must not touch the others: that is the whole reason for
+// minting a token per consumer rather than sharing one.
+$namedId = $named->decoded()['tokenId'];
+check('a named token can be revoked on its own', api('DELETE', '/api/auth/tokens/' . $namedId, [
+    'token' => $token,
+])->status, 200);
+check('it stops working', api('GET', '/api/repos', ['token' => $named->decoded()['token']])->status, 401);
+check('and the others are untouched', api('GET', '/api/repos', ['token' => $foreverToken])->status, 200);
+
+$listed = api('GET', '/api/auth/tokens', ['token' => $token])->decoded()['tokens'];
+$byLabel = array_column($listed, 'kind', 'label');
+check('a login token describes itself as a session', $byLabel[''] ?? null, 'session');
+check('and a minted one as named', $byLabel['beagle-cli updater'] ?? null, 'named');
+
+check('a token with no label is refused', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['days' => 30],
+])->errorCode(), 'no_label');
+check('as is a blank one', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => '   ', 'days' => 30],
+])->errorCode(), 'no_label');
+
+// No default lifetime: "how long should this live" is exactly the decision
+// that should not be made silently on the caller's behalf.
+check('a lifetime must be given', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'ci'],
+])->errorCode(), 'no_lifetime');
+check('a negative lifetime is refused', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'ci', 'days' => -1],
+])->errorCode(), 'bad_lifetime');
+check('an absurd one is refused', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'ci', 'days' => 100000],
+])->errorCode(), 'bad_lifetime');
+check('and so is a non-number', api('POST', '/api/auth/tokens', [
+    'token' => $token,
+    'json' => ['label' => 'ci', 'days' => 'forever'],
+])->errorCode(), 'bad_lifetime');
+
+check('minting needs a token of your own', api('POST', '/api/auth/tokens', [
+    'json' => ['label' => 'ci', 'days' => 30],
+])->status, 401);
+
 // --- routing -------------------------------------------------------------
 echo "\nrouting\n";
 

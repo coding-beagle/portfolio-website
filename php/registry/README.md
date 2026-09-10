@@ -4,6 +4,11 @@ A private release registry: versioned build artifacts, uploaded from a laptop
 or from CI, downloaded by whatever needs them — including the applications
 themselves, checking whether they are out of date.
 
+> **Building a client?** [`INTEGRATION.md`](INTEGRATION.md) is a self-contained
+> guide written to be handed to another developer or coding agent: the full
+> auto-update flow, tested reference implementations in Python and Node, and
+> the three rules that will otherwise cost you an afternoon.
+
 - **Server** — this directory. PHP, SQLite, no dependencies, no build step.
 - **Client** — [`cli/`](../../cli), the `nt` command line tool.
 - **Browser** — the same API, at the root of the subdomain.
@@ -220,16 +225,45 @@ Revokes the calling token. → `{"revoked": true}`
 
 #### `GET /auth/tokens`
 
-Every live token. No hashes ever leave the server.
+Every live token. No hashes ever leave the server. An `expiresAt` of `0` means
+the token never expires.
 
 ```json
 {
   "tokens": [
-    { "id": "uuid", "label": "laptop", "createdAt": 0, "expiresAt": 0, "lastSeenAt": 0 }
+    { "id": "uuid", "label": "laptop", "kind": "session",
+      "createdAt": 0, "expiresAt": 1791656850, "lastSeenAt": 0 }
   ],
   "you": "uuid"
 }
 ```
+
+#### `POST /auth/tokens`
+
+Mints a **named** token: labelled, with a lifetime of its own, revocable
+without touching anyone's session. This is what a CI job or a shipped
+auto-updater carries.
+
+```json
+{ "label": "github actions", "days": 90 }
+```
+
+`days` is required — a lifetime is exactly the decision that should not be made
+silently — and may be `0` for a token that never expires, up to a maximum of
+3650. `label` is required too: an unlabelled long-lived token is one nobody
+will dare revoke.
+
+→ `201`
+
+```json
+{ "token": "…", "tokenId": "uuid", "label": "github actions",
+  "kind": "named", "expiresAt": 1796840850, "neverExpires": false }
+```
+
+`400 no_label` · `400 no_lifetime` · `400 bad_lifetime`
+
+> A named token is a full credential: it can read every repository and mint
+> further tokens. Its value is returned exactly once.
 
 #### `DELETE /auth/tokens/{id}` · `DELETE /auth/tokens`
 
@@ -591,6 +625,22 @@ polls this server offline.
 `nt auth revoke <id>`, or the tokens panel in the browser UI. `DELETE
 /auth/tokens` revokes every token including your own, which is the right move
 if you are not sure which one leaked.
+
+This is why named tokens carry a label and are minted one per consumer: when
+something leaks you want to retire exactly that one, not log every machine and
+pipeline out at once.
+
+### Tokens for CI and for shipped applications
+
+```sh
+nt auth issue "github actions" --days 365
+nt auth issue "beagle-cli updater" --never
+```
+
+Shown once. `--never` exists because a token compiled into a distributed
+application cannot be rotated on the ordinary schedule — but note that anyone
+holding that binary can extract it, so mint one per application and nothing
+else. [`INTEGRATION.md`](INTEGRATION.md) covers this from the client's side.
 
 ### A leaked password
 

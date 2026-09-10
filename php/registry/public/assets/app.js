@@ -519,11 +519,23 @@
 
     state.tokens.tokens.forEach(function (token) {
       var mine = token.id === state.tokens.you;
+      // An expiry of 0 is the never-expires sentinel. Formatting it as a date
+      // would show 1970 and read as a bug.
+      var expiry = token.expiresAt ? 'expires ' + when(token.expiresAt) : 'never expires';
       panel.appendChild(el('div', { class: 'token' }, [
         el('span', { class: 'grow' }, [
-          el('div', { text: (token.label || 'unlabelled') + (mine ? ' — this session' : '') }),
-          el('div', { class: 'muted small',
-            text: 'last used ' + when(token.lastSeenAt) + ' · expires ' + when(token.expiresAt) }),
+          el('div', {}, [
+            document.createTextNode(token.label || 'unlabelled'),
+            token.kind === 'named' ? el('span', {
+              class: 'tag', text: 'named', style: 'margin-left:8px',
+            }) : null,
+            mine ? el('span', { class: 'muted small', text: ' — this session' }) : null,
+          ]),
+          el('div', {
+            class: token.expiresAt ? 'muted small' : 'small',
+            style: token.expiresAt ? '' : 'color:var(--warn)',
+            text: 'last used ' + when(token.lastSeenAt) + ' · ' + expiry,
+          }),
         ]),
         el('button', {
           class: 'link danger',
@@ -543,6 +555,8 @@
       ]));
     });
 
+    panel.appendChild(mintView());
+
     panel.appendChild(el('div', { style: 'margin-top:16px' }, [
       el('button', {
         class: 'link danger',
@@ -557,6 +571,84 @@
     ]));
 
     return panel;
+  }
+
+  /**
+   * Minting a named token: the kind a CI job or a shipped auto-updater holds.
+   *
+   * The value is shown exactly once, so it is rendered into the page and left
+   * there until dismissed rather than being announced in a notice that the
+   * next render would clear.
+   */
+  function mintView() {
+    var label = el('input', { placeholder: 'github actions', maxlength: '100' });
+    var days = el('input', { type: 'number', min: '0', max: '3650', placeholder: '90' });
+    var never = el('input', { type: 'checkbox' });
+    var result = el('div');
+
+    function mint(event) {
+      event.preventDefault();
+      if (!label.value.trim()) return notify('error', 'Give the token a label.');
+      if (!never.checked && !days.value) {
+        return notify('error', 'Say how many days it should live, or tick "never expires".');
+      }
+
+      setBusy(true);
+      call('POST', '/auth/tokens', {
+        json: {
+          label: label.value.trim(),
+          days: never.checked ? 0 : Number(days.value),
+        },
+      })
+        .then(function (token) {
+          state.busy = false;
+          state.notice = null;
+          label.value = '';
+          days.value = '';
+          never.checked = false;
+
+          result.textContent = '';
+          result.appendChild(el('div', { class: 'notice good' }, [
+            el('div', { text: 'Copy this now — it is not shown again.' }),
+            el('div', {
+              class: 'mono',
+              style: 'word-break:break-all;margin:8px 0;user-select:all',
+              text: token.token,
+            }),
+            el('div', { class: 'small', text: token.neverExpires
+              ? 'Never expires. Revoking it is the only way to retire it.'
+              : 'Expires ' + when(token.expiresAt) + '.' }),
+          ]));
+
+          return call('GET', '/auth/tokens').then(function (data) {
+            // Re-rendering would drop the token that was just shown, so the
+            // list is updated in place behind it.
+            state.tokens = data;
+            var shown = result.firstChild;
+            render();
+            var panel = document.querySelector('.panel');
+            if (panel && shown) panel.appendChild(shown);
+          });
+        })
+        .catch(fail);
+    }
+
+    return el('form', { onsubmit: mint, style: 'margin-top:20px' }, [
+      el('h3', { text: 'Mint a named token', style: 'margin-bottom:10px' }),
+      el('p', { class: 'muted small', style: 'margin:0 0 12px' },
+        ['For a CI job or an app that updates itself. Revocable on its own.']),
+      el('div', { class: 'row' }, [
+        el('div', { class: 'field' }, [el('label', { text: 'Label' }), label]),
+        el('div', { class: 'field' }, [el('label', { text: 'Days' }), days]),
+      ]),
+      el('label', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:12px' }, [
+        never,
+        document.createTextNode('Never expires (for a token you are shipping)'),
+      ]),
+      el('button', { class: 'primary', type: 'submit', text: 'Mint',
+        disabled: state.busy ? 'disabled' : null }),
+      result,
+    ]);
   }
 
   // --- go ---------------------------------------------------------------
