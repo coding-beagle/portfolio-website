@@ -3,10 +3,11 @@ import React from "react";
 /**
  * The site's mark: a 3:2 Lissajous figure with one arc of it picked out.
  *
- * It is the same file the favicon uses (`public/lissajous.svg`) rather than a
- * redrawn copy, so the mark stays in one place — change that file and
- * everything showing it follows. The SVG fills its box, so `size` is the size
- * of the mark itself.
+ * It is drawn from `public/lissajous.svg` rather than a redrawn copy, so the
+ * mark stays in one place — change that file and everything showing it
+ * follows. The site's favicon is the NT .ico; the Lissajous is the start
+ * button's mark here and NPaint's favicon on its own subdomain. The SVG fills
+ * its box, so `size` is the size of the mark itself.
  */
 export default function SiteLogo({ size = 20, style = {} }) {
   return (
