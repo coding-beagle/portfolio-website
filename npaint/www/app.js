@@ -79,9 +79,9 @@ const TOOLS = [
     hint: "Paint the selection itself to fix it: drag to add, Alt+drag to rub out.",
   },
   { name: "move", label: "Move", key: "V", hint: "Drag to move the selected pixels, or the whole layer." },
-  { name: "brush", label: "Brush", key: "B", hint: "Paint with the foreground colour at the chosen opacity. Alt+click picks a colour." },
-  { name: "pencil", label: "Pencil", key: "P", hint: "Hard, fully opaque strokes. Alt+click picks a colour." },
-  { name: "eraser", label: "Eraser", key: "E", hint: "Erase to transparent." },
+  { name: "brush", label: "Brush", key: "B", hint: "Paint with the foreground colour at the chosen opacity. Shift+click draws a straight line from the last stroke. Alt+click picks a colour." },
+  { name: "pencil", label: "Pencil", key: "P", hint: "Hard, fully opaque strokes. Shift+click draws a straight line from the last stroke. Alt+click picks a colour." },
+  { name: "eraser", label: "Eraser", key: "E", hint: "Erase to transparent. Shift+click erases a straight line from the last stroke." },
   {
     name: "bucket",
     label: "Paint bucket",

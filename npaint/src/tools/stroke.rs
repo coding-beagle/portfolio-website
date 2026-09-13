@@ -8,6 +8,9 @@
 //! where the pointer slowed down. The coverage is soft at the rim by the
 //! brush's hardness, and where it is partial the paint is mixed in by that
 //! much; the pencil is always hard.
+//!
+//! Shift-clicking joins the new stroke to where the last one ended with a
+//! straight line, as in Photoshop, so a run of Shift-clicks draws a polyline.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::geometry::{Point, Rect};
@@ -27,6 +30,8 @@ pub enum StrokeMode {
 pub struct StrokeTool {
     mode: StrokeMode,
     gesture: Option<InProgress>,
+    /// Where the previous stroke ended, for Shift-click to draw a line from.
+    previous_end: Option<Point>,
 }
 
 #[derive(Debug)]
@@ -36,14 +41,11 @@ struct InProgress {
     base: Raster,
     /// Where the stroke has been: alpha 255 for covered pixels.
     mask: Raster,
-    /// The bounding box of everything stamped so far, so each update only
-    /// re-applies the part of the layer the stroke has reached.
-    dirty: Rect,
 }
 
 impl StrokeTool {
     pub fn new(mode: StrokeMode) -> StrokeTool {
-        StrokeTool { mode, gesture: None }
+        StrokeTool { mode, gesture: None, previous_end: None }
     }
 
     fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point) {
@@ -53,16 +55,17 @@ impl StrokeTool {
         let Some(g) = self.gesture.as_mut() else { return };
         let all = g.mask.bounds();
         let from = g.last;
-        g.mask.stamp_along(from, to, |m, p| m.stamp_soft_disc(p, size, hardness, &all));
+        stamp_spaced(from, to, spacing(size), |p| g.mask.stamp_soft_disc(p, size, hardness, &all));
         g.last = to;
 
         let reach = (size as i32) / 2 + 1;
         let (fx, fy) = from.round();
         let (tx, ty) = to.round();
+        // Coverage only grew within this segment's reach, and each pixel's
+        // result depends only on its coverage and the base, so only that
+        // part needs re-blending; the rest of the stroke is already right.
         let segment = Rect::from_corners((fx, fy), (tx, ty)).inflate(reach);
-        g.dirty = if g.dirty.is_empty() { segment } else { union(g.dirty, segment) };
-
-        let region = g.dirty.intersect(&clip);
+        let region = segment.intersect(&clip);
         let layer = ctx.document.active_surface_mut();
         let color = ctx.settings.color;
         let opacity = ctx.settings.opacity;
@@ -87,12 +90,25 @@ impl StrokeTool {
     }
 }
 
-fn union(a: Rect, b: Rect) -> Rect {
-    let x0 = a.x.min(b.x);
-    let y0 = a.y.min(b.y);
-    let x1 = a.right().max(b.right());
-    let y1 = a.bottom().max(b.bottom());
-    Rect::new(x0, y0, x1 - x0, y1 - y0)
+/// How far apart the discs along a stroke are stamped, in pixels. Coverage
+/// combines by maximum, so discs a small fraction of their diameter apart
+/// merge into a band whose edge dips by well under a pixel between stamps,
+/// while costing that fraction of stamping at every pixel.
+fn spacing(size: u32) -> f64 {
+    f64::from(size / 16).max(1.0)
+}
+
+/// Calls `stamp` at points from `a` to `b` no more than `spacing` apart,
+/// always including `b`, and `a` too when the two are the same.
+fn stamp_spaced(a: Point, b: Point, spacing: f64, mut stamp: impl FnMut(Point)) {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let len = dx.hypot(dy);
+    let steps = (len / spacing).ceil().max(1.0);
+    for i in 0..=steps as u32 {
+        let t = f64::from(i) / steps;
+        stamp(Point::new(a.x + dx * t, a.y + dy * t));
+    }
 }
 
 impl Tool for StrokeTool {
@@ -106,11 +122,13 @@ impl Tool for StrokeTool {
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
         let layer = ctx.document.active_surface();
+        // With Shift, the stroke starts where the last one ended, so the
+        // first stamp draws a straight line from there to the click.
+        let from = if ev.shift { self.previous_end.unwrap_or(ev.pos) } else { ev.pos };
         self.gesture = Some(InProgress {
-            last: ev.pos,
+            last: from,
             base: layer.clone(),
             mask: Raster::new(layer.width(), layer.height()),
-            dirty: Rect::default(),
         });
         // A click without movement still lays down one dab.
         self.stamp_to(ctx, ev.pos);
@@ -127,7 +145,7 @@ impl Tool for StrokeTool {
 
     fn finish(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
         let changed = self.update(ctx, ev);
-        self.gesture = None;
+        self.previous_end = self.gesture.take().map(|g| g.last);
         changed
     }
 
@@ -169,6 +187,12 @@ mod tests {
         }
 
         fn stroke(&mut self, points: &[(f64, f64)]) {
+            self.stroke_with(points, false);
+        }
+
+        /// A stroke whose every event carries the Shift state.
+        fn stroke_with(&mut self, points: &[(f64, f64)], shift: bool) {
+            let at = |x: f64, y: f64| PointerEvent { shift, ..PointerEvent::at(x, y) };
             let mut ctx = ToolContext {
                 document: &mut self.doc,
                 selection: &mut self.selection,
@@ -176,12 +200,12 @@ mod tests {
                 settings: &mut self.settings,
             };
             let (first, rest) = points.split_first().unwrap();
-            self.tool.begin(&mut ctx, PointerEvent::at(first.0, first.1));
+            self.tool.begin(&mut ctx, at(first.0, first.1));
             for p in rest {
-                self.tool.update(&mut ctx, PointerEvent::at(p.0, p.1));
+                self.tool.update(&mut ctx, at(p.0, p.1));
             }
             let last = points.last().unwrap();
-            self.tool.finish(&mut ctx, PointerEvent::at(last.0, last.1));
+            self.tool.finish(&mut ctx, at(last.0, last.1));
         }
 
         fn px(&self, x: i32, y: i32) -> Rgba {
@@ -210,6 +234,50 @@ mod tests {
             assert_eq!(rig.px(10, i), RED, "(10,{i})");
         }
         assert_eq!(rig.painted(), 21);
+    }
+
+    #[test]
+    fn shift_click_draws_a_line_from_where_the_last_stroke_ended() {
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.stroke(&[(0.0, 0.0), (5.0, 0.0)]);
+        rig.stroke_with(&[(5.0, 10.0)], true);
+        for i in 0..=10 {
+            assert_eq!(rig.px(5, i), RED, "(5,{i})");
+        }
+        assert_eq!(rig.painted(), 16);
+        // And the next Shift-click continues from there.
+        rig.stroke_with(&[(15.0, 10.0)], true);
+        assert_eq!(rig.px(10, 10), RED);
+        assert_eq!(rig.painted(), 26);
+    }
+
+    #[test]
+    fn a_plain_click_does_not_join_to_the_last_stroke() {
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.stroke(&[(0.0, 0.0)]);
+        rig.stroke(&[(10.0, 0.0)]);
+        assert_eq!(rig.painted(), 2);
+    }
+
+    #[test]
+    fn the_first_shift_click_is_just_a_dab() {
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.stroke_with(&[(10.0, 10.0)], true);
+        assert_eq!(rig.painted(), 1);
+    }
+
+    #[test]
+    fn a_wide_stroke_has_no_gaps_between_its_spaced_stamps() {
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.doc = Document::new(100, 100, Rgba::TRANSPARENT);
+        rig.settings.size = 48;
+        rig.stroke(&[(10.0, 50.0), (90.0, 50.0)]);
+        for x in 10..=90 {
+            assert_eq!(rig.px(x, 50), RED, "centre ({x},50)");
+            assert_eq!(rig.px(x, 27), RED, "top edge ({x},27)");
+            assert_eq!(rig.px(x, 73), RED, "bottom edge ({x},73)");
+        }
+        assert_eq!(rig.px(50, 25), Rgba::TRANSPARENT);
     }
 
     #[test]
@@ -305,3 +373,4 @@ mod tests {
         assert_eq!(rig.px(15, 10), Rgba::TRANSPARENT, "outside the disc");
     }
 }
+
