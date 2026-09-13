@@ -9,6 +9,8 @@
 //! Undo is not the tool's job: [`Tool::begin`] says whether the gesture is
 //! going to edit the active layer and the editor snapshots it beforehand.
 
+mod bucket;
+mod eyedropper;
 mod movetool;
 mod select;
 mod shape;
@@ -16,8 +18,10 @@ mod stroke;
 mod view;
 mod wand;
 
+pub use bucket::BucketTool;
+pub use eyedropper::{sample_color, EyedropperTool};
 pub use movetool::MoveTool;
-pub use select::MarqueeTool;
+pub use select::{MarqueeShape, MarqueeTool};
 pub use shape::{Shape, ShapeTool};
 pub use stroke::{StrokeMode, StrokeTool};
 pub use view::{HandTool, ZoomTool};
@@ -28,6 +32,7 @@ use crate::color::Rgba;
 use crate::document::Document;
 use crate::geometry::Point;
 use crate::selection::Selection;
+use crate::snap::Guides;
 use crate::viewport::Viewport;
 
 /// Every tool the editor offers, by name. The names are the strings the page
@@ -35,6 +40,8 @@ use crate::viewport::Viewport;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToolKind {
     Select,
+    EllipseSelect,
+    Crop,
     Wand,
     QuickSelect,
     Refine,
@@ -42,6 +49,8 @@ pub enum ToolKind {
     Brush,
     Pencil,
     Eraser,
+    Bucket,
+    Eyedropper,
     Line,
     Rectangle,
     Ellipse,
@@ -52,6 +61,8 @@ pub enum ToolKind {
 impl ToolKind {
     pub const ALL: &'static [ToolKind] = &[
         ToolKind::Select,
+        ToolKind::EllipseSelect,
+        ToolKind::Crop,
         ToolKind::Wand,
         ToolKind::QuickSelect,
         ToolKind::Refine,
@@ -59,6 +70,8 @@ impl ToolKind {
         ToolKind::Brush,
         ToolKind::Pencil,
         ToolKind::Eraser,
+        ToolKind::Bucket,
+        ToolKind::Eyedropper,
         ToolKind::Line,
         ToolKind::Rectangle,
         ToolKind::Ellipse,
@@ -69,6 +82,8 @@ impl ToolKind {
     pub fn name(self) -> &'static str {
         match self {
             ToolKind::Select => "select",
+            ToolKind::EllipseSelect => "ellipse-select",
+            ToolKind::Crop => "crop",
             ToolKind::Wand => "wand",
             ToolKind::QuickSelect => "quickselect",
             ToolKind::Refine => "refine",
@@ -76,11 +91,34 @@ impl ToolKind {
             ToolKind::Brush => "brush",
             ToolKind::Pencil => "pencil",
             ToolKind::Eraser => "eraser",
+            ToolKind::Bucket => "bucket",
+            ToolKind::Eyedropper => "eyedropper",
             ToolKind::Line => "line",
             ToolKind::Rectangle => "rectangle",
             ToolKind::Ellipse => "ellipse",
             ToolKind::Zoom => "zoom",
             ToolKind::Hand => "hand",
+        }
+    }
+
+    /// What the history panel calls a gesture made with the tool.
+    pub fn label(self) -> &'static str {
+        match self {
+            ToolKind::Select | ToolKind::EllipseSelect | ToolKind::Crop => "Select",
+            ToolKind::Wand => "Magic Wand",
+            ToolKind::QuickSelect => "Quick Select",
+            ToolKind::Refine => "Refine Selection",
+            ToolKind::Move => "Move",
+            ToolKind::Brush => "Brush",
+            ToolKind::Pencil => "Pencil",
+            ToolKind::Eraser => "Eraser",
+            ToolKind::Bucket => "Paint Bucket",
+            ToolKind::Eyedropper => "Eyedropper",
+            ToolKind::Line => "Line",
+            ToolKind::Rectangle => "Rectangle",
+            ToolKind::Ellipse => "Ellipse",
+            ToolKind::Zoom => "Zoom",
+            ToolKind::Hand => "Hand",
         }
     }
 
@@ -90,12 +128,21 @@ impl ToolKind {
         !matches!(
             self,
             ToolKind::Select
+                | ToolKind::EllipseSelect
+                | ToolKind::Crop
                 | ToolKind::Wand
                 | ToolKind::QuickSelect
                 | ToolKind::Refine
+                | ToolKind::Eyedropper
                 | ToolKind::Zoom
                 | ToolKind::Hand
         )
+    }
+
+    /// Whether Alt-clicking with the tool samples a colour instead —
+    /// the eyedropper that lives under every painting tool.
+    pub fn alt_picks_color(self) -> bool {
+        matches!(self, ToolKind::Brush | ToolKind::Pencil | ToolKind::Bucket)
     }
 
     /// Whether the tool's edits must stay inside the selection. The move
@@ -111,7 +158,9 @@ impl ToolKind {
 
     pub fn instantiate(self) -> Box<dyn Tool> {
         match self {
-            ToolKind::Select => Box::new(MarqueeTool::default()),
+            ToolKind::Select => Box::new(MarqueeTool::new(MarqueeShape::Rectangle, false)),
+            ToolKind::EllipseSelect => Box::new(MarqueeTool::new(MarqueeShape::Ellipse, false)),
+            ToolKind::Crop => Box::new(MarqueeTool::new(MarqueeShape::Rectangle, true)),
             ToolKind::Wand => Box::new(MagicWandTool),
             ToolKind::QuickSelect => Box::new(QuickSelectTool::default()),
             ToolKind::Refine => Box::new(RefineTool::default()),
@@ -121,6 +170,8 @@ impl ToolKind {
             ToolKind::Brush => Box::new(StrokeTool::new(StrokeMode::Brush)),
             ToolKind::Pencil => Box::new(StrokeTool::new(StrokeMode::Pencil)),
             ToolKind::Eraser => Box::new(StrokeTool::new(StrokeMode::Eraser)),
+            ToolKind::Bucket => Box::new(BucketTool),
+            ToolKind::Eyedropper => Box::new(EyedropperTool),
             ToolKind::Line => Box::new(ShapeTool::new(Shape::Line)),
             ToolKind::Rectangle => Box::new(ShapeTool::new(Shape::Rectangle)),
             ToolKind::Ellipse => Box::new(ShapeTool::new(Shape::Ellipse)),
@@ -139,6 +190,9 @@ pub struct ToolSettings {
     pub size: u32,
     /// Brush opacity, `0.0..=1.0`. The pencil ignores it.
     pub opacity: f32,
+    /// How far out from the centre a brush dab is solid before it fades,
+    /// `0.0..=1.0`. `1.0` is a hard edge. The pencil ignores it.
+    pub hardness: f32,
     /// Whether the shape tools fill their shape or stroke its outline.
     pub fill: bool,
     /// Whether dragging with the zoom tool scrubs the zoom continuously
@@ -154,6 +208,8 @@ pub struct ToolSettings {
     pub sample_all_layers: bool,
     /// Whether an automatic selection gets a soft one-pixel edge.
     pub antialias: bool,
+    /// The guides the move tool and transforms snap to, and whether they do.
+    pub guides: Guides,
 }
 
 impl Default for ToolSettings {
@@ -163,12 +219,14 @@ impl Default for ToolSettings {
             background: Rgba::WHITE,
             size: 8,
             opacity: 1.0,
+            hardness: 1.0,
             fill: true,
             scrubby_zoom: true,
             tolerance: 32,
             sample_mode: SampleMode::Contiguous,
             sample_all_layers: false,
             antialias: true,
+            guides: Guides::default(),
         }
     }
 }
@@ -198,7 +256,8 @@ pub struct ToolContext<'a> {
     pub document: &'a mut Document,
     pub selection: &'a mut Selection,
     pub viewport: &'a mut Viewport,
-    pub settings: &'a ToolSettings,
+    /// Mutable for the eyedropper alone, which sets the colours.
+    pub settings: &'a mut ToolSettings,
 }
 
 impl ToolContext<'_> {

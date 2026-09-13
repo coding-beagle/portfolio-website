@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::adjust::Adjustment;
 use crate::autoselect::SampleMode;
+use crate::blend::BlendMode;
 use crate::color::Rgba;
 use crate::editor::Editor;
 use crate::geometry::Point;
@@ -164,6 +165,15 @@ impl NPaint {
         self.editor.settings().opacity
     }
 
+    /// How far out a brush dab is solid before it fades, `0.0..=1.0`.
+    pub fn set_hardness(&mut self, hardness: f32) {
+        self.editor.settings_mut().hardness = hardness.clamp(0.0, 1.0);
+    }
+
+    pub fn hardness(&self) -> f32 {
+        self.editor.settings().hardness
+    }
+
     pub fn set_tolerance(&mut self, tolerance: u8) {
         self.editor.settings_mut().tolerance = tolerance;
     }
@@ -205,6 +215,31 @@ impl NPaint {
 
     pub fn scrubby_zoom(&self) -> bool {
         self.editor.settings().scrubby_zoom
+    }
+
+    /// The guides the page draws, in document pixels, for the move tool and
+    /// transforms to snap to. Call whenever they change.
+    pub fn set_guides(&mut self, h: &[f64], v: &[f64]) {
+        let guides = &mut self.editor.settings_mut().guides;
+        guides.h = h.to_vec();
+        guides.v = v.to_vec();
+    }
+
+    /// The guides as the engine has them: what an opened file brought in.
+    pub fn guides_h(&self) -> Vec<f64> {
+        self.editor.settings().guides.h.clone()
+    }
+
+    pub fn guides_v(&self) -> Vec<f64> {
+        self.editor.settings().guides.v.clone()
+    }
+
+    pub fn set_snap(&mut self, on: bool) {
+        self.editor.settings_mut().guides.enabled = on;
+    }
+
+    pub fn snap(&self) -> bool {
+        self.editor.settings().guides.enabled
     }
 
     pub fn set_fill(&mut self, fill: bool) {
@@ -261,6 +296,48 @@ impl NPaint {
         self.editor.can_redo()
     }
 
+    /// Every step in the history, oldest first, done and undone alike.
+    pub fn history_labels(&self) -> Vec<String> {
+        self.editor.history_labels()
+    }
+
+    /// How many of those steps are applied.
+    pub fn history_position(&self) -> usize {
+        self.editor.history_position()
+    }
+
+    /// Jumps to having `steps` of the history applied.
+    pub fn history_go_to(&mut self, steps: usize) -> bool {
+        let moved = self.editor.history_go_to(steps);
+        self.resize_frame();
+        moved
+    }
+
+    pub fn history_limit(&self) -> usize {
+        self.editor.history_limit()
+    }
+
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.editor.set_history_limit(limit);
+    }
+
+    /// Whether the document differs from what was last saved or opened.
+    pub fn is_modified(&self) -> bool {
+        self.editor.is_modified()
+    }
+
+    /// The document as an NPaint file, and from now on it counts as saved.
+    pub fn save_document(&mut self) -> Vec<u8> {
+        self.editor.save_document()
+    }
+
+    /// Replaces the document with an NPaint file's.
+    pub fn open_document(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.editor.open_document(bytes).map_err(err)?;
+        self.resize_frame();
+        Ok(())
+    }
+
     // ---- Layers --------------------------------------------------------------
     //
     // Indices are bottom-first, as the document stores them.
@@ -287,6 +364,40 @@ impl NPaint {
 
     pub fn layer_opacity(&self, index: usize) -> Result<f32, String> {
         Ok(self.layer(index)?.opacity)
+    }
+
+    /// The blend mode's name, as `blend_mode_names` lists them.
+    pub fn layer_blend(&self, index: usize) -> Result<String, String> {
+        Ok(self.layer(index)?.blend.name().to_owned())
+    }
+
+    pub fn set_layer_blend(&mut self, index: usize, name: &str) -> Result<(), String> {
+        let mode = BlendMode::from_name(name).ok_or_else(|| format!("no blend mode called \"{name}\""))?;
+        self.editor.set_layer_blend(index, mode).map_err(err)
+    }
+
+    pub fn blend_mode_names() -> Vec<String> {
+        BlendMode::ALL.iter().map(|m| m.name().to_owned()).collect()
+    }
+
+    pub fn blend_mode_labels() -> Vec<String> {
+        BlendMode::ALL.iter().map(|m| m.label().to_owned()).collect()
+    }
+
+    pub fn layer_locked(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.locked)
+    }
+
+    pub fn set_layer_locked(&mut self, index: usize, locked: bool) -> Result<(), String> {
+        self.editor.set_layer_locked(index, locked).map_err(err)
+    }
+
+    pub fn layer_lock_alpha(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.lock_alpha)
+    }
+
+    pub fn set_layer_lock_alpha(&mut self, index: usize, locked: bool) -> Result<(), String> {
+        self.editor.set_layer_lock_alpha(index, locked).map_err(err)
     }
 
     /// A small RGBA thumbnail of one layer's pixels, `w` by `h`,
@@ -444,6 +555,58 @@ impl NPaint {
         Ok(())
     }
 
+    /// Adds a picture of any size as a layer at its own resolution, centred
+    /// — Open as Layer.
+    pub fn add_layer_centred(&mut self, name: &str, width: u32, height: u32, bytes: &[u8]) -> Result<usize, String> {
+        let raster = Raster::from_rgba_bytes(width, height, bytes)
+            .ok_or_else(|| "image bytes do not match the size given".to_owned())?;
+        Ok(self.editor.add_layer_centred(name, &raster))
+    }
+
+    // ---- Clipboard --------------------------------------------------------------
+
+    /// Copies the selected pixels of the active surface, or of the whole
+    /// picture when `merged`. False when there is nothing to copy.
+    pub fn copy_selection(&mut self, merged: bool) -> bool {
+        self.editor.copy_selection(merged)
+    }
+
+    pub fn cut_selection(&mut self) -> bool {
+        self.editor.cut_selection()
+    }
+
+    pub fn has_clipboard(&self) -> bool {
+        self.editor.clipboard().is_some()
+    }
+
+    /// `[width, height]` of what the clipboard holds, or empty.
+    pub fn clipboard_size(&self) -> Vec<u32> {
+        match self.editor.clipboard() {
+            Some(clip) => vec![clip.raster.width(), clip.raster.height()],
+            None => Vec::new(),
+        }
+    }
+
+    /// The clipboard's pixels as straight-alpha RGBA, for the page to hand
+    /// to the system clipboard.
+    pub fn clipboard_rgba(&self) -> Vec<u8> {
+        self.editor.clipboard().map(|clip| clip.raster.to_rgba_bytes()).unwrap_or_default()
+    }
+
+    /// Pastes the clipboard as a new layer. The layer's index, or none when
+    /// the clipboard is empty.
+    pub fn paste(&mut self) -> Option<usize> {
+        self.editor.paste()
+    }
+
+    /// Pastes a picture from outside — the system clipboard, a dropped file
+    /// — as a new layer, centred.
+    pub fn paste_external(&mut self, name: &str, width: u32, height: u32, bytes: &[u8]) -> Result<usize, String> {
+        let raster = Raster::from_rgba_bytes(width, height, bytes)
+            .ok_or_else(|| "image bytes do not match the size given".to_owned())?;
+        Ok(self.editor.paste_external(name, &raster))
+    }
+
     pub fn duplicate_layer(&mut self, index: usize) -> Result<usize, String> {
         self.editor.duplicate_layer(index).map_err(err)
     }
@@ -488,6 +651,28 @@ impl NPaint {
         self.editor.fill_selection_background()
     }
 
+    /// Paints a line `width` wide along the selection's edge in the
+    /// foreground colour.
+    pub fn stroke_selection(&mut self, width: u32) -> bool {
+        self.editor.stroke_selection(width)
+    }
+
+    /// Auto Levels (`per_channel`) or Auto Contrast on the selected pixels.
+    pub fn auto_levels(&mut self, per_channel: bool) -> bool {
+        self.editor.auto_levels(per_channel)
+    }
+
+    /// Moves the selected pixels (or the whole layer) by whole pixels; a run
+    /// of nudges is one undo step.
+    pub fn nudge_layer(&mut self, dx: i32, dy: i32) -> bool {
+        self.editor.nudge_layer(dx, dy)
+    }
+
+    /// Moves the selection outline by whole pixels.
+    pub fn nudge_selection(&mut self, dx: i32, dy: i32) -> bool {
+        self.editor.nudge_selection(dx, dy)
+    }
+
     pub fn flip_layer_horizontal(&mut self) -> bool {
         self.editor.flip_layer_horizontal()
     }
@@ -522,6 +707,20 @@ impl NPaint {
         // The frame the page reads is the size of the document; leaving it
         // behind hands the page a byte count that does not match the
         // dimensions it asks for, and `ImageData` refuses it.
+        self.resize_frame();
+        done
+    }
+
+    /// Crops the canvas to the selection's bounding box.
+    pub fn crop_to_selection(&mut self) -> bool {
+        let done = self.editor.crop_to_selection();
+        self.resize_frame();
+        done
+    }
+
+    /// Scales the whole picture to a new size.
+    pub fn resize_image(&mut self, width: u32, height: u32) -> bool {
+        let done = self.editor.resize_image(width, height);
         self.resize_frame();
         done
     }
@@ -588,6 +787,27 @@ impl NPaint {
 
     pub fn is_transforming(&self) -> bool {
         self.editor.is_transforming()
+    }
+
+    /// Starts a free transform of the selection outline rather than pixels.
+    pub fn begin_transform_selection(&mut self) -> Result<(), String> {
+        self.editor.begin_transform_selection().map_err(err)
+    }
+
+    pub fn is_transforming_selection(&self) -> bool {
+        self.editor.is_transforming_selection()
+    }
+
+    pub fn transform_set_position(&mut self, x: f64, y: f64) -> bool {
+        self.editor.transform_set_position(x, y)
+    }
+
+    pub fn transform_set_size(&mut self, width: f64, height: f64) -> bool {
+        self.editor.transform_set_size(width, height)
+    }
+
+    pub fn transform_set_angle(&mut self, degrees: f64) -> bool {
+        self.editor.transform_set_angle(degrees)
     }
 
     /// The eight handles as `[x0, y0, x1, y1, ...]` in screen pixels, in the
@@ -897,7 +1117,7 @@ mod tests {
     #[test]
     fn adjustment_surface() {
         let mut np = NPaint::new(1, 1, "#ffffff").unwrap();
-        assert_eq!(NPaint::adjustment_names().len(), 7);
+        assert_eq!(NPaint::adjustment_names().len(), 9);
         np.begin_adjustment().unwrap();
         np.preview_adjustment("invert", &[]).unwrap();
         assert!(np.preview_adjustment("nope", &[]).is_err());
@@ -1019,6 +1239,79 @@ mod tests {
         np.new_document(7, 13, "#000000").unwrap();
         np.render();
         assert!(matches(&np), "after a new document");
+
+        assert!(np.resize_image(14, 26));
+        np.render();
+        assert!(matches(&np), "after scaling the image");
+
+        np.select_all();
+        assert!(np.select_contract(2));
+        assert!(np.crop_to_selection());
+        np.render();
+        assert!(matches(&np), "after cropping");
+
+        assert!(np.history_go_to(0));
+        np.render();
+        assert!(matches(&np), "after jumping through the history");
+
+        let saved = np.save_document();
+        np.new_document(3, 3, "").unwrap();
+        np.open_document(&saved).unwrap();
+        np.render();
+        assert!(matches(&np), "after opening a file");
+        assert_eq!((np.width(), np.height()), (7, 13));
+    }
+
+    #[test]
+    fn the_new_settings_and_commands_cross_the_boundary() {
+        let mut np = NPaint::new(8, 8, "#ffffff").unwrap();
+        assert_eq!(np.hardness(), 1.0);
+        np.set_hardness(0.5);
+        assert_eq!(np.hardness(), 0.5);
+        assert_eq!(NPaint::blend_mode_names().len(), NPaint::blend_mode_labels().len());
+        assert_eq!(np.layer_blend(0).unwrap(), "normal");
+        np.set_layer_blend(0, "multiply").unwrap();
+        assert_eq!(np.layer_blend(0).unwrap(), "multiply");
+        assert!(np.set_layer_blend(0, "dissolve").is_err());
+        np.set_layer_locked(0, true).unwrap();
+        assert!(np.layer_locked(0).unwrap());
+        np.set_layer_locked(0, false).unwrap();
+        np.set_layer_lock_alpha(0, true).unwrap();
+        assert!(np.layer_lock_alpha(0).unwrap());
+        np.set_layer_lock_alpha(0, false).unwrap();
+        assert!(np.is_modified());
+        assert!(np.history_labels().len() >= 5);
+        assert_eq!(np.history_position(), np.history_labels().len());
+        np.set_history_limit(3);
+        assert_eq!(np.history_limit(), 3);
+        assert_eq!(np.history_labels().len(), 3);
+
+        assert!(!np.has_clipboard());
+        assert!(np.clipboard_size().is_empty());
+        assert!(np.paste().is_none());
+        np.select_all();
+        assert!(np.copy_selection(true));
+        assert_eq!(np.clipboard_size(), vec![8, 8]);
+        assert_eq!(np.clipboard_rgba().len(), 8 * 8 * 4);
+        assert_eq!(np.paste(), Some(1));
+        assert!(np.cut_selection());
+        assert!(np.paste_external("x", 2, 2, &[0u8; 16]).is_ok());
+        assert!(np.paste_external("x", 2, 2, &[0u8; 3]).is_err());
+        assert!(np.add_layer_centred("y", 1, 1, &[0u8; 4]).is_ok());
+
+        np.select_all();
+        assert!(np.stroke_selection(1));
+        assert!(np.auto_levels(true));
+        assert!(np.nudge_layer(1, 0));
+        assert!(np.nudge_selection(1, 0));
+        assert!(np.begin_transform_selection().is_ok());
+        assert!(np.is_transforming_selection());
+        assert!(np.transform_set_position(1.0, 1.0));
+        assert!(np.transform_set_size(4.0, 4.0));
+        assert!(np.transform_set_angle(0.0));
+        assert!(np.commit_session());
+        np.deselect();
+        assert!(np.begin_transform_selection().is_err());
     }
 
     #[test]

@@ -5,10 +5,11 @@
 //! a coverage mask and applied to a copy of the layer taken at the start,
 //! so overlapping stamps within one stroke do not compound: a 50% brush lays
 //! down 50% everywhere it goes, as in Photoshop, rather than growing darker
-//! where the pointer slowed down.
+//! where the pointer slowed down. The coverage is soft at the rim by the
+//! brush's hardness, and where it is partial the paint is mixed in by that
+//! much; the pencil is always hard.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
-use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
 use crate::raster::Raster;
 
@@ -47,11 +48,12 @@ impl StrokeTool {
 
     fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point) {
         let size = ctx.settings.size.max(1);
+        let hardness = if self.mode == StrokeMode::Pencil { 1.0 } else { ctx.settings.hardness };
         let clip = ctx.clip();
         let Some(g) = self.gesture.as_mut() else { return };
         let all = g.mask.bounds();
         let from = g.last;
-        g.mask.stamp_along(from, to, |m, p| m.stamp_disc(p, size, Rgba::WHITE, &all));
+        g.mask.stamp_along(from, to, |m, p| m.stamp_soft_disc(p, size, hardness, &all));
         g.last = to;
 
         let reach = (size as i32) / 2 + 1;
@@ -67,16 +69,17 @@ impl StrokeTool {
         let mode = self.mode;
         for y in region.y..region.bottom() {
             for x in region.x..region.right() {
-                let covered = g.mask.get(x, y).a > 0;
+                let cover = g.mask.get(x, y).a;
                 let before = g.base.get(x, y);
-                let after = if !covered {
+                let after = if cover == 0 {
                     before
                 } else {
-                    match mode {
+                    let full = match mode {
                         StrokeMode::Brush => color.scaled_alpha(opacity).over(before),
                         StrokeMode::Pencil => color.with_alpha(255).over(before),
                         StrokeMode::Eraser => before.scaled_alpha(1.0 - opacity),
-                    }
+                    };
+                    if cover == 255 { full } else { before.lerp(full, f32::from(cover) / 255.0) }
                 };
                 layer.set(x, y, after);
             }
@@ -138,6 +141,7 @@ impl Tool for StrokeTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::Rgba;
     use crate::document::Document;
     use crate::selection::Selection;
     use crate::tools::ToolSettings;
@@ -169,7 +173,7 @@ mod tests {
                 document: &mut self.doc,
                 selection: &mut self.selection,
                 viewport: &mut self.viewport,
-                settings: &self.settings,
+                settings: &mut self.settings,
             };
             let (first, rest) = points.split_first().unwrap();
             self.tool.begin(&mut ctx, PointerEvent::at(first.0, first.1));
@@ -264,12 +268,30 @@ mod tests {
             document: &mut rig.doc,
             selection: &mut rig.selection,
             viewport: &mut rig.viewport,
-            settings: &rig.settings,
+            settings: &mut rig.settings,
         };
         rig.tool.begin(&mut ctx, PointerEvent::at(1.0, 1.0));
         rig.tool.update(&mut ctx, PointerEvent::at(9.0, 9.0));
         rig.tool.cancel(&mut ctx);
         assert_eq!(rig.painted(), 0);
+    }
+
+    #[test]
+    fn a_soft_brush_fades_at_the_rim_and_the_pencil_never_does() {
+        let mut rig = Rig::new(StrokeMode::Brush);
+        rig.settings.size = 15;
+        rig.settings.hardness = 0.0;
+        rig.stroke(&[(15.0, 15.0)]);
+        assert_eq!(rig.px(15, 15), RED, "solid in the middle");
+        let rim = rig.px(15, 9).a;
+        assert!(rim > 0 && rim < 255, "faint at the rim: {rim}");
+        assert_eq!((rig.px(15, 9).r, rig.px(15, 9).g), (255, 0), "but still red");
+
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.settings.size = 15;
+        rig.settings.hardness = 0.0;
+        rig.stroke(&[(15.0, 15.0)]);
+        assert_eq!(rig.px(15, 9), RED, "the pencil is hard whatever the setting");
     }
 
     #[test]

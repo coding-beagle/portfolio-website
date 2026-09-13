@@ -30,17 +30,22 @@
           <input id="opt-size" type="range" min="1" max="200" value="8" />
           <input id="opt-size-num" type="number" min="1" max="500" value="8" />
         </label>
+        <label class="opt" id="opt-hardness-wrap" title="How far out from the centre the brush is solid before it fades">
+          <span>Hardness</span>
+          <input id="opt-hardness" type="range" min="0" max="100" value="100" />
+          <output id="opt-hardness-out">100%</output>
+        </label>
         <label class="opt" id="opt-opacity-wrap">
           <span>Opacity</span>
           <input id="opt-opacity" type="range" min="1" max="100" value="100" />
           <output id="opt-opacity-out">100%</output>
         </label>
-        <label class="opt" id="opt-tolerance-wrap" title="How far a colour may be from the one sampled and still be selected">
+        <label class="opt" id="opt-tolerance-wrap" title="How far a colour may be from the one sampled and still count">
           <span>Tolerance</span>
           <input id="opt-tolerance" type="range" min="0" max="255" value="32" />
           <output id="opt-tolerance-out">32</output>
         </label>
-        <div class="opt seg" id="opt-sample-wrap" role="radiogroup" aria-label="Wand reach">
+        <div class="opt seg" id="opt-sample-wrap" role="radiogroup" aria-label="Reach">
           <button id="opt-contiguous" class="seg-on" aria-pressed="true" title="Only the patch under the click">Contiguous</button>
           <button id="opt-global" aria-pressed="false" title="Every matching pixel in the image">Global</button>
         </div>
@@ -48,7 +53,7 @@
           <input type="checkbox" id="opt-all-layers" />
           All layers
         </label>
-        <label class="opt check" id="opt-antialias-wrap" title="Give the selection a soft one-pixel edge">
+        <label class="opt check" id="opt-antialias-wrap" title="Give the edge a soft one-pixel rim">
           <input type="checkbox" id="opt-antialias" checked />
           Anti-alias
         </label>
@@ -69,9 +74,18 @@
           <input type="checkbox" id="opt-scrubby" />
           Scrubby zoom
         </label>
+        <div class="opt" id="crop-bar" hidden>
+          <button id="crop-cancel" title="Clear the crop box (Esc)">Cancel</button>
+          <button id="crop-apply" class="primary" title="Crop to the box (Enter)">Crop</button>
+        </div>
         <div class="opt transform-bar" id="transform-bar" hidden>
-          <span class="tb-label">Transform</span>
-          <span id="tb-info" class="tb-info"></span>
+          <span class="tb-label" id="tb-label">Transform</span>
+          <label class="tb-field">X <input id="tb-x" type="number" step="1" /></label>
+          <label class="tb-field">Y <input id="tb-y" type="number" step="1" /></label>
+          <label class="tb-field">W <input id="tb-w" type="number" step="1" min="1" /></label>
+          <button id="tb-link" class="tb-link" aria-pressed="true" title="Keep the proportions when W or H is typed">⛓</button>
+          <label class="tb-field">H <input id="tb-h" type="number" step="1" min="1" /></label>
+          <label class="tb-field">∠ <input id="tb-angle" type="number" step="0.1" />°</label>
           <button id="tb-rot-ccw" title="Rotate 90° anticlockwise">⟲ 90°</button>
           <button id="tb-rot-cw" title="Rotate 90° clockwise">⟳ 90°</button>
           <button id="tb-flip-h" title="Flip horizontal">⇔</button>
@@ -95,6 +109,9 @@
 
         <div class="viewport" id="viewport">
           <canvas id="view"></canvas>
+          <div class="drop-hint" id="drop-hint" hidden>
+            Drop to open · Shift to add as a layer · Alt to place as a smart object
+          </div>
           <div class="working" id="working" hidden role="status" aria-live="polite">
             <span class="throb-slot"></span>
             <span class="working-label" id="working-label"></span>
@@ -103,25 +120,44 @@
           </div>
         </div>
 
-        <aside class="panel layers-panel">
-          <div class="panel-title">Layers</div>
-          <div class="layer-opacity">
-            <span>Opacity</span>
-            <input id="layer-opacity" type="range" min="0" max="100" value="100" />
-            <output id="layer-opacity-out">100%</output>
-          </div>
-          <ul class="layer-list" id="layer-list"></ul>
-          <div class="layer-buttons">
-            <button id="layer-add" title="New layer (Ctrl+Shift+N)">+</button>
-            <button id="layer-dup" title="Duplicate layer (Ctrl+J)">⧉</button>
-            <button id="layer-up" title="Move layer up">▲</button>
-            <button id="layer-down" title="Move layer down">▼</button>
-            <button id="layer-mask" title="Add a layer mask: from the selection, or revealing everything">◐</button>
-            <button id="layer-adjust" title="New adjustment layer">◑</button>
-            <button id="layer-merge" title="Merge down (Ctrl+E)">⤓</button>
-            <button id="layer-delete" title="Delete layer">🗑</button>
-          </div>
-        </aside>
+        <div class="side">
+          <aside class="panel layers-panel">
+            <div class="panel-title">Layers</div>
+            <div class="layer-props">
+              <select id="layer-blend" title="How the layer blends with what is below it"></select>
+              <button id="layer-lock" class="lock" title="Lock the layer: nothing on it can change">🔒</button>
+              <button id="layer-lock-alpha" class="lock" title="Lock transparent pixels: paint only where there is already something">▦</button>
+            </div>
+            <div class="layer-opacity">
+              <span>Opacity</span>
+              <input id="layer-opacity" type="range" min="0" max="100" value="100" />
+              <output id="layer-opacity-out">100%</output>
+            </div>
+            <ul class="layer-list" id="layer-list"></ul>
+            <div class="layer-buttons">
+              <button id="layer-add" title="New layer (Ctrl+Shift+N)">+</button>
+              <button id="layer-dup" title="Duplicate layer (Ctrl+J)">⧉</button>
+              <button id="layer-up" title="Move layer up">▲</button>
+              <button id="layer-down" title="Move layer down">▼</button>
+              <button id="layer-mask" title="Add a layer mask: from the selection, or revealing everything">◐</button>
+              <button id="layer-adjust" title="New adjustment layer">◑</button>
+              <button id="layer-merge" title="Merge down (Ctrl+E)">⤓</button>
+              <button id="layer-delete" title="Delete layer">🗑</button>
+            </div>
+          </aside>
+          <aside class="panel history-panel">
+            <div class="panel-title history-title">
+              <span>History</span>
+              <select id="history-limit" title="How many steps to keep">
+                <option value="20">20 steps</option>
+                <option value="40" selected>40 steps</option>
+                <option value="100">100 steps</option>
+                <option value="200">200 steps</option>
+              </select>
+            </div>
+            <ul class="history-list" id="history-list"></ul>
+          </aside>
+        </div>
       </div>
 
       <footer class="statusbar">
@@ -198,6 +234,21 @@
       </form>
     </dialog>
 
+    <dialog id="dlg-image-size">
+      <form id="image-size-form" class="dialog-form">
+        <h2>Image size</h2>
+        <label>Width <input id="image-width" type="number" min="1" max="16384" /> px</label>
+        <label>Height <input id="image-height" type="number" min="1" max="16384" /> px</label>
+        <label>Scale <input id="image-percent" type="number" min="1" max="3200" step="any" value="100" /> %</label>
+        <label class="check-row"><input type="checkbox" id="image-lock" checked /> Keep proportions</label>
+        <p class="field-note" id="image-note"></p>
+        <div class="dialog-buttons">
+          <button type="button" id="image-cancel">Cancel</button>
+          <button type="submit" class="primary">Resize</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="dlg-export">
       <form id="export-form" class="dialog-form">
         <h2>Export image</h2>
@@ -224,7 +275,7 @@
     <div id="color-popover" class="color-popover" hidden></div>
     <div id="menu-layer" hidden></div>
 
-    <input id="file-input" type="file" accept="image/*" hidden />
+    <input id="file-input" type="file" accept="image/*,.npaint" hidden />
 
     <script type="module" src="app.js"></script>
   </body>

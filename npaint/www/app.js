@@ -16,6 +16,10 @@ import { ADJUSTMENTS, createAdjustDialog } from "./adjust.js";
 
 const ICON = {
   select: '<rect x="4" y="4" width="16" height="16" stroke-dasharray="3 2"/>',
+  "ellipse-select": '<ellipse cx="12" cy="12" rx="8" ry="7" stroke-dasharray="3 2"/>',
+  crop: '<path d="M7 2v15h15M2 7h15v15"/>',
+  bucket: '<path d="M5 11l7-7 7 7-7 7z"/><path d="M12 4V2M19 13c0 2 1.5 3 1.5 4.5a1.5 1.5 0 01-3 0C17.5 16 19 15 19 13z"/>',
+  eyedropper: '<path d="M4 20l1-4 9-9 3 3-9 9z"/><path d="M13 6l2-2a2 2 0 013 3l-2 2"/>',
   wand: '<path d="M4 20l9-9M6.5 4.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L3 8l2.5-1zM17 3l.8 2.2L20 6l-2.2.8L17 9l-.8-2.2L14 6l2.2-.8zM19 14l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/><path d="M12.5 11.5l2 2"/>',
   quickselect: '<path d="M3 12a9 9 0 0113.5-7.8" stroke-dasharray="3 2"/><path d="M21 12a9 9 0 01-9 9" stroke-dasharray="3 2"/><path d="M8 17c1.5-.3 2.2-1.3 2.6-2.6L17 8l2 2-6.4 6.4C11.3 16.8 10 17.5 8 17.5z"/>',
   refine: '<path d="M4 20c2-.5 3-2 3.5-4l8.5-8.5 2.5 2.5L10 18.5c-2 .5-3.5 1.5-6 1.5z"/><circle cx="17" cy="6" r="3.2" stroke-dasharray="2.5 2"/>',
@@ -31,7 +35,24 @@ const ICON = {
 };
 
 const TOOLS = [
-  { name: "select", label: "Marquee select", key: "M", hint: "Drag to select a rectangle; click to deselect. Shift for a square." },
+  {
+    name: "select",
+    label: "Rectangular marquee",
+    key: "M",
+    hint: "Drag to select a rectangle; click to deselect. Shift adds, Alt takes away; Shift during the drag squares it.",
+  },
+  {
+    name: "ellipse-select",
+    label: "Elliptical marquee",
+    key: "M",
+    hint: "Drag to select an ellipse. Shift adds, Alt takes away; Shift during the drag makes a circle.",
+  },
+  {
+    name: "crop",
+    label: "Crop",
+    key: "C",
+    hint: "Drag out the area to keep, then press Enter or click Crop. Esc clears the box.",
+  },
   {
     name: "wand",
     label: "Magic wand",
@@ -51,9 +72,21 @@ const TOOLS = [
     hint: "Paint the selection itself to fix it: drag to add, Alt+drag to rub out.",
   },
   { name: "move", label: "Move", key: "V", hint: "Drag to move the selected pixels, or the whole layer." },
-  { name: "brush", label: "Brush", key: "B", hint: "Paint with the foreground colour at the chosen opacity." },
-  { name: "pencil", label: "Pencil", key: "P", hint: "Hard, fully opaque strokes." },
+  { name: "brush", label: "Brush", key: "B", hint: "Paint with the foreground colour at the chosen opacity. Alt+click picks a colour." },
+  { name: "pencil", label: "Pencil", key: "P", hint: "Hard, fully opaque strokes. Alt+click picks a colour." },
   { name: "eraser", label: "Eraser", key: "E", hint: "Erase to transparent." },
+  {
+    name: "bucket",
+    label: "Paint bucket",
+    key: "G",
+    hint: "Click to fill the patch of colour under the pointer with the foreground colour. Alt+click picks a colour.",
+  },
+  {
+    name: "eyedropper",
+    label: "Eyedropper",
+    key: "I",
+    hint: "Click to pick the foreground colour from the picture; Alt+click picks the background colour.",
+  },
   { name: "line", label: "Line", key: "L", hint: "Drag to draw a line. Shift snaps to 45°." },
   { name: "rectangle", label: "Rectangle", key: "U", hint: "Drag to draw. Shift for a square, Alt to draw from the centre." },
   { name: "ellipse", label: "Ellipse", key: "O", hint: "Drag to draw. Shift for a circle, Alt to draw from the centre." },
@@ -104,6 +137,18 @@ let dpr = 1;
 let picker; // the colour picker
 let pickerTarget = "fg"; // which swatch the picker is editing
 let adjust; // the adjustment dialog
+// The document's name, from the file it came from; what Save and Export use.
+let docName = "npaint";
+// The view furniture: none of it is in the document, so the page keeps it.
+let showRulers = false;
+let showGrid = false;
+let showPixelGrid = true;
+let gridSize = 32;
+/** Whether the move tool and transforms snap to guides and canvas edges. */
+let snapToGuides = true;
+// Guides in document pixels, and one being dragged out of a ruler or moved.
+let guides = { h: [], v: [] };
+let guideDrag = null; // { axis: "h" | "v", at: number | null, index: number | null }
 
 // ---- Boot -------------------------------------------------------------------
 
@@ -129,6 +174,13 @@ async function boot() {
   bindDialogs();
   bindExport();
   bindCanvasDialog();
+  bindImageSizeDialog();
+  bindHistory();
+  bindClipboard();
+  bindDrop();
+  bindUnload();
+  loadViewPrefs();
+  np.set_snap(snapToGuides);
   adjust = createAdjustDialog(np, { onChange: touch, onError: message });
 
   $("loading").hidden = true;
@@ -220,7 +272,10 @@ function step(now) {
     // session in the engine; the dialog has nothing left to preview.
     if (adjust.isOpen() && !np.is_adjusting()) adjust.abandon();
     renderLayers();
+    renderHistory();
     syncTransformBar();
+    syncCropBar();
+    syncSwatches();
     layersDirty = false;
   }
 }
@@ -254,7 +309,11 @@ function draw(now, ants, transforming) {
   vctx.lineWidth = 1;
   vctx.strokeRect(px - 0.5, py - 0.5, w + 1, h + 1);
 
+  if (showGrid) drawGrid(px, py, zoom, w, h);
+  if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
+  if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
   if (ants.length) drawAnts(now, ants, px, py, zoom);
+  drawGuides(px, py, zoom);
 
   const overlay = np.tool_overlay();
   if (overlay.length) drawZoomMarquee(overlay);
@@ -262,6 +321,7 @@ function draw(now, ants, transforming) {
   if (transforming) drawTransformBox();
   if (resizing) drawResizePreview(zoom);
   if ((cursor || sizing) && showsBrushRing() && !resizing) drawBrushRing(zoom);
+  if (showRulers) drawRulers(px, py, zoom);
 
   $("btn-zoom-level").textContent = `${Math.round(zoom * 100)}%`;
   $("status-size").textContent = `${np.width()} × ${np.height()} px`;
@@ -302,6 +362,178 @@ function drawAnts(now, ants, px, py, zoom) {
   vctx.lineDashOffset = -crawl + 4.5;
   vctx.strokeStyle = "#000";
   vctx.stroke(path);
+  vctx.restore();
+}
+
+/** The grid: lines every `gridSize` document pixels, over the document. */
+function drawGrid(px, py, zoom, w, h) {
+  const step = gridSize * zoom;
+  if (step < 4) return;
+  vctx.save();
+  vctx.beginPath();
+  vctx.rect(px, py, w, h);
+  vctx.clip();
+  vctx.beginPath();
+  for (let x = 0; x <= np.width(); x += gridSize) {
+    const sx = Math.round(px + x * zoom) + 0.5;
+    vctx.moveTo(sx, py);
+    vctx.lineTo(sx, py + h);
+  }
+  for (let y = 0; y <= np.height(); y += gridSize) {
+    const sy = Math.round(py + y * zoom) + 0.5;
+    vctx.moveTo(px, sy);
+    vctx.lineTo(px + w, sy);
+  }
+  vctx.lineWidth = 1;
+  vctx.strokeStyle = "rgba(0,0,0,0.35)";
+  vctx.stroke();
+  vctx.strokeStyle = "rgba(255,255,255,0.35)";
+  vctx.setLineDash([2, 2]);
+  vctx.stroke();
+  vctx.restore();
+}
+
+/** Hairlines between pixels once they are big enough to have room for one. */
+function drawPixelGrid(px, py, zoom, w, h) {
+  const left = Math.max(0, Math.floor(-px / zoom));
+  const top = Math.max(0, Math.floor(-py / zoom));
+  const right = Math.min(np.width(), Math.ceil((view.clientWidth - px) / zoom));
+  const bottom = Math.min(np.height(), Math.ceil((view.clientHeight - py) / zoom));
+  if (right <= left || bottom <= top) return;
+  vctx.save();
+  vctx.beginPath();
+  vctx.rect(px, py, w, h);
+  vctx.clip();
+  vctx.beginPath();
+  for (let x = left; x <= right; x++) {
+    const sx = Math.round(px + x * zoom) + 0.5;
+    vctx.moveTo(sx, py + top * zoom);
+    vctx.lineTo(sx, py + bottom * zoom);
+  }
+  for (let y = top; y <= bottom; y++) {
+    const sy = Math.round(py + y * zoom) + 0.5;
+    vctx.moveTo(px + left * zoom, sy);
+    vctx.lineTo(px + right * zoom, sy);
+  }
+  vctx.lineWidth = 1;
+  vctx.strokeStyle = "rgba(128,128,128,0.35)";
+  vctx.stroke();
+  vctx.restore();
+}
+
+/** With the crop tool, everything outside the box is dimmed. */
+function drawCropShade(px, py, zoom) {
+  const r = np.selection_rect();
+  if (!r.length) return;
+  vctx.save();
+  vctx.beginPath();
+  vctx.rect(0, 0, view.clientWidth, view.clientHeight);
+  vctx.rect(px + r[0] * zoom, py + r[1] * zoom, r[2] * zoom, r[3] * zoom);
+  vctx.fillStyle = "rgba(0,0,0,0.5)";
+  vctx.fill("evenodd");
+  vctx.restore();
+}
+
+/** The height of the ruler bands, in CSS pixels. */
+const RULER = 20;
+
+/** A tick spacing in document pixels that puts labels ~60px apart. */
+function rulerStep(zoom) {
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000];
+  return steps.find((s) => s * zoom >= 60) ?? 10000;
+}
+
+function drawRulers(px, py, zoom) {
+  const W = view.clientWidth;
+  const H = view.clientHeight;
+  const step = rulerStep(zoom);
+  vctx.save();
+  vctx.fillStyle = "#2b2b2b";
+  vctx.fillRect(0, 0, W, RULER);
+  vctx.fillRect(0, 0, RULER, H);
+  vctx.strokeStyle = "#111";
+  vctx.lineWidth = 1;
+  vctx.beginPath();
+  vctx.moveTo(0, RULER + 0.5);
+  vctx.lineTo(W, RULER + 0.5);
+  vctx.moveTo(RULER + 0.5, 0);
+  vctx.lineTo(RULER + 0.5, H);
+  vctx.stroke();
+  vctx.fillStyle = "#9a9a9a";
+  vctx.strokeStyle = "#7a7a7a";
+  vctx.font = "9px system-ui, sans-serif";
+  vctx.textBaseline = "top";
+  const minor = step / 5;
+  // Across the top.
+  vctx.beginPath();
+  const x0 = Math.floor((RULER - px) / zoom / minor) * minor;
+  const x1 = (W - px) / zoom;
+  for (let x = x0; x <= x1; x += minor) {
+    const sx = Math.round(px + x * zoom) + 0.5;
+    if (sx < RULER) continue;
+    const major = Math.abs(x / step - Math.round(x / step)) < 1e-6;
+    vctx.moveTo(sx, RULER);
+    vctx.lineTo(sx, major ? 8 : 14);
+    if (major) vctx.fillText(String(Math.round(x)), sx + 2, 1);
+  }
+  vctx.stroke();
+  // Down the side, with the labels turned.
+  vctx.beginPath();
+  const y0 = Math.floor((RULER - py) / zoom / minor) * minor;
+  const y1 = (H - py) / zoom;
+  for (let y = y0; y <= y1; y += minor) {
+    const sy = Math.round(py + y * zoom) + 0.5;
+    if (sy < RULER) continue;
+    const major = Math.abs(y / step - Math.round(y / step)) < 1e-6;
+    vctx.moveTo(RULER, sy);
+    vctx.lineTo(major ? 8 : 14, sy);
+    if (major) {
+      vctx.save();
+      vctx.translate(1, sy + 2);
+      vctx.rotate(Math.PI / 2);
+      vctx.fillText(String(Math.round(y)), 0, -9);
+      vctx.restore();
+    }
+  }
+  vctx.stroke();
+  // The corner, and a marker for the pointer.
+  vctx.fillStyle = "#2b2b2b";
+  vctx.fillRect(0, 0, RULER, RULER);
+  if (cursor) {
+    vctx.strokeStyle = "#4ea3f2";
+    vctx.beginPath();
+    vctx.moveTo(Math.round(cursor.x) + 0.5, 0);
+    vctx.lineTo(Math.round(cursor.x) + 0.5, RULER);
+    vctx.moveTo(0, Math.round(cursor.y) + 0.5);
+    vctx.lineTo(RULER, Math.round(cursor.y) + 0.5);
+    vctx.stroke();
+  }
+  vctx.restore();
+}
+
+/** The guides, and the one being dragged. */
+function drawGuides(px, py, zoom) {
+  const lines = [];
+  for (const y of guides.h) lines.push(["h", y, false]);
+  for (const x of guides.v) lines.push(["v", x, false]);
+  if (guideDrag && guideDrag.at !== null) lines.push([guideDrag.axis, guideDrag.at, true]);
+  if (!lines.length) return;
+  vctx.save();
+  vctx.lineWidth = 1;
+  for (const [axis, at, live] of lines) {
+    vctx.strokeStyle = live ? "#4ea3f2" : "rgba(0,200,255,0.9)";
+    vctx.beginPath();
+    if (axis === "h") {
+      const sy = Math.round(py + at * zoom) + 0.5;
+      vctx.moveTo(0, sy);
+      vctx.lineTo(view.clientWidth, sy);
+    } else {
+      const sx = Math.round(px + at * zoom) + 0.5;
+      vctx.moveTo(sx, 0);
+      vctx.lineTo(sx, view.clientHeight);
+    }
+    vctx.stroke();
+  }
   vctx.restore();
 }
 
@@ -562,9 +794,9 @@ function startThrobbing() {
 
 /** Which block of the toolbox each tool belongs in, in order. */
 const TOOL_GROUPS = [
-  ["select", "wand", "quickselect", "refine"],
+  ["select", "ellipse-select", "crop", "wand", "quickselect", "refine"],
   ["move"],
-  ["brush", "pencil", "eraser"],
+  ["brush", "pencil", "eraser", "bucket", "eyedropper"],
   ["line", "rectangle", "ellipse"],
   ["zoom", "hand"],
 ];
@@ -615,29 +847,37 @@ function zoomHint() {
 /** Shows the options that apply to the current tool. */
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
-  const hasOpacity = tool === "brush" || tool === "eraser";
+  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket";
+  const hasHardness = tool === "brush" || tool === "eraser";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
+  const marquee = tool === "select" || tool === "ellipse-select" || tool === "crop";
   const viewTool =
-    tool === "select" ||
+    marquee ||
     tool === "hand" ||
     tool === "zoom" ||
     tool === "move" ||
-    tool === "wand";
+    tool === "wand" ||
+    tool === "bucket" ||
+    tool === "eyedropper";
   const usesSize = !viewTool && !(isShape && np.fill());
   $("opt-opacity-wrap").hidden = !hasOpacity;
+  $("opt-hardness-wrap").hidden = !hasHardness;
+  $("opt-hardness").value = Math.round(np.hardness() * 100);
+  $("opt-hardness-out").value = `${Math.round(np.hardness() * 100)}%`;
   $("opt-fill-wrap").hidden = !isShape;
-  // The tolerance is the wand's and quick select's; the refine brush paints
-  // the selection by hand and has only a size.
-  $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect");
-  $("opt-sample-wrap").hidden = tool !== "wand";
-  $("opt-all-layers-wrap").hidden = !auto;
-  $("opt-antialias-wrap").hidden = !auto;
+  // The tolerance is the wand's, quick select's and the bucket's; the refine
+  // brush paints the selection by hand and has only a size.
+  $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect" || tool === "bucket");
+  $("opt-sample-wrap").hidden = !(tool === "wand" || tool === "bucket");
+  $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket");
+  $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select");
   $("opt-subject").hidden = !auto;
   $("opt-quality-wrap").hidden = !auto;
   $("opt-tolerance").value = np.tolerance();
   $("opt-tolerance-out").value = np.tolerance();
   $("opt-all-layers").checked = np.sample_all_layers();
   $("opt-antialias").checked = np.antialias();
+  syncCropBar();
   toggleSeg($("opt-contiguous"), $("opt-global"), np.sample_mode() === "contiguous");
   $("opt-zoom-wrap").hidden = tool !== "zoom";
   $("opt-scrubby-wrap").hidden = tool !== "zoom";
@@ -667,6 +907,13 @@ function bindOptions() {
     np.set_opacity(Number(opacity.value) / 100);
     $("opt-opacity-out").value = `${opacity.value}%`;
   });
+  const hardness = $("opt-hardness");
+  hardness.addEventListener("input", () => {
+    np.set_hardness(Number(hardness.value) / 100);
+    $("opt-hardness-out").value = `${hardness.value}%`;
+  });
+  $("crop-apply").addEventListener("click", cropToSelection);
+  $("crop-cancel").addEventListener("click", () => act(() => np.deselect()));
 
   $("opt-fill").addEventListener("click", () => {
     np.set_fill(true);
@@ -717,6 +964,64 @@ function bindOptions() {
   $("tb-flip-v").addEventListener("click", () => act(() => np.transform_flip_vertical()));
   $("tb-cancel").addEventListener("click", () => act(() => np.cancel_session()));
   $("tb-commit").addEventListener("click", () => act(() => np.commit_session()));
+  bindTransformFields();
+}
+
+/** The typed-in side of the transform bar. */
+function bindTransformFields() {
+  const num = (id) => Number($(id).value);
+  const position = () => act(() => np.transform_set_position(num("tb-x"), num("tb-y")));
+  $("tb-x").addEventListener("change", position);
+  $("tb-y").addEventListener("change", position);
+  const linked = () => $("tb-link").getAttribute("aria-pressed") === "true";
+  $("tb-link").addEventListener("click", () => {
+    $("tb-link").setAttribute("aria-pressed", String(!linked()));
+    $("tb-link").classList.toggle("seg-on", linked());
+  });
+  $("tb-link").classList.add("seg-on");
+  const size = (changed) => {
+    const info = np.transform_info();
+    if (info.length !== 7) return;
+    let w = num("tb-w");
+    let h = num("tb-h");
+    if (linked() && info[2] > 0 && info[3] > 0) {
+      if (changed === "w") h = (w * info[3]) / info[2];
+      else w = (h * info[2]) / info[3];
+    }
+    act(() => np.transform_set_size(Math.max(1, w), Math.max(1, h)));
+  };
+  $("tb-w").addEventListener("change", () => size("w"));
+  $("tb-h").addEventListener("change", () => size("h"));
+  $("tb-angle").addEventListener("change", () => act(() => np.transform_set_angle(num("tb-angle"))));
+  for (const id of ["tb-x", "tb-y", "tb-w", "tb-h", "tb-angle"]) {
+    $(id).addEventListener("keydown", (e) => {
+      // Enter applies the field, not the whole transform; Escape leaves it.
+      if (e.key === "Enter") {
+        e.preventDefault();
+        $(id).dispatchEvent(new Event("change"));
+        $(id).blur();
+      }
+      if (e.key === "Escape") $(id).blur();
+      e.stopPropagation();
+    });
+  }
+}
+
+/** With the crop tool the options bar offers to crop to the box. */
+function syncCropBar() {
+  const on = tool === "crop";
+  $("crop-bar").hidden = !on;
+  if (on) $("crop-apply").disabled = !hasSelection();
+}
+
+function cropToSelection() {
+  act(() => {
+    if (!np.crop_to_selection()) message("Drag out the area to keep first.");
+    else {
+      fit();
+      message(`Cropped to ${np.width()} × ${np.height()} px.`);
+    }
+  });
 }
 
 function setSize(v) {
@@ -732,7 +1037,12 @@ function syncTransformBar() {
   viewport.classList.toggle("transforming", on);
   if (on) {
     const [x, y, w, h, , , angle] = info;
-    $("tb-info").textContent = `X ${x.toFixed(0)}  Y ${y.toFixed(0)}  W ${w.toFixed(0)}  H ${h.toFixed(0)}  ∠ ${angle.toFixed(1)}°`;
+    const fields = { "tb-x": x.toFixed(0), "tb-y": y.toFixed(0), "tb-w": w.toFixed(0), "tb-h": h.toFixed(0), "tb-angle": angle.toFixed(1) };
+    for (const [id, value] of Object.entries(fields)) {
+      // A field being typed in keeps what is being typed.
+      if (document.activeElement !== $(id)) $(id).value = value;
+    }
+    $("tb-label").textContent = np.is_transforming_selection() ? "Transform selection" : "Transform";
   }
 }
 
@@ -881,6 +1191,18 @@ function layerItems(index) {
       checked: () => !np.layer_visible(i()),
       action: () => act(() => np.set_layer_visible(i(), !np.layer_visible(i()))),
     },
+    {
+      label: "Lock Layer",
+      checked: () => np.layer_locked(i()),
+      action: () => act(() => np.set_layer_locked(i(), !np.layer_locked(i()))),
+    },
+    {
+      label: "Lock Transparent Pixels",
+      checked: () => np.layer_lock_alpha(i()),
+      enabled: () => layerKind(i()) === "pixels",
+      action: () => act(() => np.set_layer_lock_alpha(i(), !np.layer_lock_alpha(i()))),
+    },
+    { label: "Blend Mode", submenu: blendItems(i) },
     { sep: true },
     { label: "Move Up", enabled: () => i() < layerCount() - 1, action: () => act(() => np.move_layer(i(), i() + 1)) },
     { label: "Move Down", enabled: () => i() > 0, action: () => act(() => np.move_layer(i(), i() - 1)) },
@@ -908,6 +1230,17 @@ function layerItems(index) {
   ];
 }
 
+/** The blend modes, as a submenu for one layer. */
+function blendItems(i) {
+  const names = NPaint.blend_mode_names();
+  const labels = NPaint.blend_mode_labels();
+  return names.map((name, k) => ({
+    label: labels[k],
+    checked: () => np.layer_blend(i()) === name,
+    action: () => act(() => np.set_layer_blend(i(), name)),
+  }));
+}
+
 /** Runs `fn` with `index` as the active layer — the context menu acts on
  *  the row that was clicked, not the one that happened to be active. */
 function withActive(index, fn) {
@@ -917,15 +1250,31 @@ function withActive(index, fn) {
   });
 }
 
+/** The widths Edit > Stroke offers, so no dialog is needed. */
+const STROKE_WIDTHS = [1, 2, 3, 4, 6, 8, 12, 16];
+
 function editItems() {
   return [
     { label: "Undo", shortcut: "Ctrl+Z", enabled: () => np.can_undo(), action: () => act(() => np.undo()) },
     { label: "Redo", shortcut: "Ctrl+Shift+Z", enabled: () => np.can_redo(), action: () => act(() => np.redo()) },
     { sep: true },
+    { label: "Cut", shortcut: "Ctrl+X", action: () => copyToClipboard("cut") },
+    { label: "Copy", shortcut: "Ctrl+C", action: () => copyToClipboard("copy") },
+    { label: "Copy Merged", shortcut: "Ctrl+Shift+C", action: () => copyToClipboard("merged") },
+    { label: "Paste", shortcut: "Ctrl+V", action: pasteFromMenu },
+    { sep: true },
     { label: "Free Transform…", shortcut: "T", action: beginTransform },
     { sep: true },
     { label: "Fill with Foreground", shortcut: "Alt+Backspace", action: () => act(() => np.fill_selection()) },
     { label: "Fill with Background", shortcut: "Ctrl+Backspace", action: () => act(() => np.fill_selection_background()) },
+    {
+      label: "Stroke Selection",
+      submenu: STROKE_WIDTHS.map((n) => ({
+        label: `${n} px, foreground colour`,
+        enabled: hasSelection,
+        action: () => act(() => np.stroke_selection(n)),
+      })),
+    },
     { label: "Clear", shortcut: "Delete", action: () => act(() => np.clear_selection()) },
     { sep: true },
     { label: "Swap Colours", shortcut: "X", action: swapColors },
@@ -954,7 +1303,108 @@ function selectItems() {
     { label: "Contract", submenu: amountItems((n) => np.select_contract(n)) },
     { label: "Feather", submenu: amountItems((n) => np.select_feather(n)) },
     { label: "Smooth", submenu: amountItems((n) => np.select_smooth(n)) },
+    { sep: true },
+    { label: "Transform Selection…", enabled: hasSelection, action: () => act(() => np.begin_transform_selection()) },
   ];
+}
+
+/** The View menu: what the page draws around the document. */
+function viewItems() {
+  return [
+    { label: "Zoom In", shortcut: "Ctrl++", action: () => zoomStep(1) },
+    { label: "Zoom Out", shortcut: "Ctrl+−", action: () => zoomStep(-1) },
+    { label: "Fit on Screen", shortcut: "Ctrl+0", action: fit },
+    { label: "Actual Pixels", shortcut: "Ctrl+1", action: actualSize },
+    { sep: true },
+    { label: "Rulers", shortcut: "Ctrl+R", checked: () => showRulers, action: toggleRulers },
+    { label: "Grid", shortcut: "Ctrl+'", checked: () => showGrid, action: toggleGrid },
+    {
+      label: "Grid Size",
+      submenu: [8, 16, 32, 64, 128].map((n) => ({
+        label: `${n} px`,
+        checked: () => gridSize === n,
+        action: () => {
+          gridSize = n;
+          showGrid = true;
+          saveViewPrefs();
+          needsDraw = true;
+        },
+      })),
+    },
+    {
+      label: "Pixel Grid",
+      checked: () => showPixelGrid,
+      action: () => {
+        showPixelGrid = !showPixelGrid;
+        saveViewPrefs();
+        needsDraw = true;
+      },
+    },
+    { sep: true },
+    {
+      label: "Snap to Guides",
+      checked: () => snapToGuides,
+      action: () => {
+        snapToGuides = !snapToGuides;
+        np.set_snap(snapToGuides);
+        saveViewPrefs();
+      },
+    },
+    { label: "Clear Guides", enabled: () => guides.h.length + guides.v.length > 0, action: clearGuides },
+  ];
+}
+
+function toggleRulers() {
+  showRulers = !showRulers;
+  saveViewPrefs();
+  needsDraw = true;
+  if (showRulers) message("Drag out of a ruler to add a guide. Guides can be dragged with any tool; drag one off the canvas to remove it.");
+}
+
+function toggleGrid() {
+  showGrid = !showGrid;
+  saveViewPrefs();
+  needsDraw = true;
+}
+
+function clearGuides() {
+  guides = { h: [], v: [] };
+  syncGuides();
+}
+
+/** The engine keeps a copy of the guides to snap to. */
+function syncGuides() {
+  np.set_guides(Float64Array.from(guides.h), Float64Array.from(guides.v));
+  needsDraw = true;
+}
+
+/** The view furniture is remembered between visits. */
+function saveViewPrefs() {
+  try {
+    localStorage.setItem("npaint.view", JSON.stringify({ rulers: showRulers, grid: showGrid, gridSize, pixelGrid: showPixelGrid, snap: snapToGuides }));
+  } catch {
+    // No storage: not remembered, nothing lost.
+  }
+}
+
+function loadViewPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("npaint.view") ?? "null");
+    if (saved) {
+      showRulers = Boolean(saved.rulers);
+      showGrid = Boolean(saved.grid);
+      showPixelGrid = saved.pixelGrid !== false;
+      snapToGuides = saved.snap !== false;
+      if ([8, 16, 32, 64, 128].includes(saved.gridSize)) gridSize = saved.gridSize;
+    }
+    const limit = Number(localStorage.getItem("npaint.historyLimit"));
+    if ([20, 40, 100, 200].includes(limit)) {
+      np.set_history_limit(limit);
+      $("history-limit").value = String(limit);
+    }
+  } catch {
+    // The defaults stand.
+  }
 }
 
 // ---- Select Subject ---------------------------------------------------------
@@ -1154,9 +1604,11 @@ function buildMenus() {
       items: [
         { label: "New…", shortcut: "Ctrl+N", action: showNewDialog },
         { label: "Open…", shortcut: "Ctrl+O", action: () => pickFile("open") },
+        { label: "Open as Layer…", shortcut: "Ctrl+Shift+O", action: () => pickFile("layer") },
         { label: "Place as Smart Object…", action: () => pickFile("place") },
         { sep: true },
-        { label: "Export Image…", shortcut: "Ctrl+S", action: showExportDialog },
+        { label: "Save…", shortcut: "Ctrl+S", action: saveDocument },
+        { label: "Export Image…", shortcut: "Ctrl+Shift+S", action: showExportDialog },
       ],
     },
     { title: "Edit", items: editItems() },
@@ -1164,8 +1616,12 @@ function buildMenus() {
       title: "Image",
       items: [
         { label: "Adjustments", submenu: adjustmentItems() },
+        { label: "Auto Levels", shortcut: "Ctrl+Shift+L", action: () => act(() => np.auto_levels(true)) },
+        { label: "Auto Contrast", shortcut: "Ctrl+Alt+Shift+L", action: () => act(() => np.auto_levels(false)) },
         { sep: true },
-        { label: "Canvas Size…", action: showCanvasDialog },
+        { label: "Image Size…", shortcut: "Ctrl+Alt+I", action: showImageSizeDialog },
+        { label: "Canvas Size…", shortcut: "Ctrl+Alt+C", action: showCanvasDialog },
+        { label: "Crop to Selection", enabled: hasSelection, action: cropToSelection },
         { sep: true },
         { label: "Rotate Canvas 90° Clockwise", action: () => act(() => np.rotate_canvas(1)) },
         { label: "Rotate Canvas 90° Anticlockwise", action: () => act(() => np.rotate_canvas(-1)) },
@@ -1178,15 +1634,7 @@ function buildMenus() {
     },
     { title: "Layer", items: layerItems() },
     { title: "Select", items: selectItems() },
-    {
-      title: "View",
-      items: [
-        { label: "Zoom In", shortcut: "+", action: () => zoomStep(1) },
-        { label: "Zoom Out", shortcut: "−", action: () => zoomStep(-1) },
-        { label: "Fit on Screen", shortcut: "Ctrl+0", action: fit },
-        { label: "Actual Pixels", shortcut: "Ctrl+1", action: actualSize },
-      ],
-    },
+    { title: "View", items: viewItems() },
   ]);
 }
 
@@ -1207,7 +1655,9 @@ function canvasContextItems() {
   return [
     ...selectItems(),
     { sep: true },
-    ...editItems().slice(3),
+    ...editItems().slice(3, 7),
+    { sep: true },
+    ...editItems().slice(8),
     { sep: true },
     { label: "Layer via Copy", shortcut: "", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
     { label: "Adjustments", submenu: adjustmentItems() },
@@ -1230,12 +1680,25 @@ function bindDialogs() {
     const w = clampInt($("new-width").value, 1, 8192, 1024);
     const h = clampInt($("new-height").value, 1, 8192, 768);
     np.new_document(w, h, $("new-bg").value);
+    docName = "npaint";
+    clearGuides();
     fit();
     touch();
   });
 }
 
+/** Warns before the tab closes on unsaved work. */
+function bindUnload() {
+  window.addEventListener("beforeunload", (e) => {
+    if (!np || !np.is_modified()) return;
+    e.preventDefault();
+    // Older browsers want a value; newer ones ignore it and show their own text.
+    e.returnValue = "";
+  });
+}
+
 function showNewDialog() {
+  if (np.is_modified() && !window.confirm("Start a new document and lose the unsaved changes to this one?")) return;
   $("new-width").value = np.width();
   $("new-height").value = np.height();
   $("dlg-new").showModal();
@@ -1282,35 +1745,221 @@ function pickFile(mode) {
   input.click();
 }
 
-/**
- * Decodes an image file and hands its pixels, at the picture's own size, to
- * the engine: as a new document (`open`), as a smart object fitted to the
- * document (`place`), or as the new contents of the active smart object
- * (`replace`). The engine works out the placement, so a placed picture keeps
- * every pixel it came with however small it is shown.
- */
-async function loadFile(file, mode) {
+/** Whether a file is one of NPaint's own, by name or by its first bytes. */
+async function isNPaintFile(file) {
+  if (/\.npaint$/i.test(file.name)) return true;
+  const head = new Uint8Array(await file.slice(0, 6).arrayBuffer());
+  return (head[0] === 0x1f && head[1] === 0x8b) || String.fromCharCode(...head) === "NPAINT";
+}
+
+/** The pixels of an image file, decoded, at the picture's own size. */
+async function decodeImage(file) {
   const bitmap = await createImageBitmap(file);
-  const name = file.name.replace(/\.[^.]+$/, "") || "Image";
   const scratch = document.createElement("canvas");
   const sctx = scratch.getContext("2d");
   scratch.width = bitmap.width;
   scratch.height = bitmap.height;
   sctx.drawImage(bitmap, 0, 0);
   const data = sctx.getImageData(0, 0, bitmap.width, bitmap.height);
-  const bytes = new Uint8Array(data.data.buffer);
   bitmap.close();
+  return { width: data.width, height: data.height, bytes: new Uint8Array(data.data.buffer) };
+}
 
-  if (mode === "open") {
-    np.open_image(name, data.width, data.height, bytes);
+/**
+ * Opens a file: an NPaint document replaces the document whatever the mode;
+ * an image goes in as a new document (`open`), as a layer at its own size
+ * (`layer`), as a smart object fitted to the document (`place`), or as the
+ * new contents of the active smart object (`replace`). The engine works out
+ * the placement, so a placed picture keeps every pixel it came with however
+ * small it is shown.
+ */
+async function loadFile(file, mode) {
+  const name = file.name.replace(/\.[^.]+$/, "") || "Image";
+  if (await isNPaintFile(file)) {
+    if (np.is_modified() && !window.confirm("Open this file and lose the unsaved changes to the current document?")) return;
+    np.open_document(await inflate(new Uint8Array(await file.arrayBuffer())));
+    docName = name;
+    // The file carries its guides; the engine has them now.
+    guides = { h: Array.from(np.guides_h()), v: Array.from(np.guides_v()) };
+    syncGuides();
     fit();
+    touch();
+    message(`Opened ${file.name}.`);
+    return;
+  }
+  const { width, height, bytes } = await decodeImage(file);
+  if (mode === "open") {
+    if (np.is_modified() && !window.confirm("Open this image and lose the unsaved changes to the current document?")) return;
+    np.open_image(name, width, height, bytes);
+    docName = name;
+    clearGuides();
+    fit();
+  } else if (mode === "layer") {
+    act(() => np.add_layer_centred(name, width, height, bytes));
+    message(`Added ${file.name} as a layer.`);
   } else if (mode === "replace") {
-    act(() => np.replace_smart_contents(active(), data.width, data.height, bytes));
+    act(() => np.replace_smart_contents(active(), width, height, bytes));
   } else {
-    act(() => np.place_smart_object(name, data.width, data.height, bytes));
+    act(() => np.place_smart_object(name, width, height, bytes));
     message(`Placed ${file.name} as a smart object: transform it freely, it keeps its pixels.`);
   }
   touch();
+}
+
+// ---- Saving --------------------------------------------------------------------
+//
+// NPaint's own file keeps every layer. The engine writes it as a plain
+// stream and the page gzips it, since the browser has a compressor and the
+// engine does not; a file that arrives uncompressed still opens.
+
+async function deflate(bytes) {
+  if (typeof CompressionStream !== "function") return new Blob([bytes]);
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Response(stream).blob();
+}
+
+async function inflate(bytes) {
+  const gzipped = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  if (!gzipped) return bytes;
+  if (typeof DecompressionStream !== "function") throw new Error("this browser cannot read compressed files");
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function download(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function saveDocument() {
+  const name = window.prompt("Save as", `${docName}.npaint`);
+  if (name === null) return;
+  const base = name.replace(/\.npaint$/i, "").trim() || docName;
+  docName = base;
+  const blob = await deflate(np.save_document());
+  download(blob, `${base}.npaint`);
+  touch();
+  message(`Saved ${base}.npaint (${Math.round(blob.size / 1024)} kB). Open it again with File > Open.`);
+}
+
+// ---- Drag and drop -------------------------------------------------------------------
+
+function bindDrop() {
+  let depth = 0;
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    depth += 1;
+    $("drop-hint").hidden = false;
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!hasFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) $("drop-hint").hidden = true;
+  });
+  window.addEventListener("dragover", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("drop", (e) => {
+    depth = 0;
+    $("drop-hint").hidden = true;
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    const mode = e.altKey ? "place" : e.shiftKey ? "layer" : "open";
+    loadFile(file, mode).catch((err) => message(`Could not open ${file.name}: ${err.message || err}`));
+  });
+}
+
+const hasFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
+// ---- Clipboard ---------------------------------------------------------------------
+//
+// Copy keeps the pixels in the engine, where a paste can put them back in
+// the same place, and also hands a PNG to the system clipboard so they can
+// go to another program. Paste takes whichever is the better source: the
+// engine's own copy when what the system holds is the same picture, and
+// otherwise whatever image the system clipboard has.
+
+function bindClipboard() {
+  window.addEventListener("paste", (e) => {
+    if (typingInField(e) || document.querySelector("dialog[open]")) return;
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const image = items.find((i) => i.kind === "file" && i.type.startsWith("image/"));
+    if (!image && !np.has_clipboard()) return;
+    e.preventDefault();
+    pasteImage(image ? image.getAsFile() : null);
+  });
+}
+
+async function pasteImage(file) {
+  if (file) {
+    let decoded;
+    try {
+      decoded = await decodeImage(file);
+    } catch (err) {
+      message(`Could not paste that image: ${err.message || err}`);
+      return;
+    }
+    const [cw, ch] = np.clipboard_size();
+    const ours = np.has_clipboard() && cw === decoded.width && ch === decoded.height;
+    act(() => {
+      if (ours) np.paste();
+      else np.paste_external("Pasted", decoded.width, decoded.height, decoded.bytes);
+    });
+    return;
+  }
+  act(() => {
+    if (np.paste() === undefined) message("Nothing to paste.");
+  });
+}
+
+/** Edit > Paste: asks the system clipboard, which needs permission; the
+ *  engine's own clipboard is the fallback. Ctrl+V goes through the paste
+ *  event instead and needs no permission. */
+async function pasteFromMenu() {
+  let file = null;
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find((t) => t.startsWith("image/"));
+      if (type) {
+        file = await item.getType(type);
+        break;
+      }
+    }
+  } catch {
+    // Not allowed, or not supported: the engine's clipboard will do.
+  }
+  await pasteImage(file);
+}
+
+function copyToClipboard(what) {
+  const done = what === "cut" ? np.cut_selection() : np.copy_selection(what === "merged");
+  touch();
+  if (!done) {
+    message("Nothing to copy: select something on a layer with pixels.");
+    return;
+  }
+  const [w, h] = np.clipboard_size();
+  message(`${what === "cut" ? "Cut" : "Copied"} ${w} × ${h} px.`);
+  writeSystemClipboard().catch(() => {
+    // The engine's clipboard still has it; only other programs miss out.
+  });
+}
+
+async function writeSystemClipboard() {
+  if (!navigator.clipboard || typeof ClipboardItem !== "function") return;
+  const [w, h] = np.clipboard_size();
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(np.clipboard_rgba().buffer), w, h), 0, 0);
+  const blob = await new Promise((resolve) => c.toBlob(resolve, "image/png"));
+  if (blob) await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
 }
 
 // ---- Canvas size ------------------------------------------------------------
@@ -1374,9 +2023,78 @@ function bindCanvasDialog() {
   });
 }
 
+// ---- Image size ---------------------------------------------------------------------
+//
+// Scales the picture, unlike Canvas Size, which only adds or trims space.
+
+function showImageSizeDialog() {
+  $("image-width").value = np.width();
+  $("image-height").value = np.height();
+  $("image-percent").value = 100;
+  syncImageSizeNote();
+  $("dlg-image-size").showModal();
+}
+
+function syncImageSizeNote() {
+  const w = Number($("image-width").value);
+  const h = Number($("image-height").value);
+  const note = $("image-note");
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
+    note.textContent = "Give a width and a height of at least one pixel.";
+    return;
+  }
+  if (w * h > np.max_pixels() || w > np.max_side() || h > np.max_side()) {
+    note.textContent = `Too big: at most ${np.max_side()} px a side and ${Math.round(np.max_pixels() / 1e6)} megapixels.`;
+    return;
+  }
+  const bigger = w > np.width() || h > np.height();
+  note.textContent = bigger
+    ? "Enlarging resamples the pixels; the picture will be softer than the original."
+    : "Every layer is scaled to the new size; smart objects keep their originals.";
+}
+
+function bindImageSizeDialog() {
+  const locked = () => $("image-lock").checked;
+  const ratio = () => np.width() / np.height();
+  const setPercent = () => ($("image-percent").value = ((Number($("image-width").value) / np.width()) * 100).toFixed(1));
+  $("image-width").addEventListener("input", () => {
+    if (locked()) $("image-height").value = Math.max(1, Math.round(Number($("image-width").value) / ratio()));
+    setPercent();
+    syncImageSizeNote();
+  });
+  $("image-height").addEventListener("input", () => {
+    if (locked()) $("image-width").value = Math.max(1, Math.round(Number($("image-height").value) * ratio()));
+    setPercent();
+    syncImageSizeNote();
+  });
+  $("image-percent").addEventListener("input", () => {
+    const k = Number($("image-percent").value) / 100;
+    if (!(k > 0)) return;
+    $("image-width").value = Math.max(1, Math.round(np.width() * k));
+    $("image-height").value = Math.max(1, Math.round(np.height() * k));
+    syncImageSizeNote();
+  });
+  $("image-cancel").addEventListener("click", () => $("dlg-image-size").close());
+  $("image-size-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const w = Number($("image-width").value);
+    const h = Number($("image-height").value);
+    act(() => {
+      if (np.resize_image(w, h)) {
+        message(`Image ${w} × ${h} px.`);
+        $("dlg-image-size").close();
+        fit();
+      } else {
+        syncImageSizeNote();
+      }
+    });
+  });
+}
+
 /** Opens the export dialog; the actual writing happens on submit. */
 function showExportDialog() {
   const dialog = $("dlg-export");
+  $("export-name").value = docName;
   syncExportFields();
   dialog.showModal();
 }
@@ -1442,12 +2160,9 @@ function writeImage(format, quality, name) {
         message(`This browser cannot write ${format.replace("image/", "").toUpperCase()}.`);
         return;
       }
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `${name || "npaint"}.${EXTENSION[format] ?? "png"}`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      message(`Exported ${a.download} (${Math.round(blob.size / 1024)} kB).`);
+      const filename = `${name || "npaint"}.${EXTENSION[format] ?? "png"}`;
+      download(blob, filename);
+      message(`Exported ${filename} (${Math.round(blob.size / 1024)} kB).`);
     },
     format,
     quality
@@ -1483,6 +2198,21 @@ function bindLayers() {
     np.set_layer_opacity(active(), Number(opacity.value) / 100);
     $("layer-opacity-out").value = `${opacity.value}%`;
   });
+
+  const blend = $("layer-blend");
+  const names = NPaint.blend_mode_names();
+  const labels = NPaint.blend_mode_labels();
+  names.forEach((name, k) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = labels[k];
+    blend.appendChild(option);
+  });
+  blend.addEventListener("change", () => act(() => np.set_layer_blend(active(), blend.value)));
+  $("layer-lock").addEventListener("click", () => act(() => np.set_layer_locked(active(), !np.layer_locked(active()))));
+  $("layer-lock-alpha").addEventListener("click", () =>
+    act(() => np.set_layer_lock_alpha(active(), !np.layer_lock_alpha(active())))
+  );
 
   $("layer-list").addEventListener("contextmenu", (e) => {
     const row = e.target.closest(".layer");
@@ -1645,6 +2375,13 @@ function renderLayers() {
     const name = document.createElement("span");
     name.className = "layer-name";
     name.textContent = np.layer_name(i);
+    if (np.layer_locked(i) || np.layer_lock_alpha(i)) {
+      const lock = document.createElement("span");
+      lock.className = "layer-lock-mark";
+      lock.textContent = np.layer_locked(i) ? "🔒" : "▦";
+      lock.title = np.layer_locked(i) ? "Locked" : "Transparent pixels locked";
+      name.appendChild(lock);
+    }
     name.title = kind === "adjustment" ? "Double-click to change the adjustment" : "Double-click to rename";
     name.addEventListener("dblclick", (e) => {
       e.stopPropagation();
@@ -1660,11 +2397,65 @@ function renderLayers() {
   const opacity = Math.round(np.layer_opacity(act_) * 100);
   $("layer-opacity").value = opacity;
   $("layer-opacity-out").value = `${opacity}%`;
+  $("layer-blend").value = np.layer_blend(act_);
+  $("layer-lock").classList.toggle("on", np.layer_locked(act_));
+  $("layer-lock").setAttribute("aria-pressed", String(np.layer_locked(act_)));
+  $("layer-lock-alpha").classList.toggle("on", np.layer_lock_alpha(act_));
+  $("layer-lock-alpha").setAttribute("aria-pressed", String(np.layer_lock_alpha(act_)));
+  $("layer-lock-alpha").disabled = layerKind(act_) !== "pixels";
   $("layer-delete").disabled = count <= 1;
   $("layer-merge").disabled = act_ === 0 || layerKind(act_ - 1) !== "pixels";
   $("layer-mask").disabled = hasMask(act_);
   $("layer-up").disabled = act_ >= count - 1;
   $("layer-down").disabled = act_ === 0;
+}
+
+// ---- History panel --------------------------------------------------------------
+//
+// Every step the engine remembers, with the ones undone greyed below the
+// current one; click a row to go there.
+
+function bindHistory() {
+  $("history-limit").addEventListener("change", (e) => {
+    const limit = Number(e.target.value);
+    np.set_history_limit(limit);
+    try {
+      localStorage.setItem("npaint.historyLimit", String(limit));
+    } catch {
+      // Not remembered; the choice still holds for this visit.
+    }
+    touch();
+  });
+  $("history-list").addEventListener("click", (e) => {
+    const row = e.target.closest(".history-step");
+    if (!row) return;
+    act(() => np.history_go_to(Number(row.dataset.steps)));
+  });
+}
+
+function renderHistory() {
+  const list = $("history-list");
+  const labels = np.history_labels();
+  const position = np.history_position();
+  list.replaceChildren();
+  const row = (label, steps) => {
+    const li = document.createElement("li");
+    li.className = "history-step" + (steps === position ? " current" : "") + (steps > position ? " undone" : "");
+    li.dataset.steps = steps;
+    li.textContent = label;
+    list.appendChild(li);
+    return li;
+  };
+  row(docName === "npaint" ? "Open" : docName, 0);
+  labels.forEach((label, k) => row(label, k + 1));
+  // Keep the current step in view — scrolling the list itself, never the
+  // page, which scrollIntoView would happily drag along.
+  const current = list.querySelector(".current");
+  if (current) {
+    const top = current.offsetTop - list.offsetTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + current.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + current.offsetHeight - list.clientHeight;
+  }
 }
 
 function renameLayer(index) {
@@ -1737,6 +2528,9 @@ function canvasRect() {
  * never taken for a resize.
  */
 function edgeAt(x, y) {
+  // An open transform owns its box: a handle sitting on the canvas edge, or
+  // hanging just past it, must beat the canvas resize grab.
+  if (np.is_transforming() && np.transform_hit(x, y) !== "outside") return null;
   const r = canvasRect();
   const left = x <= r.x && x >= r.x - EDGE_GRAB;
   const right = x >= r.x + r.w && x <= r.x + r.w + EDGE_GRAB;
@@ -1785,6 +2579,35 @@ function resizedRect(x, y) {
   return { x0, y0, x1, y1 };
 }
 
+/** How close to a guide, in CSS pixels, counts as grabbing it. */
+const GUIDE_GRAB = 4;
+
+/** A guide near a screen point, as `{ axis, index }`, if there is one. */
+function guideAt(x, y) {
+  const zoom = np.zoom();
+  const hy = guides.h.findIndex((g) => Math.abs(np.pan_y() + g * zoom - y) <= GUIDE_GRAB);
+  if (hy >= 0) return { axis: "h", index: hy };
+  const vx = guides.v.findIndex((g) => Math.abs(np.pan_x() + g * zoom - x) <= GUIDE_GRAB);
+  if (vx >= 0) return { axis: "v", index: vx };
+  return null;
+}
+
+/** Where a dragged guide is in document pixels, or null when it is off the
+ *  canvas and would be dropped. */
+function guidePosition(x, y) {
+  const [dx, dy] = np.screen_to_doc(x, y);
+  let at = guideDrag.axis === "h" ? dy : dx;
+  const extent = guideDrag.axis === "h" ? np.height() : np.width();
+  if (at < 0 || at > extent) return null;
+  // A guide being placed snaps to the canvas centre, and to the pointer's
+  // whole pixel otherwise. The engine snaps everything else.
+  if (snapToGuides && Math.abs(at - extent / 2) * np.zoom() <= GUIDE_SNAP) at = extent / 2;
+  return Math.round(at);
+}
+
+/** How close on screen, in CSS pixels, a dragged guide snaps to the centre. */
+const GUIDE_SNAP = 6;
+
 function bindPointer() {
   view.addEventListener("pointerdown", (e) => {
     closeMenus();
@@ -1796,9 +2619,29 @@ function bindPointer() {
       e.preventDefault();
       return;
     }
+    // Space with Ctrl or Alt is a temporary zoom tool.
+    if (spaceHeld && e.button === 0 && (e.ctrlKey || e.metaKey || e.altKey)) {
+      if (e.altKey) np.zoom_out_about(x, y);
+      else np.zoom_in_about(x, y);
+      needsDraw = true;
+      e.preventDefault();
+      return;
+    }
     const wantsPan = e.button === 1 || spaceHeld;
     const edge = wantsPan ? null : edgeAt(x, y);
-    if (edge && e.button === 0) {
+    const onRuler = showRulers && !wantsPan && e.button === 0 && (x < RULER || y < RULER);
+    // Guides are grabbed with whatever tool is in hand: they are thin, and
+    // hunting for the move tool to shift one is worse than losing a couple
+    // of pixels of paintable space along each.
+    const grabbed = !wantsPan && e.button === 0 && !np.is_transforming() ? guideAt(x, y) : null;
+    if (onRuler) {
+      // Dragging out of a ruler makes a guide.
+      guideDrag = { axis: y < RULER && x >= RULER ? "h" : x < RULER && y >= RULER ? "v" : y < x ? "h" : "v", at: null, index: null };
+    } else if (grabbed) {
+      guideDrag = { axis: grabbed.axis, at: guides[grabbed.axis][grabbed.index], index: grabbed.index };
+      guides[grabbed.axis].splice(grabbed.index, 1);
+      syncGuides();
+    } else if (edge && e.button === 0) {
       // Dragging a canvas edge resizes the canvas, and only starts from
       // outside it, so it never gets in the way of painting.
       resizing = { edge, rect: { x0: 0, y0: 0, x1: np.width(), y1: np.height() } };
@@ -1810,12 +2653,13 @@ function bindPointer() {
       // With the zoom tool, the options-bar "zoom out" acts like Alt.
       const alt = e.altKey || (tool === "zoom" && zoomOutMode);
       if (!np.pointer_down(x, y, e.shiftKey, alt)) {
-        // A smart object's pixels or an adjustment layer's: the engine says
-        // which, and what to do instead.
+        // A smart object's pixels, an adjustment layer's, or a locked
+        // layer: the engine says which, and what to do instead.
         const why = np.edit_refusal();
         if (why) message(why.charAt(0).toUpperCase() + why.slice(1) + ".");
         return;
       }
+      if (tool === "eyedropper" || alt) syncSwatches();
     } else {
       return;
     }
@@ -1828,9 +2672,14 @@ function bindPointer() {
     const [dx, dy] = np.screen_to_doc(x, y);
     $("status-cursor").textContent = `${Math.floor(dx)}, ${Math.floor(dy)}`;
     if (sizeToPointer(x, y)) return;
-    if (showsBrushRing()) {
+    if (showsBrushRing() || showRulers) {
       cursor = { x, y };
       needsDraw = true;
+    }
+    if (guideDrag) {
+      guideDrag.at = guidePosition(x, y);
+      needsDraw = true;
+      return;
     }
     if (resizing) {
       resizing.rect = resizedRect(x, y);
@@ -1839,7 +2688,8 @@ function bindPointer() {
     }
     if (!pan && !np.is_gesturing()) {
       const edge = edgeAt(x, y);
-      view.style.cursor = edge ? EDGE_CURSOR[edge] ?? "" : "";
+      const guide = !np.is_transforming() ? guideAt(x, y) : null;
+      view.style.cursor = edge ? EDGE_CURSOR[edge] ?? "" : guide ? (guide.axis === "h" ? "row-resize" : "col-resize") : "";
     }
     if (pan) {
       np.pan_by(x - pan.x, y - pan.y);
@@ -1850,12 +2700,21 @@ function bindPointer() {
       else setHitCursor(np.transform_hit(x, y));
     } else if (np.is_gesturing()) {
       np.pointer_move(x, y, e.shiftKey, e.altKey);
+      if (tool === "eyedropper") syncSwatches();
       needsDraw = true;
     }
   });
 
   const end = (e) => {
     const [x, y] = canvasPoint(e);
+    if (guideDrag) {
+      const at = guidePosition(x, y);
+      if (at !== null) guides[guideDrag.axis].push(at);
+      guideDrag = null;
+      view.style.cursor = "";
+      syncGuides();
+      return;
+    }
     if (resizing) {
       const r = resizedRect(x, y);
       resizing = null;
@@ -1882,6 +2741,7 @@ function bindPointer() {
   view.addEventListener("pointercancel", () => {
     pan = null;
     resizing = null;
+    guideDrag = null;
     view.style.cursor = "";
     viewport.classList.remove("panning", "dragging");
     np.cancel_gesture();
@@ -1955,7 +2815,7 @@ function typingInField(e) {
 
 function bindKeyboard() {
   window.addEventListener("keydown", (e) => {
-    if ($("dlg-new").open || $("dlg-canvas").open || $("dlg-export").open || adjust.isOpen()) return;
+    if (document.querySelector("dialog[open]")) return;
     if (e.key === "Alt") {
       altHeld = true;
       syncOptions();
@@ -1982,6 +2842,12 @@ function bindKeyboard() {
       return;
     }
 
+    if (tool === "crop" && key === "Enter" && hasSelection()) {
+      cropToSelection();
+      e.preventDefault();
+      return;
+    }
+
     switch (key) {
       case "f":
         if (!endSizing(true)) beginSizing();
@@ -1999,6 +2865,13 @@ function bindKeyboard() {
       case "Delete":
       case "Backspace":
         act(() => (e.altKey ? np.fill_selection() : np.clear_selection()));
+        e.preventDefault();
+        return;
+      case "ArrowLeft":
+      case "ArrowRight":
+      case "ArrowUp":
+      case "ArrowDown":
+        nudge(key, e.shiftKey ? 10 : 1, tool === "move");
         e.preventDefault();
         return;
       case "+":
@@ -2030,8 +2903,12 @@ function bindKeyboard() {
         break;
     }
 
-    const t = TOOLS.find((t) => t.key.toLowerCase() === key);
-    if (t && !e.altKey) setTool(t.name);
+    // A key shared by several tools cycles through them.
+    const sharing = TOOLS.filter((t) => t.key.toLowerCase() === key);
+    if (sharing.length && !e.altKey) {
+      const at = sharing.findIndex((t) => t.name === tool);
+      setTool(sharing[(at + 1) % sharing.length].name);
+    }
   });
 
   window.addEventListener("keyup", (e) => {
@@ -2050,6 +2927,26 @@ function bindKeyboard() {
     spaceHeld = false;
     altHeld = false;
     viewport.classList.remove("panning");
+  });
+}
+
+/**
+ * The arrow keys: with the move tool (or Ctrl held) they move the selected
+ * pixels, otherwise the selection outline; Shift makes it ten pixels. With
+ * the crop tool, Enter crops.
+ */
+function nudge(key, step, pixels) {
+  const dx = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : 0;
+  const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
+  act(() => {
+    if (pixels) {
+      if (!np.nudge_layer(dx, dy)) {
+        const why = np.edit_refusal();
+        if (why) message(why.charAt(0).toUpperCase() + why.slice(1) + ".");
+      }
+    } else if (!np.nudge_selection(dx, dy)) {
+      message("Select something to move its outline, or use the move tool to move pixels.");
+    }
   });
 }
 
@@ -2100,6 +2997,14 @@ function handleShortcut(key, shift, alt) {
     case "1":
       actualSize();
       return true;
+    case "+":
+    case "=":
+      zoomStep(1);
+      return true;
+    case "-":
+    case "_":
+      zoomStep(-1);
+      return true;
     case "n":
       if (shift) act(() => np.add_layer());
       else showNewDialog();
@@ -2111,20 +3016,52 @@ function handleShortcut(key, shift, alt) {
       act(() => (shift ? np.flatten() : np.merge_down(active())));
       return true;
     case "i":
-      if (shift) act(() => np.select_invert());
+      if (alt) showImageSizeDialog();
+      else if (shift) act(() => np.select_invert());
       else adjust.open("invert");
       return true;
     case "u":
       adjust.open(shift ? "desaturate" : "hue-saturation");
       return true;
     case "l":
-      adjust.open("levels");
+      if (shift) act(() => np.auto_levels(!alt));
+      else adjust.open("levels");
       return true;
+    case "m":
+      adjust.open("curves");
+      return true;
+    case "b":
+      adjust.open("color-balance");
+      return true;
+    case "c":
+      if (alt) showCanvasDialog();
+      else copyToClipboard(shift ? "merged" : "copy");
+      return true;
+    case "x":
+      copyToClipboard("cut");
+      return true;
+    case "v":
+      // Left to the browser: its paste event carries the system clipboard,
+      // which a key handler cannot read without asking permission.
+      return false;
     case "o":
-      pickFile("open");
+      pickFile(shift ? "layer" : "open");
       return true;
     case "s":
-      showExportDialog();
+      if (shift) showExportDialog();
+      else saveDocument();
+      return true;
+    case "r":
+      toggleRulers();
+      return true;
+    case "'":
+      toggleGrid();
+      return true;
+    case "ArrowLeft":
+    case "ArrowRight":
+    case "ArrowUp":
+    case "ArrowDown":
+      nudge(key, shift ? 10 : 1, true);
       return true;
     case "Backspace":
       act(() => (alt ? np.fill_selection() : np.fill_selection_background()));

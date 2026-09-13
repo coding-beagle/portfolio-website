@@ -42,6 +42,26 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
+     * Adds a picture of any size as a layer at its own resolution, centred
+     * — Open as Layer.
+     * @param {string} name
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     * @returns {number}
+     */
+    add_layer_centred(name, width, height, bytes) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_add_layer_centred(this.__wbg_ptr, ptr0, len0, width, height, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
      * Adds a layer from straight-alpha RGBA bytes of the document's size —
      * what `getImageData` on a decoded image gives.
      * @param {string} name
@@ -115,6 +135,15 @@ export class NPaint {
         }
     }
     /**
+     * Auto Levels (`per_channel`) or Auto Contrast on the selected pixels.
+     * @param {boolean} per_channel
+     * @returns {boolean}
+     */
+    auto_levels(per_channel) {
+        const ret = wasm.npaint_auto_levels(this.__wbg_ptr, per_channel);
+        return ret !== 0;
+    }
+    /**
      * @returns {string}
      */
     background() {
@@ -153,6 +182,33 @@ export class NPaint {
         }
     }
     /**
+     * Starts a free transform of the selection outline rather than pixels.
+     */
+    begin_transform_selection() {
+        const ret = wasm.npaint_begin_transform_selection(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @returns {string[]}
+     */
+    static blend_mode_labels() {
+        const ret = wasm.npaint_blend_mode_labels();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string[]}
+     */
+    static blend_mode_names() {
+        const ret = wasm.npaint_blend_mode_names();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @returns {boolean}
      */
     can_redo() {
@@ -188,6 +244,27 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * The clipboard's pixels as straight-alpha RGBA, for the page to hand
+     * to the system clipboard.
+     * @returns {Uint8Array}
+     */
+    clipboard_rgba() {
+        const ret = wasm.npaint_clipboard_rgba(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * `[width, height]` of what the clipboard holds, or empty.
+     * @returns {Uint32Array}
+     */
+    clipboard_size() {
+        const ret = wasm.npaint_clipboard_size(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @returns {string}
      */
     color() {
@@ -217,6 +294,31 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * Copies the selected pixels of the active surface, or of the whole
+     * picture when `merged`. False when there is nothing to copy.
+     * @param {boolean} merged
+     * @returns {boolean}
+     */
+    copy_selection(merged) {
+        const ret = wasm.npaint_copy_selection(this.__wbg_ptr, merged);
+        return ret !== 0;
+    }
+    /**
+     * Crops the canvas to the selection's bounding box.
+     * @returns {boolean}
+     */
+    crop_to_selection() {
+        const ret = wasm.npaint_crop_to_selection(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    cut_selection() {
+        const ret = wasm.npaint_cut_selection(this.__wbg_ptr);
+        return ret !== 0;
     }
     deselect() {
         wasm.npaint_deselect(this.__wbg_ptr);
@@ -329,6 +431,39 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
+     * The guides as the engine has them: what an opened file brought in.
+     * @returns {Float64Array}
+     */
+    guides_h() {
+        const ret = wasm.npaint_guides_h(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    guides_v() {
+        const ret = wasm.npaint_guides_v(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    hardness() {
+        const ret = wasm.npaint_hardness(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {boolean}
+     */
+    has_clipboard() {
+        const ret = wasm.npaint_has_clipboard(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     has_session() {
@@ -340,6 +475,40 @@ export class NPaint {
      */
     height() {
         const ret = wasm.npaint_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Jumps to having `steps` of the history applied.
+     * @param {number} steps
+     * @returns {boolean}
+     */
+    history_go_to(steps) {
+        const ret = wasm.npaint_history_go_to(this.__wbg_ptr, steps);
+        return ret !== 0;
+    }
+    /**
+     * Every step in the history, oldest first, done and undone alike.
+     * @returns {string[]}
+     */
+    history_labels() {
+        const ret = wasm.npaint_history_labels(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {number}
+     */
+    history_limit() {
+        const ret = wasm.npaint_history_limit(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * How many of those steps are applied.
+     * @returns {number}
+     */
+    history_position() {
+        const ret = wasm.npaint_history_position(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -357,10 +526,25 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * Whether the document differs from what was last saved or opened.
+     * @returns {boolean}
+     */
+    is_modified() {
+        const ret = wasm.npaint_is_modified(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     is_transforming() {
         const ret = wasm.npaint_is_transforming(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_transforming_selection() {
+        const ret = wasm.npaint_is_transforming_selection(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -399,6 +583,29 @@ export class NPaint {
         var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * The blend mode's name, as `blend_mode_names` lists them.
+     * @param {number} index
+     * @returns {string}
+     */
+    layer_blend(index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.npaint_layer_blend(this.__wbg_ptr, index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
     }
     /**
      * @returns {number}
@@ -464,6 +671,28 @@ export class NPaint {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_lock_alpha(index) {
+        const ret = wasm.npaint_layer_lock_alpha(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_locked(index) {
+        const ret = wasm.npaint_layer_locked(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * @param {number} index
@@ -627,11 +856,44 @@ export class NPaint {
         }
     }
     /**
+     * Moves the selected pixels (or the whole layer) by whole pixels; a run
+     * of nudges is one undo step.
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {boolean}
+     */
+    nudge_layer(dx, dy) {
+        const ret = wasm.npaint_nudge_layer(this.__wbg_ptr, dx, dy);
+        return ret !== 0;
+    }
+    /**
+     * Moves the selection outline by whole pixels.
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {boolean}
+     */
+    nudge_selection(dx, dy) {
+        const ret = wasm.npaint_nudge_selection(this.__wbg_ptr, dx, dy);
+        return ret !== 0;
+    }
+    /**
      * @returns {number}
      */
     opacity() {
         const ret = wasm.npaint_opacity(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * Replaces the document with an NPaint file's.
+     * @param {Uint8Array} bytes
+     */
+    open_document(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_open_document(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * Replaces the document with an image, as Open does. The bytes are
@@ -671,6 +933,35 @@ export class NPaint {
     pan_y() {
         const ret = wasm.npaint_pan_y(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * Pastes the clipboard as a new layer. The layer's index, or none when
+     * the clipboard is empty.
+     * @returns {number | undefined}
+     */
+    paste() {
+        const ret = wasm.npaint_paste(this.__wbg_ptr);
+        return ret === Number.MAX_SAFE_INTEGER ? undefined : ret;
+    }
+    /**
+     * Pastes a picture from outside — the system clipboard, a dropped file
+     * — as a new layer, centred.
+     * @param {string} name
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     * @returns {number}
+     */
+    paste_external(name, width, height, bytes) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_paste_external(this.__wbg_ptr, ptr0, len0, width, height, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
     }
     /**
      * Places an image as a smart object above the active layer, fitted to
@@ -828,6 +1119,16 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * Scales the whole picture to a new size.
+     * @param {number} width
+     * @param {number} height
+     * @returns {boolean}
+     */
+    resize_image(width, height) {
+        const ret = wasm.npaint_resize_image(this.__wbg_ptr, width, height);
+        return ret !== 0;
+    }
+    /**
      * @param {number} turns
      */
     rotate_canvas(turns) {
@@ -863,6 +1164,16 @@ export class NPaint {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * The document as an NPaint file, and from now on it counts as saved.
+     * @returns {Uint8Array}
+     */
+    save_document() {
+        const ret = wasm.npaint_save_document(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * `[x, y]` document coordinates for a screen position, for the status
@@ -1065,6 +1376,64 @@ export class NPaint {
         wasm.npaint_set_fill(this.__wbg_ptr, fill);
     }
     /**
+     * The guides the page draws, in document pixels, for the move tool and
+     * transforms to snap to. Call whenever they change.
+     * @param {Float64Array} h
+     * @param {Float64Array} v
+     */
+    set_guides(h, v) {
+        const ptr0 = passArrayF64ToWasm0(h, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(v, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.npaint_set_guides(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
+     * How far out a brush dab is solid before it fades, `0.0..=1.0`.
+     * @param {number} hardness
+     */
+    set_hardness(hardness) {
+        wasm.npaint_set_hardness(this.__wbg_ptr, hardness);
+    }
+    /**
+     * @param {number} limit
+     */
+    set_history_limit(limit) {
+        wasm.npaint_set_history_limit(this.__wbg_ptr, limit);
+    }
+    /**
+     * @param {number} index
+     * @param {string} name
+     */
+    set_layer_blend(index, name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_layer_blend(this.__wbg_ptr, index, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
+     * @param {boolean} locked
+     */
+    set_layer_lock_alpha(index, locked) {
+        const ret = wasm.npaint_set_layer_lock_alpha(this.__wbg_ptr, index, locked);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
+     * @param {boolean} locked
+     */
+    set_layer_locked(index, locked) {
+        const ret = wasm.npaint_set_layer_locked(this.__wbg_ptr, index, locked);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {number} index
      * @param {boolean} enabled
      */
@@ -1142,6 +1511,12 @@ export class NPaint {
         wasm.npaint_set_size(this.__wbg_ptr, size);
     }
     /**
+     * @param {boolean} on
+     */
+    set_snap(on) {
+        wasm.npaint_set_snap(this.__wbg_ptr, on);
+    }
+    /**
      * @param {number} tolerance
      */
     set_tolerance(tolerance) {
@@ -1179,6 +1554,23 @@ export class NPaint {
     size() {
         const ret = wasm.npaint_size(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    snap() {
+        const ret = wasm.npaint_snap(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Paints a line `width` wide along the selection's edge in the
+     * foreground colour.
+     * @param {number} width
+     * @returns {boolean}
+     */
+    stroke_selection(width) {
+        const ret = wasm.npaint_stroke_selection(this.__wbg_ptr, width);
+        return ret !== 0;
     }
     swap_colors() {
         wasm.npaint_swap_colors(this.__wbg_ptr);
@@ -1299,6 +1691,32 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * @param {number} degrees
+     * @returns {boolean}
+     */
+    transform_set_angle(degrees) {
+        const ret = wasm.npaint_transform_set_angle(this.__wbg_ptr, degrees);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    transform_set_position(x, y) {
+        const ret = wasm.npaint_transform_set_position(this.__wbg_ptr, x, y);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} width
+     * @param {number} height
+     * @returns {boolean}
+     */
+    transform_set_size(width, height) {
+        const ret = wasm.npaint_transform_set_size(this.__wbg_ptr, width, height);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     undo() {
@@ -1407,6 +1825,11 @@ function getArrayJsValueFromWasm0(ptr, len) {
     return result;
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -1448,6 +1871,14 @@ function getStringFromWasm0(ptr, len) {
     return decodeText(ptr >>> 0, len);
 }
 
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
 let cachedUint8ArrayMemory0 = null;
 function getUint8ArrayMemory0() {
     if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
@@ -1466,6 +1897,13 @@ function passArray8ToWasm0(arg, malloc) {
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF64ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 8, 8) >>> 0;
+    getFloat64ArrayMemory0().set(arg, ptr / 8);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }
@@ -1551,6 +1989,7 @@ function __wbg_finalize_init(instance, module) {
     cachedFloat32ArrayMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
     cachedInt32ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

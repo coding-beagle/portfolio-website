@@ -11,6 +11,7 @@
 use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
 use crate::raster::Raster;
+use crate::snap::Snap;
 
 /// A 2D affine transform `[a c e; b d f]`: `x' = a x + c y + e`,
 /// `y' = b x + d y + f`.
@@ -242,7 +243,10 @@ impl Handle {
 /// What the pointer is doing to the box.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drag {
-    Move { last: Point },
+    /// Where the pointer went down and the matrix it found, so snapping
+    /// can re-derive the box from the total drag rather than nudging it
+    /// step by step.
+    Move { start: Point, origin: Affine },
     Scale { handle: Handle, anchor: Point },
     Rotate { last_angle: f64 },
 }
@@ -407,7 +411,7 @@ impl TransformSession {
     pub fn pointer_down(&mut self, p: Point, tolerance: f64) -> bool {
         self.drag = match self.hit(p, tolerance) {
             Hit::Handle(handle) => Some(Drag::Scale { handle, anchor: self.box_point(handle.opposite().unit()) }),
-            Hit::Inside => Some(Drag::Move { last: p }),
+            Hit::Inside => Some(Drag::Move { start: p, origin: self.matrix }),
             Hit::Rotate => {
                 let c = self.centre();
                 Some(Drag::Rotate { last_angle: (p.y - c.y).atan2(p.x - c.x) })
@@ -421,14 +425,28 @@ impl TransformSession {
     /// rotation to 15°; `alt` scales about the centre instead of the
     /// opposite handle. Returns whether the matrix changed.
     pub fn pointer_move(&mut self, p: Point, shift: bool, alt: bool) -> bool {
+        self.pointer_move_snapped(p, shift, alt, None)
+    }
+
+    /// [`TransformSession::pointer_move`] with guides to snap to: a move
+    /// pulls the box's edges and centre onto them, a scale pulls the handle.
+    pub fn pointer_move_snapped(&mut self, p: Point, shift: bool, alt: bool, snap: Option<&Snap>) -> bool {
         let Some(drag) = self.drag else { return false };
         match drag {
-            Drag::Move { last } => {
-                self.translate(p.x - last.x, p.y - last.y);
-                self.drag = Some(Drag::Move { last: p });
+            Drag::Move { start, origin } => {
+                self.matrix = Affine::translation(p.x - start.x, p.y - start.y).then(&origin);
+                if let Some(snap) = snap {
+                    let c = self.centre();
+                    let corners = self.corners();
+                    let xs: Vec<f64> = corners.iter().map(|q| q.x).chain([c.x]).collect();
+                    let ys: Vec<f64> = corners.iter().map(|q| q.y).chain([c.y]).collect();
+                    let (dx, dy) = snap.offset(&xs, &ys);
+                    self.translate(dx, dy);
+                }
             }
             Drag::Scale { handle, anchor } => {
                 let anchor = if alt { self.centre() } else { anchor };
+                let p = snap.map_or(p, |s| s.point(p));
                 self.scale_towards(handle, anchor, p, shift || (alt && handle.is_corner() && shift));
             }
             Drag::Rotate { last_angle } => {
@@ -473,6 +491,30 @@ impl TransformSession {
 
     pub fn flip_vertical(&mut self) {
         self.flip(1.0, -1.0);
+    }
+
+    /// Moves the box so its top-left corner lands on `(x, y)`.
+    pub fn set_position(&mut self, x: f64, y: f64) {
+        let tl = self.box_point(Point::new(0.0, 0.0));
+        self.translate(x - tl.x, y - tl.y);
+    }
+
+    /// Scales the box, about its top-left corner and along its own axes, to
+    /// `width` by `height` document pixels.
+    pub fn set_size(&mut self, width: f64, height: f64) {
+        let (sx, sy) = self.matrix.scale();
+        let kx = width / (f64::from(self.bounds.w) * sx).max(1e-9);
+        let ky = height / (f64::from(self.bounds.h) * sy).max(1e-9);
+        let tl = self.box_point(Point::new(0.0, 0.0));
+        let theta = self.matrix.angle();
+        let in_frame = Affine::rotation(theta).then(&Affine::scaling(kx.max(0.01), ky.max(0.01))).then(&Affine::rotation(-theta));
+        self.matrix = self.matrix.pre_about(&in_frame, tl);
+    }
+
+    /// Turns the box, about its centre, to an absolute angle.
+    pub fn set_angle(&mut self, radians: f64) {
+        let delta = radians - self.matrix.angle();
+        self.rotate(delta);
     }
 
     /// Mirrors along the box's own axes, about its centre.
@@ -711,6 +753,23 @@ mod tests {
     }
 
     #[test]
+    fn a_snapped_move_lands_the_box_edge_on_a_guide() {
+        use crate::snap::Guides;
+        let guides = Guides { h: vec![], v: vec![30.0], enabled: true };
+        let snap = Snap::new(&guides, Rect::new(0, 0, 100, 100), 1.0).unwrap();
+        let mut s = TransformSession::new(&layer(), Some(Rect::new(4, 4, 6, 4))).unwrap();
+        assert!(s.pointer_down(Point::new(6.0, 6.0), 0.5));
+        // Right edge would be at 27; the guide at 30 pulls it the last 3.
+        // Dragged 20 down as well, so the canvas top is out of reach.
+        s.pointer_move_snapped(Point::new(23.0, 26.0), false, false, Some(&snap));
+        assert_eq!(s.moved_selection(), Some(Rect::new(24, 24, 6, 4)));
+        // Well away from it, the drag is exact and the total drag, not the
+        // step from the snapped position, is what counts.
+        s.pointer_move_snapped(Point::new(70.0, 26.0), false, false, Some(&snap));
+        assert_eq!(s.moved_selection(), Some(Rect::new(68, 24, 6, 4)));
+    }
+
+    #[test]
     fn shift_snaps_rotation() {
         let mut s = TransformSession::new(&layer(), None).unwrap();
         let c = s.centre();
@@ -741,6 +800,24 @@ mod tests {
         s.flip_horizontal();
         s.rotate(std::f64::consts::PI);
         assert!(close(s.handles()[0], Point::new(10.0, 8.0)));
+    }
+
+    #[test]
+    fn the_numbers_in_the_bar_can_be_typed() {
+        let mut s = TransformSession::new(&layer(), None).unwrap();
+        s.set_position(1.0, 2.0);
+        let info = s.info();
+        assert!((info.x - 1.0).abs() < 1e-9 && (info.y - 2.0).abs() < 1e-9);
+        s.set_size(12.0, 2.0);
+        let info = s.info();
+        assert!((info.width - 12.0).abs() < 1e-9 && (info.height - 2.0).abs() < 1e-9, "{info:?}");
+        assert!((info.x - 1.0).abs() < 1e-9, "scaled about the top-left, which stayed put");
+        s.set_angle(30f64.to_radians());
+        assert!((s.info().angle_degrees - 30.0).abs() < 1e-6);
+        s.set_angle(0.0);
+        assert!(s.info().angle_degrees.abs() < 1e-6);
+        let (sx, sy) = s.matrix().scale();
+        assert!((sx - 2.0).abs() < 1e-9 && (sy - 0.5).abs() < 1e-9, "turning did not change the size");
     }
 
     #[test]

@@ -202,6 +202,25 @@ button.opt {
   grid-template-columns: auto 1fr 240px;
   min-height: 0;
 }
+/* The right-hand column: layers above, history below. */
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+.side .panel {
+  border-left: none;
+}
+.layers-panel {
+  flex: 1 1 60%;
+  min-height: 120px;
+}
+.history-panel {
+  flex: 0 1 40%;
+  min-height: 90px;
+  border-top: 1px solid var(--border);
+}
 
 .toolbox {
   display: flex;
@@ -211,18 +230,25 @@ button.opt {
   background: var(--panel);
   border-right: 1px solid var(--border);
   align-items: center;
+  /* Seventeen tools are taller than a short window: the box scrolls rather
+     than pushing the workspace off the bottom of the page. */
+  min-height: 0;
+  overflow: hidden auto;
+  scrollbar-width: none;
 }
 /* A gap and a rule between blocks of like tools. */
 .tool-sep {
   width: 22px;
   height: 1px;
-  margin: 5px 0;
+  flex: 0 0 auto;
+  margin: 4px 0;
   background: var(--border-soft);
 }
 .tool {
   position: relative;
   width: 38px;
-  height: 36px;
+  height: 32px;
+  flex: 0 0 auto;
   padding: 0;
   display: grid;
   place-items: center;
@@ -581,10 +607,16 @@ button.primary {
     grid-template-columns: auto 1fr;
     grid-template-rows: 1fr 160px;
   }
-  .layers-panel {
+  .side {
     grid-column: 1 / -1;
+    flex-direction: row;
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+  .history-panel {
+    border-top: none;
+    border-left: 1px solid var(--border);
+    flex-basis: 40%;
   }
   .status-keys,
   .hint {
@@ -670,6 +702,7 @@ button.primary {
 }
 .swatches {
   position: relative;
+  flex: 0 0 auto;
   width: 38px;
   height: 46px;
   margin: 8px 0 4px;
@@ -873,4 +906,151 @@ button.primary {
 }
 #menu-layer .popup-menu {
   pointer-events: auto;
+}
+
+/* ---- Layer properties, locks ---- */
+.layer-props {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 0;
+}
+.layer-props select {
+  flex: 1;
+  min-width: 0;
+}
+.layer-props .lock {
+  width: 28px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1;
+}
+.layer-props .lock.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.layer-lock-mark {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ---- History panel ---- */
+.history-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.history-title select {
+  font-weight: 400;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 12px;
+}
+.history-step {
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+.history-step:hover {
+  background: #3a3a3a;
+}
+.history-step.current {
+  background: var(--accent-soft);
+}
+.history-step.undone {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ---- Transform bar fields ---- */
+.tb-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+.tb-field input {
+  width: 4.2em;
+}
+.tb-link {
+  padding: 2px 6px;
+}
+.tb-link.seg-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* ---- Curves ---- */
+.curve-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.curve-graph {
+  width: 200px;
+  height: 200px;
+  border: 1px solid var(--border);
+  cursor: crosshair;
+  touch-action: none;
+}
+.curve-readout {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.adjust-heading {
+  margin: 6px 0 2px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.adjust-dialog .dialog-form {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+
+/* ---- Drop hint ---- */
+.drop-hint {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: rgba(30, 30, 30, 0.7);
+  color: var(--text);
+  font-size: 15px;
+  pointer-events: none;
+  z-index: 15;
+}
+.drop-hint[hidden] {
+  display: none;
+}
+
+/* ---- Dialog odds and ends ---- */
+.dialog-form .check-row {
+  justify-content: flex-start;
+  gap: 8px;
+}
+.dialog-form .check-row input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.viewport.tool-eyedropper canvas,
+.viewport.tool-bucket canvas,
+.viewport.tool-crop canvas,
+.viewport.tool-ellipse-select canvas {
+  cursor: crosshair;
 }

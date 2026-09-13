@@ -30,14 +30,7 @@ use crate::transform::Affine;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LayerId(pub u32);
 
-/// How a layer combines with what is below it. Only `Normal` exists yet; the
-/// enum is here so a second mode is an arm in [`Raster::composite_over`]'s
-/// caller rather than a redesign.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum BlendMode {
-    #[default]
-    Normal,
-}
+pub use crate::blend::BlendMode;
 
 /// A picture kept at its own size, placed in the document by a transform.
 #[derive(Clone, Debug, PartialEq)]
@@ -98,6 +91,11 @@ pub enum EditRefusal {
     SmartObject,
     /// An adjustment layer has no pixels; only its mask can be painted.
     AdjustmentLayer,
+    /// The layer is locked: nothing on it may change until it is unlocked.
+    Locked,
+    /// The layer's transparency is locked, which painting respects but
+    /// moving and transforming cannot.
+    AlphaLocked,
 }
 
 impl std::fmt::Display for EditRefusal {
@@ -105,6 +103,8 @@ impl std::fmt::Display for EditRefusal {
         f.write_str(match self {
             EditRefusal::SmartObject => "a smart object cannot be painted on directly: rasterize it, or paint on its mask",
             EditRefusal::AdjustmentLayer => "an adjustment layer has no pixels: paint on its mask instead",
+            EditRefusal::Locked => "the layer is locked: unlock it first",
+            EditRefusal::AlphaLocked => "the layer's transparency is locked: unlock it to move or transform it",
         })
     }
 }
@@ -129,6 +129,11 @@ pub struct Layer {
     pub mask_enabled: bool,
     /// Which raster the tools edit. `Mask` means nothing without a mask.
     pub target: Target,
+    /// Lock all: nothing on the layer — pixels, mask, placement — changes.
+    pub locked: bool,
+    /// Lock transparent pixels: painting keeps every pixel's alpha, so a
+    /// stroke lands only where there is already something.
+    pub lock_alpha: bool,
 }
 
 /// How much a mask pixel shows: its brightness, with anything transparent
@@ -166,6 +171,8 @@ impl Layer {
             mask: None,
             mask_enabled: true,
             target: Target::Pixels,
+            locked: false,
+            lock_alpha: false,
         }
     }
 
@@ -210,8 +217,8 @@ impl Layer {
     }
 
     pub fn adjustment(&self) -> Option<Adjustment> {
-        match self.kind {
-            LayerKind::Adjustment(a) => Some(a),
+        match &self.kind {
+            LayerKind::Adjustment(a) => Some(a.clone()),
             _ => None,
         }
     }
@@ -244,9 +251,13 @@ impl Layer {
         }
     }
 
-    /// Why the current surface cannot be edited, if it cannot. A mask always
-    /// can; the pixels of a smart object or an adjustment layer never can.
+    /// Why the current surface cannot be edited, if it cannot. A locked
+    /// layer never can; otherwise a mask always can, and the pixels of a
+    /// smart object or an adjustment layer never can.
     pub fn edit_refusal(&self) -> Option<EditRefusal> {
+        if self.locked {
+            return Some(EditRefusal::Locked);
+        }
         if self.editing_mask() {
             return None;
         }
@@ -358,6 +369,28 @@ impl Layer {
             self.raster = object.render(width, height);
         }
     }
+
+    /// Whether painting on the current surface must keep the alpha it has:
+    /// the pixels of a layer with its transparency locked. A mask has no
+    /// transparency to lock.
+    pub fn keeps_alpha(&self) -> bool {
+        self.lock_alpha && !self.editing_mask()
+    }
+}
+
+/// Gives every pixel of `edited` the alpha it has in `base` — what painting
+/// on a layer with locked transparency comes to. A pixel that was empty
+/// stays empty, colour and all.
+pub fn keep_alpha(edited: &mut Raster, base: &Raster) {
+    for y in 0..edited.height() as i32 {
+        for x in 0..edited.width() as i32 {
+            let was = base.get(x, y);
+            let now = edited.get(x, y);
+            if now.a != was.a {
+                edited.set(x, y, if was.a == 0 { was } else { now.with_alpha(was.a) });
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -466,6 +499,29 @@ mod tests {
         smart.rasterize();
         assert_eq!(smart.edit_refusal(), None);
         assert_eq!(smart.kind, LayerKind::Pixels);
+    }
+
+    #[test]
+    fn a_locked_layer_refuses_everything_and_alpha_lock_keeps_the_holes() {
+        let mut layer = Layer::new(LayerId(1), "a", Raster::new(2, 2));
+        layer.locked = true;
+        assert_eq!(layer.edit_refusal(), Some(EditRefusal::Locked));
+        layer.add_mask(Raster::filled(2, 2, Rgba::WHITE));
+        assert_eq!(layer.edit_refusal(), Some(EditRefusal::Locked), "the mask too");
+        layer.locked = false;
+        assert_eq!(layer.edit_refusal(), None);
+
+        layer.lock_alpha = true;
+        assert!(!layer.keeps_alpha(), "a mask has no transparency to keep");
+        layer.set_target(Target::Pixels);
+        assert!(layer.keeps_alpha());
+
+        let mut base = Raster::new(2, 1);
+        base.set(0, 0, Rgba::new(255, 0, 0, 128));
+        let mut edited = Raster::filled(2, 1, Rgba::BLACK);
+        keep_alpha(&mut edited, &base);
+        assert_eq!(edited.get(0, 0), Rgba::new(0, 0, 0, 128), "painted, at the alpha it had");
+        assert_eq!(edited.get(1, 0), Rgba::TRANSPARENT, "an empty pixel stays empty");
     }
 
     #[test]

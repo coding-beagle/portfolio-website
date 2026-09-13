@@ -5,6 +5,7 @@ use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::geometry::Point;
 use crate::raster::Raster;
 use crate::selection::Selection;
+use crate::snap::Snap;
 
 #[derive(Debug, Default)]
 pub struct MoveTool {
@@ -22,13 +23,26 @@ struct Moving {
     /// The offset applied so far, so a move that ends where it began is a
     /// no-op and updates only happen on whole-pixel changes.
     offset: (i32, i32),
+    /// Where the moving pixels were, for snapping their edges and centre to
+    /// the guides. `None` when there is nothing visible to snap.
+    bounds: Option<crate::geometry::Rect>,
 }
 
 impl MoveTool {
     fn apply(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
         let Some(g) = self.gesture.as_mut() else { return false };
-        let dx = (ev.pos.x - g.start.x).round() as i32;
-        let dy = (ev.pos.y - g.start.y).round() as i32;
+        let mut dx = ev.pos.x - g.start.x;
+        let mut dy = ev.pos.y - g.start.y;
+        let snap = Snap::new(&ctx.settings.guides, ctx.document.bounds(), ctx.viewport.zoom());
+        if let (Some(snap), Some(b)) = (snap, g.bounds) {
+            let (x0, y0) = (f64::from(b.x) + dx, f64::from(b.y) + dy);
+            let (x1, y1) = (f64::from(b.right()) + dx, f64::from(b.bottom()) + dy);
+            let (sx, sy) = snap.offset(&[x0, x1, (x0 + x1) / 2.0], &[y0, y1, (y0 + y1) / 2.0]);
+            dx += sx;
+            dy += sy;
+        }
+        let dx = dx.round() as i32;
+        let dy = dy.round() as i32;
         if (dx, dy) == g.offset {
             return false;
         }
@@ -51,7 +65,8 @@ impl Tool for MoveTool {
         let layer = ctx.document.active_surface();
         let (moving, stationary) = ctx.selection.split(layer);
         let selection = ctx.selection.clone();
-        self.gesture = Some(Moving { start: ev.pos, moving, stationary, selection, offset: (0, 0) });
+        let bounds = moving.content_bounds();
+        self.gesture = Some(Moving { start: ev.pos, moving, stationary, selection, offset: (0, 0), bounds });
         Gesture::EditsActiveLayer
     }
 
@@ -100,9 +115,9 @@ mod tests {
         let mut d = doc();
         let mut sel = Selection::None;
         let mut vp = Viewport::default();
-        let settings = ToolSettings::default();
+        let mut settings = ToolSettings::default();
         let mut tool = MoveTool::default();
-        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &settings };
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
         tool.begin(&mut ctx, PointerEvent::at(5.0, 5.0));
         assert!(tool.update(&mut ctx, PointerEvent::at(6.0, 7.0)));
         assert!(!tool.update(&mut ctx, PointerEvent::at(6.2, 7.3)), "same pixel offset is not a change");
@@ -118,9 +133,9 @@ mod tests {
         let mut d = doc();
         let mut sel = Selection::Rect(Rect::new(0, 0, 5, 5));
         let mut vp = Viewport::default();
-        let settings = ToolSettings::default();
+        let mut settings = ToolSettings::default();
         let mut tool = MoveTool::default();
-        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &settings };
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
         tool.begin(&mut ctx, PointerEvent::at(1.0, 1.0));
         tool.finish(&mut ctx, PointerEvent::at(3.0, 1.0));
         assert_eq!(d.active_layer().raster.get(4, 2), RED);
@@ -136,9 +151,9 @@ mod tests {
         // than collapsing back into a rectangle.
         sel.set_mask(Mask::from_fn(10, 10, |x, y| u8::from(x < 4 && y < 4 && !(x == 3 && y == 3)) * 255));
         let mut vp = Viewport::default();
-        let settings = ToolSettings::default();
+        let mut settings = ToolSettings::default();
         let mut tool = MoveTool::default();
-        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &settings };
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
         tool.begin(&mut ctx, PointerEvent::at(1.0, 1.0));
         tool.finish(&mut ctx, PointerEvent::at(4.0, 1.0));
         let r = &d.active_layer().raster;
@@ -150,13 +165,32 @@ mod tests {
     }
 
     #[test]
+    fn snaps_the_moving_pixels_edge_onto_a_guide() {
+        let mut d = Document::new(40, 40, Rgba::TRANSPARENT);
+        d.active_layer_mut().raster.set(10, 10, RED);
+        let mut sel = Selection::None;
+        let mut vp = Viewport::default();
+        let mut settings = ToolSettings::default();
+        settings.guides.enabled = true;
+        settings.guides.v = vec![20.0];
+        let mut tool = MoveTool::default();
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
+        tool.begin(&mut ctx, PointerEvent::at(5.0, 5.0));
+        // Dragged 8 right the pixel spans 18..19, its right edge one short of
+        // the guide: it lands against the guide. Nothing is near vertically.
+        tool.finish(&mut ctx, PointerEvent::at(13.0, 5.0));
+        assert_eq!(d.active_layer().raster.get(19, 10), RED);
+        assert_eq!(d.active_layer().raster.get(18, 10), Rgba::TRANSPARENT);
+    }
+
+    #[test]
     fn cancel_puts_everything_back() {
         let mut d = doc();
         let mut sel = Selection::Rect(Rect::new(0, 0, 5, 5));
         let mut vp = Viewport::default();
-        let settings = ToolSettings::default();
+        let mut settings = ToolSettings::default();
         let mut tool = MoveTool::default();
-        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &settings };
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
         tool.begin(&mut ctx, PointerEvent::at(1.0, 1.0));
         tool.update(&mut ctx, PointerEvent::at(3.0, 3.0));
         tool.cancel(&mut ctx);

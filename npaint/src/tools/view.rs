@@ -165,7 +165,7 @@ mod tests {
             rig
         }
         fn ctx(&mut self) -> ToolContext<'_> {
-            ToolContext { document: &mut self.doc, selection: &mut self.sel, viewport: &mut self.vp, settings: &self.settings }
+            ToolContext { document: &mut self.doc, selection: &mut self.sel, viewport: &mut self.vp, settings: &mut self.settings }
         }
     }
 

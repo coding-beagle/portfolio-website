@@ -43,7 +43,7 @@ impl ShapeTool {
         let Some((start, base)) = self.gesture.as_ref() else { return };
         let start = *start;
         let clip = ctx.clip();
-        let settings = ctx.settings;
+        let settings = ctx.settings.clone();
         let size = settings.size.max(1);
         let raster = ctx.document.active_surface_mut();
         *raster = base.clone();
@@ -118,11 +118,11 @@ mod tests {
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
 
-    fn run(shape: Shape, settings: ToolSettings, selection: Selection, start: PointerEvent, moves: &[PointerEvent]) -> Raster {
+    fn run(shape: Shape, mut settings: ToolSettings, selection: Selection, start: PointerEvent, moves: &[PointerEvent]) -> Raster {
         let mut doc = Document::new(20, 20, Rgba::TRANSPARENT);
         let mut selection = selection;
         let mut tool = ShapeTool::new(shape);
-        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &settings };
+        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &mut settings };
         tool.begin(&mut ctx, start);
         let (last, rest) = moves.split_last().unwrap();
         for ev in rest {
@@ -222,13 +222,13 @@ mod tests {
     fn cancel_puts_the_layer_back() {
         let mut doc = Document::new(5, 5, Rgba::WHITE);
         let mut selection = Selection::None;
-        let settings = settings();
+        let mut settings = settings();
         let mut tool = ShapeTool::new(Shape::Ellipse);
-        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &settings };
+        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &mut settings };
         tool.begin(&mut ctx, PointerEvent::at(0.0, 0.0));
         tool.update(&mut ctx, PointerEvent::at(4.0, 4.0));
         assert_eq!(doc.active_layer().raster.get(2, 2), RED);
-        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &settings };
+        let mut ctx = ToolContext { document: &mut doc, selection: &mut selection, viewport: &mut Viewport::default(), settings: &mut settings };
         tool.cancel(&mut ctx);
         assert_eq!(doc.active_layer().raster.get(2, 2), Rgba::WHITE);
     }

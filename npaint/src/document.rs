@@ -92,6 +92,21 @@ impl Document {
         doc
     }
 
+    /// A document assembled from saved parts. `None` if the layers' ids
+    /// collide or the active index is out of range — a damaged file.
+    pub fn from_parts(width: u32, height: u32, layers: Vec<Layer>, active: usize) -> Option<Document> {
+        if layers.is_empty() || active >= layers.len() {
+            return None;
+        }
+        let mut ids: Vec<u32> = layers.iter().map(|l| l.id().0).collect();
+        ids.sort_unstable();
+        if ids.windows(2).any(|w| w[0] == w[1]) {
+            return None;
+        }
+        let next_id = ids.last().map_or(1, |id| id + 1);
+        Some(Document { width, height, layers, active, next_id })
+    }
+
     fn take_id(&mut self) -> LayerId {
         let id = LayerId(self.next_id);
         self.next_id += 1;
@@ -162,6 +177,29 @@ impl Document {
     pub fn add_layer(&mut self) -> usize {
         let raster = Raster::new(self.width, self.height);
         self.insert_layer_above_active(raster, None)
+    }
+
+    /// Adds a layer holding a picture of any size, at its own resolution,
+    /// with its top-left corner at `(x, y)` — what a paste or an image
+    /// opened as a layer does. What falls outside the canvas is lost.
+    pub fn add_layer_placed(&mut self, name: &str, raster: &Raster, x: i32, y: i32) -> usize {
+        let placed = raster.resized(self.width, self.height, x, y);
+        self.insert_layer_above_active(placed, Some(name))
+    }
+
+    /// Scales the whole document, every layer, to a new size — Image Size.
+    /// A smart object's placement is scaled rather than its rendering, so
+    /// it keeps re-rendering from its source.
+    pub fn resample(&mut self, width: u32, height: u32) {
+        let (width, height) = (width.max(1), height.max(1));
+        let sx = f64::from(width) / f64::from(self.width.max(1));
+        let sy = f64::from(height) / f64::from(self.height.max(1));
+        let scale = Affine::scaling(sx, sy);
+        for layer in &mut self.layers {
+            layer.map_rasters(|r| r.resampled(width, height), |m| scale.then(m), width, height);
+        }
+        self.width = width;
+        self.height = height;
     }
 
     /// Adds a layer holding `raster` above the active one and makes it
@@ -458,12 +496,14 @@ impl Document {
         }
     }
 
-    /// Composites one layer onto `dst`, through its mask and opacity. An
-    /// adjustment layer has nothing of its own to draw: it adjusts what is
-    /// already there, and its opacity and mask say how much of that shows.
+    /// Composites one layer onto `dst`, through its mask, opacity and blend
+    /// mode. An adjustment layer has nothing of its own to draw: it adjusts
+    /// what is already there, and its opacity and mask say how much of that
+    /// shows; its blend mode blends the adjusted result back over the
+    /// original, as in Photoshop.
     fn blend_layer(dst: &mut Raster, layer: &Layer) {
-        match (&layer.kind, layer.blend) {
-            (LayerKind::Adjustment(adjustment), BlendMode::Normal) => {
+        match &layer.kind {
+            LayerKind::Adjustment(adjustment) => {
                 if layer.opacity <= 0.0 {
                     return;
                 }
@@ -476,12 +516,15 @@ impl Document {
                             continue;
                         }
                         let was = dst.get(x, y);
-                        let now = adjusted.get(x, y);
+                        let mut now = adjusted.get(x, y);
+                        if layer.blend != BlendMode::Normal && was.a > 0 {
+                            now = now.blend_over(was, layer.blend);
+                        }
                         dst.set(x, y, if t >= 1.0 { now } else { was.lerp(now, t) });
                     }
                 }
             }
-            (_, BlendMode::Normal) => dst.composite_over(&layer.rendered(), layer.opacity),
+            _ => dst.composite_blend(&layer.rendered(), layer.opacity, layer.blend),
         }
     }
 
@@ -596,6 +639,49 @@ mod tests {
         assert_eq!(d.layer(0).unwrap().raster.get(2, 0), Rgba::WHITE, "the background moved");
         assert_eq!(d.layer(1).unwrap().raster.get(2, 0), Rgba::BLACK, "and so did the layer above");
         assert_eq!(d.layer(0).unwrap().raster.get(0, 0), Rgba::TRANSPARENT, "new space is empty");
+    }
+
+    #[test]
+    fn a_layer_blends_through_its_mode() {
+        let mut doc = Document::new(1, 1, Rgba::opaque(128, 128, 128));
+        doc.add_layer();
+        doc.active_layer_mut().raster.set(0, 0, Rgba::opaque(128, 128, 128));
+        doc.active_layer_mut().blend = BlendMode::Multiply;
+        assert!((doc.composite().get(0, 0).r as i32 - 64).abs() <= 1);
+        doc.active_layer_mut().blend = BlendMode::Screen;
+        assert!((doc.composite().get(0, 0).r as i32 - 192).abs() <= 1);
+        // An adjustment layer's mode blends its result back over the original.
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.active_layer_mut().blend = BlendMode::Darken;
+        let r = doc.composite().get(0, 0).r;
+        assert!((r as i32 - 63).abs() <= 2, "inverted 192 is 63, which is the darker: {r}");
+    }
+
+    #[test]
+    fn a_placed_layer_lands_where_it_is_told_at_its_own_size() {
+        let mut doc = Document::new(4, 4, Rgba::TRANSPARENT);
+        let i = doc.add_layer_placed("cat", &Raster::filled(2, 2, RED), 3, 3);
+        assert_eq!(doc.layer(i).unwrap().name, "cat");
+        assert_eq!(doc.composite().get(3, 3), RED);
+        assert_eq!(doc.composite().get(2, 2).a, 0);
+    }
+
+    #[test]
+    fn resampling_scales_every_layer_and_the_placement_of_a_smart_object() {
+        let mut doc = Document::new(4, 4, Rgba::WHITE);
+        doc.add_layer();
+        doc.active_layer_mut().raster.set(0, 0, RED);
+        doc.add_mask(1, Some(white_mask_with_black_at(4, 4, 3, 3)), false).unwrap();
+        doc.place_smart_object("p", Raster::filled(2, 2, Rgba::BLACK));
+        doc.resample(8, 8);
+        assert_eq!((doc.width(), doc.height()), (8, 8));
+        assert_eq!(doc.layer(0).unwrap().raster.get(7, 7), Rgba::WHITE);
+        assert_eq!(doc.layer(1).unwrap().raster.get(0, 0), RED, "the red pixel grew");
+        assert_eq!(doc.layer(1).unwrap().mask.as_ref().unwrap().get(7, 7), Rgba::BLACK, "and so did the mask's hole");
+        let smart = doc.layer(2).unwrap();
+        assert_eq!(smart.raster.get(4, 4), Rgba::BLACK, "the object scaled with the canvas");
+        assert_eq!(smart.smart_object().unwrap().source.width(), 2, "from its untouched source");
+        assert_eq!((smart.raster.width(), smart.raster.height()), (8, 8));
     }
 
     #[test]
@@ -812,8 +898,8 @@ mod tests {
         assert_eq!(doc.composite().get(0, 0), Rgba::BLACK);
         assert_eq!(doc.composite().get(1, 0), Rgba::WHITE);
         let levels = Adjustment::from_params("levels", &[0.0, 255.0, 1.0]).unwrap();
-        doc.set_adjustment(1, levels).unwrap();
-        assert_eq!(doc.active_layer().adjustment(), Some(levels));
+        doc.set_adjustment(1, levels.clone()).unwrap();
+        assert_eq!(doc.active_layer().adjustment(), Some(levels.clone()));
         assert_eq!(doc.set_adjustment(0, levels), Err(DocumentError::WrongKind));
     }
 

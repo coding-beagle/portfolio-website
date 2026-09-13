@@ -5,6 +5,7 @@
 //! current selection, which is how selections constrain painting without any
 //! tool needing to know about them.
 
+use crate::blend::BlendMode;
 use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
 
@@ -117,6 +118,11 @@ impl Raster {
     /// Composites every pixel of `src` over `self`, with `src` scaled by
     /// `opacity`. The two must be the same size.
     pub fn composite_over(&mut self, src: &Raster, opacity: f32) {
+        self.composite_blend(src, opacity, BlendMode::Normal);
+    }
+
+    /// [`Raster::composite_over`] through a blend mode.
+    pub fn composite_blend(&mut self, src: &Raster, opacity: f32, mode: BlendMode) {
         debug_assert_eq!((self.width, self.height), (src.width, src.height));
         if opacity <= 0.0 {
             return;
@@ -126,7 +132,7 @@ impl Raster {
                 continue;
             }
             let s = if opacity >= 1.0 { *s } else { s.scaled_alpha(opacity) };
-            *dst = s.over(*dst);
+            *dst = s.blend_over(*dst, mode);
         }
     }
 
@@ -215,6 +221,36 @@ impl Raster {
     /// pointer crosses pixel boundaries.
     pub fn stamp_disc(&mut self, center: Point, diameter: u32, color: Rgba, clip: &Rect) {
         self.stamp(center, diameter, clip, |r, x, y| r.blend(x, y, color, clip));
+    }
+
+    /// Lays down a soft dab into a coverage buffer: alpha 255 out to
+    /// `hardness` of the radius, fading to nothing at the rim, and never
+    /// less than what is already there. `hardness` of 1 is a hard disc, as
+    /// [`Raster::stamp_disc`] would stamp; 0 fades from the centre. Only the
+    /// alpha is meaningful in the result.
+    pub fn stamp_soft_disc(&mut self, center: Point, diameter: u32, hardness: f32, clip: &Rect) {
+        if diameter <= 1 || hardness >= 1.0 {
+            self.stamp_disc(center, diameter, Rgba::WHITE, clip);
+            return;
+        }
+        let (cx, cy) = center.round();
+        let d = diameter as i32;
+        let rect = Rect::new(cx - d / 2, cy - d / 2, d, d);
+        let radius = f64::from(diameter) / 2.0;
+        let mid = (f64::from(rect.x) + radius, f64::from(rect.y) + radius);
+        let solid = radius * f64::from(hardness.clamp(0.0, 1.0));
+        self.for_each_in(rect, clip, |r, x, y| {
+            let dist = (f64::from(x) + 0.5 - mid.0).hypot(f64::from(y) + 0.5 - mid.1);
+            if dist > radius {
+                return;
+            }
+            let t = if dist <= solid { 1.0 } else { 1.0 - (dist - solid) / (radius - solid).max(1e-9) };
+            let cover = (t * 255.0).round() as u8;
+            let i = y as usize * r.width as usize + x as usize;
+            if cover > r.pixels[i].a {
+                r.pixels[i] = Rgba::new(255, 255, 255, cover);
+            }
+        });
     }
 
     /// Like [`Raster::stamp_disc`], but erasing instead of painting.
@@ -417,6 +453,111 @@ impl Raster {
     /// Composites `other` over `self` at full opacity, in place.
     pub fn merge_over(&mut self, other: &Raster) {
         self.composite_over(other, 1.0);
+    }
+
+    /// The buffer scaled to a new size — Image Size. Enlarging samples
+    /// bilinearly; shrinking averages the source pixels each output pixel
+    /// covers, so a photo scaled down does not shimmer with aliasing.
+    pub fn resampled(&self, width: u32, height: u32) -> Raster {
+        let (width, height) = (width.max(1), height.max(1));
+        if (width, height) == (self.width, self.height) {
+            return self.clone();
+        }
+        if self.width == 0 || self.height == 0 {
+            return Raster::new(width, height);
+        }
+        let sx = f64::from(self.width) / f64::from(width);
+        let sy = f64::from(self.height) / f64::from(height);
+        let mut out = Raster::new(width, height);
+        if sx <= 1.0 && sy <= 1.0 {
+            // Bilinear on premultiplied colour, with the source's edge
+            // pixels standing in past the edge so the border does not fade.
+            let (w, h) = (self.width as i32, self.height as i32);
+            for oy in 0..height as i32 {
+                let y = ((f64::from(oy) + 0.5) * sy - 0.5).clamp(0.0, f64::from(h - 1));
+                let y0 = y.floor() as i32;
+                let fy = y - f64::from(y0);
+                for ox in 0..width as i32 {
+                    let x = ((f64::from(ox) + 0.5) * sx - 0.5).clamp(0.0, f64::from(w - 1));
+                    let x0 = x.floor() as i32;
+                    let fx = x - f64::from(x0);
+                    let mut acc = [0.0f64; 4];
+                    for (dx, dy, wgt) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
+                        if wgt <= 0.0 {
+                            continue;
+                        }
+                        let p = self.get((x0 + dx).min(w - 1), (y0 + dy).min(h - 1));
+                        let a = f64::from(p.a) / 255.0;
+                        acc[0] += f64::from(p.r) * a * wgt;
+                        acc[1] += f64::from(p.g) * a * wgt;
+                        acc[2] += f64::from(p.b) * a * wgt;
+                        acc[3] += a * wgt;
+                    }
+                    if acc[3] <= 0.0 {
+                        continue;
+                    }
+                    let a = acc[3];
+                    out.set(
+                        ox,
+                        oy,
+                        Rgba::new(
+                            (acc[0] / a).round().clamp(0.0, 255.0) as u8,
+                            (acc[1] / a).round().clamp(0.0, 255.0) as u8,
+                            (acc[2] / a).round().clamp(0.0, 255.0) as u8,
+                            (a * 255.0).round().clamp(0.0, 255.0) as u8,
+                        ),
+                    );
+                }
+            }
+            return out;
+        }
+        // Box filter on premultiplied colour, over the source area each
+        // output pixel maps to.
+        for oy in 0..height as i32 {
+            let y0 = f64::from(oy) * sy;
+            let y1 = f64::from(oy + 1) * sy;
+            for ox in 0..width as i32 {
+                let x0 = f64::from(ox) * sx;
+                let x1 = f64::from(ox + 1) * sx;
+                let mut acc = [0.0f64; 4];
+                let mut total = 0.0;
+                let mut y = y0.floor() as i32;
+                while f64::from(y) < y1 {
+                    let wy = (y1.min(f64::from(y + 1)) - y0.max(f64::from(y))).max(0.0);
+                    let mut x = x0.floor() as i32;
+                    while f64::from(x) < x1 {
+                        let wx = (x1.min(f64::from(x + 1)) - x0.max(f64::from(x))).max(0.0);
+                        let w = wx * wy;
+                        if w > 0.0 {
+                            let p = self.get(x, y);
+                            let a = f64::from(p.a) / 255.0;
+                            acc[0] += f64::from(p.r) * a * w;
+                            acc[1] += f64::from(p.g) * a * w;
+                            acc[2] += f64::from(p.b) * a * w;
+                            acc[3] += a * w;
+                            total += w;
+                        }
+                        x += 1;
+                    }
+                    y += 1;
+                }
+                if total <= 0.0 || acc[3] <= 0.0 {
+                    continue;
+                }
+                let a = acc[3];
+                out.set(
+                    ox,
+                    oy,
+                    Rgba::new(
+                        (acc[0] / a).round().clamp(0.0, 255.0) as u8,
+                        (acc[1] / a).round().clamp(0.0, 255.0) as u8,
+                        (acc[2] / a).round().clamp(0.0, 255.0) as u8,
+                        (a / total * 255.0).round().clamp(0.0, 255.0) as u8,
+                    ),
+                );
+            }
+        }
+        out
     }
 
     /// A line from `a` to `b` of the given `thickness`.
@@ -702,6 +843,51 @@ mod tests {
         r.map_in(&Rect::new(1, 1, 1, 1), |_| Rgba::BLACK);
         assert_eq!(count(&r, Rgba::BLACK), 1);
         assert_eq!(r.get(1, 1), Rgba::BLACK);
+    }
+
+    #[test]
+    fn a_soft_dab_fades_to_the_rim_and_only_ever_adds() {
+        let mut r = Raster::new(21, 21);
+        let all = r.bounds();
+        r.stamp_soft_disc(Point::new(10.0, 10.0), 17, 0.0, &all);
+        assert_eq!(r.get(10, 10).a, 255, "the centre is solid");
+        let rim = r.get(10, 3).a;
+        assert!(rim > 0 && rim < 255, "the rim is partial: {rim}");
+        assert!(r.get(10, 6).a > rim, "and it fades outwards");
+        assert_eq!(r.get(10, 0).a, 0);
+        // A second, harder dab on top only raises coverage.
+        r.stamp_soft_disc(Point::new(10.0, 10.0), 17, 1.0, &all);
+        assert_eq!(r.get(10, 3).a, 255);
+        // Hardness 1 is the plain disc.
+        let mut hard = Raster::new(21, 21);
+        hard.stamp_soft_disc(Point::new(10.0, 10.0), 9, 1.0, &all);
+        let mut plain = Raster::new(21, 21);
+        plain.stamp_disc(Point::new(10.0, 10.0), 9, Rgba::WHITE, &all);
+        assert_eq!(hard, plain);
+    }
+
+    #[test]
+    fn resampling_shrinks_by_averaging_and_grows_smoothly() {
+        let mut r = Raster::new(4, 4);
+        r.fill_rect(Rect::new(0, 0, 2, 4), Rgba::BLACK, &Rect::new(0, 0, 4, 4));
+        r.fill_rect(Rect::new(2, 0, 2, 4), Rgba::WHITE, &Rect::new(0, 0, 4, 4));
+        let small = r.resampled(2, 2);
+        assert_eq!((small.width(), small.height()), (2, 2));
+        assert_eq!(small.get(0, 0), Rgba::BLACK);
+        assert_eq!(small.get(1, 1), Rgba::WHITE);
+        let one = r.resampled(1, 1);
+        assert!((one.get(0, 0).r as i32 - 128).abs() <= 1, "the average of black and white: {}", one.get(0, 0));
+        assert_eq!(one.get(0, 0).a, 255);
+        let big = r.resampled(8, 8);
+        assert_eq!(big.get(0, 0), Rgba::BLACK);
+        assert_eq!(big.get(7, 7), Rgba::WHITE);
+        let mid = big.get(4, 4).r;
+        assert!(mid > 0 && mid < 255, "the boundary is interpolated: {mid}");
+        assert_eq!(r.resampled(4, 4), r, "the same size is a copy");
+        // Transparency is averaged too: a half-empty area is half opaque.
+        let mut t = Raster::new(2, 1);
+        t.set(0, 0, Rgba::WHITE);
+        assert_eq!(t.resampled(1, 1).get(0, 0).a, 128);
     }
 
     #[test]

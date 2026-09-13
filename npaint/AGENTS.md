@@ -16,32 +16,40 @@ npaint/
   Cargo.toml
   src/
     lib.rs         crate root and module map
-    adjust.rs      image adjustments (brightness/contrast, hue/sat, levels, ...)
+    adjust.rs      image adjustments (brightness/contrast, hue/sat, levels,
+                   curves, colour balance, ...) and the automatic levels
+    blend.rs       the blend modes: the W3C formulas, one function per mode
     autoselect/    the automatic selections: pure functions of the pixels
       mod.rs       colour distance, the Sobel edge map, the Select Similar set
       wand.rs      magic wand: flood or global colour match
       quick.rs     quick select: brush-driven region growing
       subject.rs   Select Subject: saliency, Otsu, colour models, ICM
     color.rs       Rgba, hex parsing, source-over compositing
+    file.rs        NPaint's own file: the whole document as a binary stream
     geometry.rs    Point, Rect
     raster.rs      the pixel buffer and every drawing primitive
-    layer.rs       Layer, LayerId, BlendMode, and what kind of layer it is:
-                   pixels, an adjustment layer, or a smart object; the
-                   layer mask and which of the two rasters the tools edit
+    layer.rs       Layer, LayerId, and what kind of layer it is: pixels, an
+                   adjustment layer, or a smart object; the layer mask and
+                   which of the two rasters the tools edit; the two locks
     mask.rs        per-pixel selection coverage: combine, grow/contract,
                    feather, smooth, antialias, contours (the marching ants)
     document.rs    the layer stack; add/remove/move/merge/composite
     selection.rs   what painting may touch: nothing, a rect, or a Mask
     viewport.rs    zoom and pan, screen <-> document mapping
-    history.rs     undo/redo as before-snapshots: one surface of a layer
-                   (pixels or mask), a whole layer, or the whole stack
+    history.rs     undo/redo as labelled before-snapshots: one surface of a
+                   layer (pixels or mask), a whole layer, or the whole stack;
+                   the list the history panel shows, and the saved-state id
     tools/
       mod.rs       Tool trait, ToolKind, ToolSettings, PointerEvent
-      select.rs    marquee
+      select.rs    the marquees (rectangle, ellipse) and the crop tool, with
+                   the add/subtract/intersect modifiers
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
       movetool.rs  move (translate the selection or the layer)
-      stroke.rs    brush, pencil, eraser (one gesture, three stamps)
+      stroke.rs    brush, pencil, eraser (one gesture, three stamps, and a
+                   hardness the pencil ignores)
+      bucket.rs    paint bucket: the wand's patch, filled
+      eyedropper.rs the eyedropper, and the Alt-click under every brush
       shape.rs     line, rectangle, ellipse (rubber-band)
       view.rs      zoom (click / alt-click / marquee or scrubby drag) and hand
     transform.rs   Affine, bilinear resampling, the free-transform session
@@ -58,7 +66,8 @@ npaint/
                    U-2-Net on demand with progress, caches them in the
                    browser, returns a matte. Not loaded until the command is
                    used.
-    adjust.js      the adjustment dialog, built from a data table
+    adjust.js      the adjustment dialog, built from a data table; the
+                   curves graph is the one control that is not a slider
     style.css
     favicon.svg
     .htaccess      served alongside; sets the wasm MIME type
@@ -118,6 +127,55 @@ tests run natively too — errors cross the boundary as `String`, not
 **Commit `build/` after `make build_npaint`.** The deploy is a copy of that
 folder; there is no build step on the server.
 
+## Files, the clipboard, and what the page keeps
+
+**The file.** `src/file.rs` writes the document as a little-endian stream —
+magic, version, size, then every layer with its rasters, mask, kind, blend
+mode and locks — and reads it back into a `Document`. It is deliberately
+not JSON or a zip: the engine has no parser for either, and the pixels are
+the bulk of it. The page gzips the stream on the way to disk
+(`CompressionStream`) and inflates it on the way back; a stream that arrives
+uncompressed still opens, and `loadFile` recognises the file by its name or
+its first bytes, so a `.npaint` dropped on the page or picked with Open goes
+the right way. `History` keeps the id of the state that was last saved, so
+`is_modified` is true only when the document differs from it — undoing back
+to it is clean — and the page asks before the tab closes or the document is
+replaced.
+
+**The clipboard.** Copy lives in the engine (`Editor::copy_selection`): the
+selected pixels of the active surface, or of the composite for Copy Merged,
+with where they came from, so Paste puts them back in place (or centred, if
+they no longer fit). The page also hands a PNG to the system clipboard so
+the pixels can go elsewhere. Paste comes in through the browser's `paste`
+event — the one route that needs no permission — and takes the engine's
+copy when the system holds the same picture, otherwise whatever image the
+system has, as a new layer at its own size. Edit > Paste asks
+`navigator.clipboard` instead, which may prompt.
+
+**The view furniture.** Rulers, guides, the grid and the pixel grid are
+drawn by the page over the composite and are not in the document; the
+guides are dragged out of the rulers and can be moved, or dragged off the
+canvas to remove them, with any tool. Rulers, grid, snapping and the
+history depth are remembered in `localStorage`. The page hands the engine a
+copy of the guides (`set_guides`) whenever they change, and `src/snap.rs`
+pulls the move tool's pixels and the free-transform box (edges and centre
+on a move, the handle on a scale) onto guides, canvas edges and the canvas centre
+lines within `SNAP_PX` on screen; a guide being dragged snaps to the centre.
+Guides are saved in the `.npaint` file, as a trailer after the layers. View > Snap to Guides turns it off.
+
+**Locks.** `Layer::locked` refuses every edit through `edit_refusal`, and
+the page shows the reason. `Layer::lock_alpha` is enforced the same way a
+mask selection is: the editor keeps the surface from before the gesture and
+`layer::keep_alpha` gives every pixel back the alpha it had (`enforce_limits`
+and `pixel_edit`). Moving or transforming an alpha-locked layer is refused
+(`EditRefusal::AlphaLocked`), since neither can keep the holes where they
+were.
+
+**Blend modes.** `blend.rs` has the sixteen W3C modes as functions of two
+colours; `Rgba::blend_over` does the alpha handling once for all of them and
+`Raster::composite_blend` is `composite_over` with a mode. An adjustment
+layer's mode blends its result back over the original.
+
 ## How a selection holds
 
 Painting clips to a **rectangle**: every primitive in `raster.rs` takes one,
@@ -130,7 +188,10 @@ funnel covers fills, clears and adjustment previews.
 
 The move tool is the exception (`ToolKind::confined_to_selection`): moving
 pixels *out* of the selection is the whole point of it, and it carries the
-selection along with them.
+selection along with them. So do the arrow keys: `nudge_layer` is the move
+tool by another route (one undo step per run of presses), and
+`nudge_selection` moves only the outline. Edit > Stroke deliberately paints
+both sides of the edge, so it does not go through the funnel either.
 
 Coverage is 8-bit, so `feather` and `antialias` are not special cases; the
 two cheap shapes (nothing selected, a plain rectangle) stay as themselves and
@@ -207,6 +268,14 @@ re-render from that snapshot, `commit_session` records one undo step and
 the pointer while it is, and any layer operation, undo or new document cancels
 it first. The page shows a dialog or a handle box, nothing more.
 
+Select > Transform Selection is the same `TransformSession` over a raster
+whose alpha is the selection's coverage (`Session::TransformSelection`):
+every change re-reads the rendered alpha into the selection, commit keeps
+the outline where it is and records nothing, cancel puts the old selection
+back. The transform bar's fields go through `transform_set_position`,
+`transform_set_size` and `transform_set_angle`, which are absolute where the
+drags are relative.
+
 The transform's handle hit-testing is in Rust (`TransformSession::hit`),
 with the grab radius given in document pixels as `8 / zoom` so it is a
 constant size on screen. The page asks `transform_hit` only to choose a
@@ -215,11 +284,14 @@ cursor.
 ## Adding things
 
 **A tool.** Add a file under `src/tools/`, implement `Tool` (`begin`,
-`update`, `finish`, `cancel`), add a `ToolKind` variant with a name, and an
-arm in `ToolKind::instantiate`. In `app.js`, add an entry to `TOOLS` (name,
-label, shortcut key, icon path, hint). Say in `begin` whether the gesture
+`update`, `finish`, `cancel`), add a `ToolKind` variant with a name and a
+history label, and an arm in `ToolKind::instantiate`. In `app.js`, add an
+entry to `TOOLS` (name, label, shortcut key, icon path, hint); tools that
+share a key cycle when it is pressed. Say in `begin` whether the gesture
 `EditsActiveLayer` — that is all the undo system needs from you. Clip every
-pixel write with `ctx.clip()` and the selection will just work.
+pixel write with `ctx.clip()` and the selection will just work. A tool that
+needs to *set* something — the eyedropper sets the colours — has
+`ctx.settings` mutably.
 
 **A drawing primitive.** `raster.rs`. Take a `clip: &Rect` and never write
 outside it. Test against a small raster with exact pixel counts.
@@ -248,8 +320,10 @@ undo and menu entries come for free.
 context menus, so add to those rather than to one menu.
 
 **Layer properties, filters, adjustments.** Add the operation to `Document`
-(pure, tested), wrap it in `Editor` through `structural()` so it is an undo
-step, expose it in `wasm.rs`, bind a button in `app.js`.
+(pure, tested), wrap it in `Editor` through `structural(label, ..)` so it is
+an undo step with a name in the history panel, expose it in `wasm.rs`, bind
+a button in `app.js`. A new layer property also wants a line in `file.rs`,
+on both sides, and a field in its round-trip test.
 
 ## Masks, adjustment layers and smart objects
 
@@ -327,16 +401,15 @@ load it as a selection. Adjustment layers open their dialog on double-click.
   re-read every draw. Never cache the `Uint8ClampedArray`: memory growth
   detaches it.
 
-## Known gaps (MVP)
+## Known gaps
 
 No lasso or polygon drawn by hand, though the mask machinery is there for
-one; Select Subject is classical computer vision rather than a model, so it
-wants a subject that stands out from its background and will not cut hair;
-no text, gradients or blur-type filters; no file format of its own (export is
-a flattened PNG); pixel layers are always document-sized (a transform
-resamples into the canvas, and what leaves it is lost — a smart object keeps
-what leaves, since it re-renders from its source); a mask is not linked to
-its layer (moving or transforming the pixels leaves the mask where it was;
-the canvas operations and the layer flips do carry it along); a smart
-object's contents cannot be opened for editing, only replaced; adjustment
-layers have no clipping to the layer below.
+one; no text, gradients or blur-type filters; no layer
+groups; pixel layers are always document-sized (a transform resamples into
+the canvas, and what leaves it is lost — a smart object keeps what leaves,
+since it re-renders from its source); a mask is not linked to its layer
+(moving or transforming the pixels leaves the mask where it was; the canvas
+operations and the layer flips do carry it along); a smart object's
+contents cannot be opened for editing, only replaced; adjustment layers have
+no clipping to the layer below; curves are a single master curve, not one
+per channel.

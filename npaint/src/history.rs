@@ -1,11 +1,11 @@
 //! Undo and redo.
 //!
 //! Every undoable edit is recorded as a [`Snapshot`] of the state it is about
-//! to change, taken *before* the change. Pixel edits snapshot only the layer
-//! they touch; anything that changes the shape of the stack snapshots the
-//! whole document. Undoing a snapshot captures the matching "after" state on
-//! the redo stack, so the two stacks are symmetric and a redo is an undo of
-//! an undo.
+//! to change, taken *before* the change, under a label the history panel
+//! shows. Pixel edits snapshot only the layer they touch; anything that
+//! changes the shape of the stack snapshots the whole document. Undoing a
+//! snapshot captures the matching "after" state on the redo stack, so the
+//! two stacks are symmetric and a redo is an undo of an undo.
 
 use crate::document::Document;
 use crate::layer::{Layer, LayerId, Target};
@@ -76,46 +76,88 @@ impl Snapshot {
     }
 }
 
+/// One entry of either stack: the state to restore, what the step that
+/// made it was called, and the id of the document state the step leads
+/// to, so the history can tell whether the document is back at the state
+/// it was saved in.
+#[derive(Clone, Debug)]
+struct Step {
+    snapshot: Snapshot,
+    label: String,
+    after: u64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct History {
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    undo: Vec<Step>,
+    redo: Vec<Step>,
     limit: usize,
     /// The coalescing key of the most recent push, if it had one.
     last_key: Option<String>,
+    /// Hands out state ids: every new step leads to a new state.
+    serial: u64,
+    /// The id of the state with nothing applied.
+    base: u64,
+    /// The id of the state that was last saved.
+    saved: u64,
 }
 
 impl History {
     /// `limit` is the number of steps kept; the oldest is dropped past it.
     pub fn new(limit: usize) -> History {
-        History { undo: Vec::new(), redo: Vec::new(), limit: limit.max(1), last_key: None }
+        History { undo: Vec::new(), redo: Vec::new(), limit: limit.max(1), last_key: None, serial: 0, base: 0, saved: 0 }
+    }
+
+    /// The id of the document state as it stands.
+    fn current(&self) -> u64 {
+        self.undo.last().map_or(self.base, |s| s.after)
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// Changes how many steps are kept, dropping the oldest at once if
+    /// there are now too many.
+    pub fn set_limit(&mut self, limit: usize) {
+        self.limit = limit.max(1);
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        if self.undo.len() > self.limit {
+            let extra = self.undo.len() - self.limit;
+            // The oldest reachable state is now the one the last dropped
+            // step led to.
+            self.base = self.undo[extra - 1].after;
+            self.undo.drain(..extra);
+        }
     }
 
     /// Records the state *before* an edit. Any redo history is discarded, as
     /// it no longer leads anywhere reachable.
-    pub fn push(&mut self, snapshot: Snapshot) {
-        self.push_keyed(snapshot, None);
+    pub fn push(&mut self, snapshot: Snapshot, label: impl Into<String>) {
+        self.push_keyed(snapshot, label.into(), None);
     }
 
     /// Like [`History::push`], but a run of consecutive pushes with the same
     /// `key` is one undo step: the first snapshot is kept and the rest are
     /// dropped. This is what makes dragging an opacity slider a single undo
     /// rather than one per pixel of travel. Any other push breaks the run.
-    pub fn push_coalescing(&mut self, snapshot: Snapshot, key: impl Into<String>) {
-        self.push_keyed(snapshot, Some(key.into()));
+    pub fn push_coalescing(&mut self, snapshot: Snapshot, label: impl Into<String>, key: impl Into<String>) {
+        self.push_keyed(snapshot, label.into(), Some(key.into()));
     }
 
-    fn push_keyed(&mut self, snapshot: Snapshot, key: Option<String>) {
+    fn push_keyed(&mut self, snapshot: Snapshot, label: String, key: Option<String>) {
         let continues_run = key.is_some() && key == self.last_key && self.redo.is_empty();
         self.last_key = key;
         if continues_run {
             return;
         }
         self.redo.clear();
-        self.undo.push(snapshot);
-        if self.undo.len() > self.limit {
-            self.undo.remove(0);
-        }
+        self.serial += 1;
+        self.undo.push(Step { snapshot, label, after: self.serial });
+        self.trim();
     }
 
     pub fn can_undo(&self) -> bool {
@@ -129,8 +171,8 @@ impl History {
     pub fn undo(&mut self, doc: &mut Document) -> bool {
         self.last_key = None;
         match self.undo.pop() {
-            Some(snapshot) => {
-                self.redo.push(snapshot.restore(doc));
+            Some(step) => {
+                self.redo.push(Step { snapshot: step.snapshot.restore(doc), label: step.label, after: step.after });
                 true
             }
             None => false,
@@ -140,8 +182,8 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> bool {
         self.last_key = None;
         match self.redo.pop() {
-            Some(snapshot) => {
-                self.undo.push(snapshot.restore(doc));
+            Some(step) => {
+                self.undo.push(Step { snapshot: step.snapshot.restore(doc), label: step.label, after: step.after });
                 true
             }
             None => false,
@@ -159,6 +201,49 @@ impl History {
         self.undo.clear();
         self.redo.clear();
         self.last_key = None;
+        self.serial += 1;
+        self.base = self.serial;
+        self.saved = self.serial;
+    }
+
+    // ---- The history panel ------------------------------------------------------
+
+    /// The labels of every step, oldest first: the ones that have been done,
+    /// then the ones undone and waiting to be redone. [`History::position`]
+    /// says where the split is.
+    pub fn labels(&self) -> Vec<String> {
+        self.undo.iter().map(|s| s.label.clone()).chain(self.redo.iter().rev().map(|s| s.label.clone())).collect()
+    }
+
+    /// How many of the steps in [`History::labels`] are currently applied.
+    pub fn position(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Undoes or redoes as many steps as it takes to have exactly `steps`
+    /// applied — clicking a row of the history panel. Returns whether
+    /// anything changed.
+    pub fn go_to(&mut self, doc: &mut Document, steps: usize) -> bool {
+        let mut moved = false;
+        while self.undo.len() > steps && self.undo(doc) {
+            moved = true;
+        }
+        while self.undo.len() < steps && self.redo(doc) {
+            moved = true;
+        }
+        moved
+    }
+
+    // ---- Saved state ---------------------------------------------------------------
+
+    /// Notes that the document as it stands now is what is on disk.
+    pub fn mark_saved(&mut self) {
+        self.saved = self.current();
+    }
+
+    /// Whether the document differs from the last saved (or opened) state.
+    pub fn is_modified(&self) -> bool {
+        self.saved != self.current()
     }
 }
 
@@ -175,7 +260,7 @@ mod tests {
         let mut history = History::new(10);
         assert!(!history.can_undo());
 
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "paint");
         doc.active_layer_mut().raster.set(0, 0, RED);
 
         assert!(history.undo(&mut doc));
@@ -199,10 +284,10 @@ mod tests {
     fn a_new_edit_discards_the_redo_stack() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "a");
         doc.active_layer_mut().raster.set(0, 0, RED);
         history.undo(&mut doc);
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "b");
         assert!(!history.can_redo());
     }
 
@@ -210,7 +295,7 @@ mod tests {
     fn structure_snapshots_restore_the_layer_stack() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push(Snapshot::of_structure(&doc));
+        history.push(Snapshot::of_structure(&doc), "layer");
         doc.add_layer();
         assert_eq!(doc.layers().len(), 2);
         history.undo(&mut doc);
@@ -224,7 +309,7 @@ mod tests {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
         doc.add_layer(); // index 1
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "paint");
         doc.active_layer_mut().raster.set(0, 0, RED);
         doc.move_layer(1, 0).unwrap(); // the painted layer is now index 0
         history.undo(&mut doc);
@@ -237,7 +322,7 @@ mod tests {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
         doc.active_layer_mut().add_mask(Raster::filled(1, 1, Rgba::WHITE));
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "paint");
         doc.active_surface_mut().set(0, 0, Rgba::BLACK);
         assert_eq!(doc.composite().get(0, 0).a, 0, "masked out");
         history.undo(&mut doc);
@@ -256,7 +341,7 @@ mod tests {
     fn a_whole_layer_snapshot_restores_everything_about_it() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push(Snapshot::of_whole_layer(&doc, 0).unwrap());
+        history.push(Snapshot::of_whole_layer(&doc, 0).unwrap(), "flip");
         doc.active_layer_mut().raster.set(0, 0, RED);
         doc.active_layer_mut().add_mask(Raster::filled(1, 1, Rgba::BLACK));
         doc.active_layer_mut().name = "changed".to_owned();
@@ -273,7 +358,7 @@ mod tests {
     fn discard_last_forgets_a_step_without_applying_it() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push(Snapshot::of_active_layer(&doc));
+        history.push(Snapshot::of_active_layer(&doc), "paint");
         doc.active_layer_mut().raster.set(0, 0, RED);
         assert!(history.discard_last());
         assert_eq!(doc.composite().get(0, 0), RED, "the pixels were left alone");
@@ -286,7 +371,7 @@ mod tests {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
         for i in 1..=3 {
-            history.push_coalescing(Snapshot::of_active_layer(&doc), "opacity");
+            history.push_coalescing(Snapshot::of_active_layer(&doc), "Opacity", "opacity");
             doc.active_layer_mut().raster.set(0, 0, Rgba::opaque(i * 50, 0, 0));
         }
         assert!(history.undo(&mut doc));
@@ -300,10 +385,10 @@ mod tests {
     fn a_different_key_or_a_plain_push_breaks_the_run() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push_coalescing(Snapshot::of_active_layer(&doc), "a");
-        history.push_coalescing(Snapshot::of_active_layer(&doc), "b");
-        history.push(Snapshot::of_active_layer(&doc));
-        history.push_coalescing(Snapshot::of_active_layer(&doc), "b");
+        history.push_coalescing(Snapshot::of_active_layer(&doc), "a", "a");
+        history.push_coalescing(Snapshot::of_active_layer(&doc), "b", "b");
+        history.push(Snapshot::of_active_layer(&doc), "c");
+        history.push_coalescing(Snapshot::of_active_layer(&doc), "b", "b");
         let mut steps = 0;
         while history.undo(&mut doc) {
             steps += 1;
@@ -315,9 +400,9 @@ mod tests {
     fn an_undo_ends_the_run() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(10);
-        history.push_coalescing(Snapshot::of_active_layer(&doc), "a");
+        history.push_coalescing(Snapshot::of_active_layer(&doc), "a", "a");
         history.undo(&mut doc);
-        history.push_coalescing(Snapshot::of_active_layer(&doc), "a");
+        history.push_coalescing(Snapshot::of_active_layer(&doc), "a", "a");
         assert!(history.can_undo(), "the second run starts a new step");
         assert!(!history.can_redo());
     }
@@ -327,10 +412,76 @@ mod tests {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
         let mut history = History::new(2);
         for _ in 0..3 {
-            history.push(Snapshot::of_active_layer(&doc));
+            history.push(Snapshot::of_active_layer(&doc), "paint");
         }
         assert!(history.undo(&mut doc));
         assert!(history.undo(&mut doc));
         assert!(!history.undo(&mut doc));
+
+        history.set_limit(10);
+        for _ in 0..5 {
+            history.push(Snapshot::of_active_layer(&doc), "paint");
+        }
+        assert_eq!(history.position(), 5);
+        history.set_limit(3);
+        assert_eq!(history.limit(), 3);
+        assert_eq!(history.position(), 3, "trimmed at once");
+        history.set_limit(0);
+        assert_eq!(history.limit(), 1, "at least one step is always kept");
+    }
+
+    #[test]
+    fn the_panel_sees_labels_and_can_jump_between_them() {
+        let mut doc = Document::new(1, 1, Rgba::WHITE);
+        let mut history = History::new(10);
+        for (i, label) in ["one", "two", "three"].iter().enumerate() {
+            history.push(Snapshot::of_active_layer(&doc), *label);
+            doc.active_layer_mut().raster.set(0, 0, Rgba::opaque(i as u8 + 1, 0, 0));
+        }
+        assert_eq!(history.labels(), vec!["one", "two", "three"]);
+        assert_eq!(history.position(), 3);
+        assert!(history.go_to(&mut doc, 1));
+        assert_eq!(doc.composite().get(0, 0).r, 1, "after step one only");
+        assert_eq!(history.position(), 1);
+        assert_eq!(history.labels(), vec!["one", "two", "three"], "undone steps still show");
+        assert!(history.go_to(&mut doc, 3));
+        assert_eq!(doc.composite().get(0, 0).r, 3);
+        assert!(!history.go_to(&mut doc, 3), "already there");
+        assert!(history.go_to(&mut doc, 0));
+        assert_eq!(doc.composite().get(0, 0), Rgba::WHITE);
+    }
+
+    #[test]
+    fn modified_means_not_at_the_saved_state() {
+        let mut doc = Document::new(1, 1, Rgba::WHITE);
+        let mut history = History::new(10);
+        assert!(!history.is_modified(), "a fresh document is clean");
+        history.push(Snapshot::of_active_layer(&doc), "paint");
+        assert!(history.is_modified());
+        history.undo(&mut doc);
+        assert!(!history.is_modified(), "undone back to the start");
+        history.redo(&mut doc);
+        history.mark_saved();
+        assert!(!history.is_modified());
+        history.undo(&mut doc);
+        assert!(history.is_modified(), "undone past the save");
+        history.redo(&mut doc);
+        assert!(!history.is_modified(), "and redone back to it");
+        history.undo(&mut doc);
+        history.push(Snapshot::of_active_layer(&doc), "other");
+        assert!(history.is_modified(), "a different branch at the same depth is not the saved state");
+        history.clear();
+        assert!(!history.is_modified(), "a new or opened document starts clean");
+
+        // Dropping old steps past the limit does not lose track of it.
+        let mut history = History::new(2);
+        history.push(Snapshot::of_active_layer(&doc), "a");
+        history.mark_saved();
+        history.push(Snapshot::of_active_layer(&doc), "b");
+        history.push(Snapshot::of_active_layer(&doc), "c");
+        assert!(history.is_modified());
+        history.undo(&mut doc);
+        history.undo(&mut doc);
+        assert!(!history.is_modified(), "back at the saved state, which is now the oldest kept");
     }
 }

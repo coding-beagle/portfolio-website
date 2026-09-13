@@ -242,7 +242,7 @@ mod tests {
                 document: &mut self.doc,
                 selection: &mut self.sel,
                 viewport: &mut self.vp,
-                settings: &self.settings,
+                settings: &mut self.settings,
             }
         }
     }
