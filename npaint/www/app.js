@@ -216,6 +216,9 @@ function step(now) {
   }
 
   if (layersDirty && !np.is_gesturing()) {
+    // Clicking another layer while the adjustment dialog is open ends the
+    // session in the engine; the dialog has nothing left to preview.
+    if (adjust.isOpen() && !np.is_adjusting()) adjust.abandon();
     renderLayers();
     syncTransformBar();
     layersDirty = false;
@@ -784,15 +787,93 @@ function adjustmentItems() {
   }));
 }
 
+/** The same list as new adjustment layers: the layer is made with neutral
+ *  settings and its dialog opened straight away, if it has any. */
+function adjustmentLayerItems() {
+  return ADJUSTMENTS.map((a) => ({
+    label: a.label,
+    action: () =>
+      act(() => {
+        const index = np.add_adjustment_layer(a.name, new Float32Array());
+        adjust.openLayer(index);
+      }),
+  }));
+}
+
+const layerKind = (i) => np.layer_kind(i);
+const hasMask = (i) => np.layer_has_mask(i);
+
+/** Edits an adjustment layer's settings, or says why it cannot. */
+function editAdjustmentLayer(index) {
+  if (layerKind(index) !== "adjustment") return;
+  if (!adjust.openLayer(index)) message("This adjustment has no settings to change.");
+}
+
+/** The mask submenu of one layer. */
+function maskItems(i) {
+  const with_ = (fn) => () => act(() => fn(i()));
+  return [
+    { label: "Reveal All", action: with_((k) => np.add_layer_mask(k, false)), enabled: () => !hasSelection() },
+    { label: "Hide All", action: with_((k) => np.add_layer_mask(k, true)), enabled: () => !hasSelection() },
+    { label: "Reveal Selection", action: with_((k) => np.add_layer_mask(k, false)), enabled: hasSelection },
+    { label: "Hide Selection", action: with_((k) => np.add_layer_mask(k, true)), enabled: hasSelection },
+    { sep: true },
+    {
+      label: "Disable Mask",
+      checked: () => hasMask(i()) && !np.layer_mask_enabled(i()),
+      enabled: () => hasMask(i()),
+      action: with_((k) => np.set_layer_mask_enabled(k, !np.layer_mask_enabled(k))),
+    },
+    { label: "Delete Mask", enabled: () => hasMask(i()), action: with_((k) => np.remove_layer_mask(k)) },
+    {
+      label: "Apply Mask",
+      enabled: () => hasMask(i()) && layerKind(i()) !== "adjustment",
+      action: with_((k) => np.apply_layer_mask(k)),
+    },
+    { sep: true },
+    {
+      label: "Load Mask as Selection",
+      enabled: () => hasMask(i()),
+      action: with_((k) => {
+        if (!np.select_layer_mask(k)) message("The mask hides everything, so there is nothing to select.");
+      }),
+    },
+  ];
+}
+
 /** The items that act on one layer; shared by the Layer menu and the
  *  layer row's context menu. */
 function layerItems(index) {
   const i = () => (index === undefined ? active() : index);
   return [
     { label: "New Layer", shortcut: "Ctrl+Shift+N", action: () => act(() => np.add_layer()) },
+    { label: "New Adjustment Layer", submenu: adjustmentLayerItems() },
     { label: "Duplicate Layer", shortcut: "Ctrl+J", action: () => act(() => np.duplicate_layer(i())) },
     { label: "Layer via Copy", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
     { label: "Delete Layer", enabled: () => layerCount() > 1, action: () => act(() => np.remove_layer(i())) },
+    { sep: true },
+    {
+      label: "Edit Adjustment…",
+      enabled: () => layerKind(i()) === "adjustment",
+      action: () => withActive(i(), () => editAdjustmentLayer(i())),
+    },
+    { label: "Layer Mask", submenu: maskItems(i) },
+    { sep: true },
+    {
+      label: "Convert to Smart Object",
+      enabled: () => layerKind(i()) === "pixels",
+      action: () => act(() => np.convert_to_smart_object(i())),
+    },
+    {
+      label: "Rasterize Layer",
+      enabled: () => layerKind(i()) === "smart",
+      action: () => act(() => np.rasterize_layer(i())),
+    },
+    {
+      label: "Replace Contents…",
+      enabled: () => layerKind(i()) === "smart",
+      action: () => withActive(i(), () => pickFile("replace")),
+    },
     { sep: true },
     { label: "Rename…", action: () => act(() => renameLayer(i())) },
     {
@@ -804,7 +885,12 @@ function layerItems(index) {
     { label: "Move Up", enabled: () => i() < layerCount() - 1, action: () => act(() => np.move_layer(i(), i() + 1)) },
     { label: "Move Down", enabled: () => i() > 0, action: () => act(() => np.move_layer(i(), i() - 1)) },
     { sep: true },
-    { label: "Merge Down", shortcut: "Ctrl+E", enabled: () => i() > 0, action: () => act(() => np.merge_down(i())) },
+    {
+      label: "Merge Down",
+      shortcut: "Ctrl+E",
+      enabled: () => i() > 0 && layerKind(i() - 1) === "pixels",
+      action: () => act(() => np.merge_down(i())),
+    },
     { label: "Flatten Image", shortcut: "Ctrl+Shift+E", enabled: () => layerCount() > 1, action: () => act(() => np.flatten()) },
     { sep: true },
     {
@@ -1068,7 +1154,7 @@ function buildMenus() {
       items: [
         { label: "New…", shortcut: "Ctrl+N", action: showNewDialog },
         { label: "Open…", shortcut: "Ctrl+O", action: () => pickFile("open") },
-        { label: "Place…", action: () => pickFile("place") },
+        { label: "Place as Smart Object…", action: () => pickFile("place") },
         { sep: true },
         { label: "Export Image…", shortcut: "Ctrl+S", action: showExportDialog },
       ],
@@ -1196,34 +1282,34 @@ function pickFile(mode) {
   input.click();
 }
 
-/** Decodes an image file and either opens it as a document or places it as
- *  a layer, scaled to fit the current document. */
+/**
+ * Decodes an image file and hands its pixels, at the picture's own size, to
+ * the engine: as a new document (`open`), as a smart object fitted to the
+ * document (`place`), or as the new contents of the active smart object
+ * (`replace`). The engine works out the placement, so a placed picture keeps
+ * every pixel it came with however small it is shown.
+ */
 async function loadFile(file, mode) {
   const bitmap = await createImageBitmap(file);
   const name = file.name.replace(/\.[^.]+$/, "") || "Image";
   const scratch = document.createElement("canvas");
   const sctx = scratch.getContext("2d");
+  scratch.width = bitmap.width;
+  scratch.height = bitmap.height;
+  sctx.drawImage(bitmap, 0, 0);
+  const data = sctx.getImageData(0, 0, bitmap.width, bitmap.height);
+  const bytes = new Uint8Array(data.data.buffer);
+  bitmap.close();
 
   if (mode === "open") {
-    scratch.width = bitmap.width;
-    scratch.height = bitmap.height;
-    sctx.drawImage(bitmap, 0, 0);
-    const data = sctx.getImageData(0, 0, bitmap.width, bitmap.height);
-    np.open_image(name, bitmap.width, bitmap.height, new Uint8Array(data.data.buffer));
+    np.open_image(name, data.width, data.height, bytes);
     fit();
+  } else if (mode === "replace") {
+    act(() => np.replace_smart_contents(active(), data.width, data.height, bytes));
   } else {
-    const w = np.width();
-    const h = np.height();
-    scratch.width = w;
-    scratch.height = h;
-    const scale = Math.min(1, w / bitmap.width, h / bitmap.height);
-    const dw = Math.round(bitmap.width * scale);
-    const dh = Math.round(bitmap.height * scale);
-    sctx.drawImage(bitmap, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh);
-    const data = sctx.getImageData(0, 0, w, h);
-    np.add_layer_from_rgba(name, w, h, new Uint8Array(data.data.buffer));
+    act(() => np.place_smart_object(name, data.width, data.height, bytes));
+    message(`Placed ${file.name} as a smart object: transform it freely, it keeps its pixels.`);
   }
-  bitmap.close();
   touch();
 }
 
@@ -1375,6 +1461,13 @@ function bindLayers() {
   $("layer-dup").addEventListener("click", () => act(() => np.duplicate_layer(active())));
   $("layer-delete").addEventListener("click", () => act(() => np.remove_layer(active())));
   $("layer-merge").addEventListener("click", () => act(() => np.merge_down(active())));
+  // Photoshop's add-mask button: the selection becomes the mask, or the
+  // mask reveals everything when nothing is selected.
+  $("layer-mask").addEventListener("click", () => act(() => np.add_layer_mask(active(), false)));
+  $("layer-adjust").addEventListener("click", (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    showContextMenu(r.left, r.top - 4, adjustmentLayerItems());
+  });
   // "Up" in the panel is towards the top of the stack, which is a higher index.
   $("layer-up").addEventListener("click", () => {
     const i = active();
@@ -1416,15 +1509,65 @@ function act(fn) {
 const THUMB_W = 40;
 const THUMB_H = 30;
 
+/** What each kind of layer wears in the corner of its thumbnail. */
+const KIND_BADGE = {
+  adjustment: { glyph: "◑", title: "Adjustment layer: double-click to change its settings" },
+  smart: { glyph: "▣", title: "Smart object: transforms from its original pixels" },
+};
+
+/**
+ * A thumbnail canvas of `bytes`, which are `tw` x `th` RGBA, centred in
+ * the box. The thumbnail keeps the document's shape inside a fixed box
+ * rather than squashing a wide picture into a square one.
+ */
+function thumbnailCanvas(bytes, tw, th, className) {
+  const thumb = document.createElement("canvas");
+  thumb.className = `thumb ${className}`;
+  thumb.width = THUMB_W;
+  thumb.height = THUMB_H;
+  thumb.getContext("2d").putImageData(
+    new ImageData(new Uint8ClampedArray(bytes.buffer), tw, th),
+    Math.round((THUMB_W - tw) / 2),
+    Math.round((THUMB_H - th) / 2)
+  );
+  return thumb;
+}
+
+/** An adjustment layer has no pixels to show, so its thumbnail is its mark. */
+function adjustmentThumbnail() {
+  const thumb = document.createElement("canvas");
+  thumb.className = "thumb";
+  thumb.width = THUMB_W;
+  thumb.height = THUMB_H;
+  const ctx = thumb.getContext("2d");
+  ctx.fillStyle = "#3a3a3a";
+  ctx.fillRect(0, 0, THUMB_W, THUMB_H);
+  ctx.beginPath();
+  ctx.arc(THUMB_W / 2, THUMB_H / 2, 9, 0, Math.PI * 2);
+  ctx.fillStyle = "#eee";
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(THUMB_W / 2, THUMB_H / 2, 9, Math.PI / 2, -Math.PI / 2);
+  ctx.fillStyle = "#111";
+  ctx.fill();
+  return thumb;
+}
+
 function renderLayers() {
   const list = $("layer-list");
   const count = layerCount();
   const act_ = active();
   list.replaceChildren();
+  const fit = Math.min(THUMB_W / np.width(), THUMB_H / np.height());
+  const tw = Math.max(1, Math.round(np.width() * fit));
+  const th = Math.max(1, Math.round(np.height() * fit));
 
   for (let i = count - 1; i >= 0; i--) {
     const li = document.createElement("li");
     const visible = np.layer_visible(i);
+    const kind = layerKind(i);
+    const masked = hasMask(i);
+    const onMask = masked && np.layer_editing_mask(i);
     li.className = "layer" + (i === act_ ? " active" : "") + (visible ? "" : " hidden-layer");
     li.dataset.index = i;
 
@@ -1437,41 +1580,79 @@ function renderLayers() {
       act(() => np.set_layer_visible(i, !visible));
     });
 
-    // The thumbnail keeps the document's shape inside a fixed box rather than
-    // squashing a wide picture into a square one.
-    const thumb = document.createElement("canvas");
-    thumb.className = "thumb";
-    thumb.width = THUMB_W;
-    thumb.height = THUMB_H;
-    const fit = Math.min(THUMB_W / np.width(), THUMB_H / np.height());
-    const tw = Math.max(1, Math.round(np.width() * fit));
-    const th = Math.max(1, Math.round(np.height() * fit));
-    const bytes = np.layer_thumbnail(i, tw, th);
-    thumb.getContext("2d").putImageData(
-      new ImageData(new Uint8ClampedArray(bytes.buffer), tw, th),
-      Math.round((THUMB_W - tw) / 2),
-      Math.round((THUMB_H - th) / 2)
-    );
-    thumb.title = "Ctrl-click to select everything on this layer";
-    thumb.addEventListener("click", (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      // Selecting a layer's contents should not also make it the active one.
-      e.stopPropagation();
-      act(() => {
-        if (!np.select_layer_opaque(i)) message("There is nothing on that layer to select.");
-      });
+    // The pixels. Clicking one chooses it as what the tools edit; Ctrl-click
+    // selects what it draws without making the layer active.
+    const pixels = document.createElement("span");
+    pixels.className = "thumb-wrap" + (onMask ? "" : " target");
+    pixels.appendChild(kind === "adjustment" ? adjustmentThumbnail() : thumbnailCanvas(np.layer_thumbnail(i, tw, th), tw, th, ""));
+    if (KIND_BADGE[kind]) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = KIND_BADGE[kind].glyph;
+      pixels.appendChild(badge);
+      pixels.title = KIND_BADGE[kind].title;
+    } else {
+      pixels.title = "Ctrl-click to select everything on this layer" + (masked ? "; click to edit the pixels" : "");
+    }
+    pixels.addEventListener("click", (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.stopPropagation();
+        act(() => {
+          if (!np.select_layer_opaque(i)) message("There is nothing on that layer to select.");
+        });
+      } else if (onMask) {
+        e.stopPropagation();
+        act(() => {
+          np.set_active_layer(i);
+          np.set_layer_target(i, false);
+        });
+      }
     });
+
+    const thumbs = document.createElement("span");
+    thumbs.className = "thumbs";
+    thumbs.appendChild(pixels);
+
+    // The mask, if there is one. Click edits it, Shift-click switches it
+    // off and on, Ctrl-click loads it as the selection — as in Photoshop.
+    if (masked) {
+      const enabled = np.layer_mask_enabled(i);
+      const link = document.createElement("span");
+      link.className = "thumb-link";
+      link.textContent = "⛓";
+      const mask = document.createElement("span");
+      mask.className = "thumb-wrap" + (onMask ? " target" : "") + (enabled ? "" : " mask-off");
+      mask.appendChild(thumbnailCanvas(np.layer_mask_thumbnail(i, tw, th), tw, th, "mask-thumb"));
+      mask.title = enabled
+        ? "Layer mask: click to paint on it, Shift-click to disable, Ctrl-click to load as a selection"
+        : "Layer mask (disabled): Shift-click to enable";
+      mask.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act(() => {
+          if (e.ctrlKey || e.metaKey) {
+            if (!np.select_layer_mask(i)) message("The mask hides everything, so there is nothing to select.");
+          } else if (e.shiftKey) {
+            np.set_layer_mask_enabled(i, !enabled);
+          } else {
+            np.set_active_layer(i);
+            np.set_layer_target(i, true);
+          }
+        });
+      });
+      thumbs.append(link, mask);
+    }
 
     const name = document.createElement("span");
     name.className = "layer-name";
     name.textContent = np.layer_name(i);
-    name.title = "Double-click to rename";
+    name.title = kind === "adjustment" ? "Double-click to change the adjustment" : "Double-click to rename";
     name.addEventListener("dblclick", (e) => {
       e.stopPropagation();
-      beginRename(name, i);
+      if (kind === "adjustment") withActive(i, () => editAdjustmentLayer(i));
+      else beginRename(name, i);
     });
 
-    li.append(eye, thumb, name);
+    li.append(eye, thumbs, name);
     li.addEventListener("click", () => act(() => np.set_active_layer(i)));
     list.appendChild(li);
   }
@@ -1480,7 +1661,8 @@ function renderLayers() {
   $("layer-opacity").value = opacity;
   $("layer-opacity-out").value = `${opacity}%`;
   $("layer-delete").disabled = count <= 1;
-  $("layer-merge").disabled = act_ === 0;
+  $("layer-merge").disabled = act_ === 0 || layerKind(act_ - 1) !== "pixels";
+  $("layer-mask").disabled = hasMask(act_);
   $("layer-up").disabled = act_ >= count - 1;
   $("layer-down").disabled = act_ === 0;
 }
@@ -1627,7 +1809,13 @@ function bindPointer() {
     } else if (e.button === 0) {
       // With the zoom tool, the options-bar "zoom out" acts like Alt.
       const alt = e.altKey || (tool === "zoom" && zoomOutMode);
-      if (!np.pointer_down(x, y, e.shiftKey, alt)) return;
+      if (!np.pointer_down(x, y, e.shiftKey, alt)) {
+        // A smart object's pixels or an adjustment layer's: the engine says
+        // which, and what to do instead.
+        const why = np.edit_refusal();
+        if (why) message(why.charAt(0).toUpperCase() + why.slice(1) + ".");
+        return;
+      }
     } else {
       return;
     }

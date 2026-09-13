@@ -17,6 +17,24 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
+     * A new adjustment layer above the active one, with `params` (as the
+     * adjustment's dialog gives them; empty for neutral). Returns its index.
+     * @param {string} name
+     * @param {Float32Array} params
+     * @returns {number}
+     */
+    add_adjustment_layer(name, params) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(params, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_add_adjustment_layer(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
      * @returns {number}
      */
     add_layer() {
@@ -42,6 +60,19 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] >>> 0;
+    }
+    /**
+     * Gives a layer a mask from the selection — revealing it, or hiding it
+     * when `hide` is set — or one revealing everything when nothing is
+     * selected.
+     * @param {number} index
+     * @param {boolean} hide
+     */
+    add_layer_mask(index, hide) {
+        const ret = wasm.npaint_add_layer_mask(this.__wbg_ptr, index, hide);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @returns {string[]}
@@ -74,6 +105,16 @@ export class NPaint {
         return ret[0] !== 0;
     }
     /**
+     * Bakes the mask into the layer and drops it.
+     * @param {number} index
+     */
+    apply_layer_mask(index) {
+        const ret = wasm.npaint_apply_layer_mask(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {string}
      */
     background() {
@@ -90,6 +131,17 @@ export class NPaint {
     }
     begin_adjustment() {
         const ret = wasm.npaint_begin_adjustment(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Opens an adjustment layer's settings as a session: `preview_adjustment`
+     * then changes the layer live, and `commit_session` keeps it.
+     * @param {number} index
+     */
+    begin_adjustment_layer(index) {
+        const ret = wasm.npaint_begin_adjustment_layer(this.__wbg_ptr, index);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -157,6 +209,15 @@ export class NPaint {
         const ret = wasm.npaint_commit_session(this.__wbg_ptr);
         return ret !== 0;
     }
+    /**
+     * @param {number} index
+     */
+    convert_to_smart_object(index) {
+        const ret = wasm.npaint_convert_to_smart_object(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
     deselect() {
         wasm.npaint_deselect(this.__wbg_ptr);
     }
@@ -170,6 +231,24 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] >>> 0;
+    }
+    /**
+     * Why the current tool cannot paint on the active layer, or an empty
+     * string when it can — the message the page shows when a click on the
+     * canvas is declined.
+     * @returns {string}
+     */
+    edit_refusal() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_edit_refusal(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @returns {boolean}
@@ -285,11 +364,72 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * The adjustment an adjustment layer applies, or an empty string.
+     * @param {number} index
+     * @returns {string}
+     */
+    layer_adjustment_name(index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.npaint_layer_adjustment_name(this.__wbg_ptr, index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Its parameters, in the order the dialog shows them.
+     * @param {number} index
+     * @returns {Float32Array}
+     */
+    layer_adjustment_params(index) {
+        const ret = wasm.npaint_layer_adjustment_params(this.__wbg_ptr, index);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @returns {number}
      */
     layer_count() {
         const ret = wasm.npaint_layer_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Whether the tools are painting on the layer's mask rather than its
+     * pixels.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_editing_mask(index) {
+        const ret = wasm.npaint_layer_editing_mask(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_has_mask(index) {
+        const ret = wasm.npaint_layer_has_mask(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * @param {number} index
@@ -301,6 +441,56 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] >>> 0;
+    }
+    /**
+     * `"pixels"`, `"adjustment"` or `"smart"`.
+     * @param {number} index
+     * @returns {string}
+     */
+    layer_kind(index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.npaint_layer_kind(this.__wbg_ptr, index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_mask_enabled(index) {
+        const ret = wasm.npaint_layer_mask_enabled(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * The same for a layer's mask, as grey. Empty when it has no mask.
+     * @param {number} index
+     * @param {number} w
+     * @param {number} h
+     * @returns {Uint8Array}
+     */
+    layer_mask_thumbnail(index, w, h) {
+        const ret = wasm.npaint_layer_mask_thumbnail(this.__wbg_ptr, index, w, h);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * @param {number} index
@@ -336,7 +526,8 @@ export class NPaint {
         return ret[0];
     }
     /**
-     * A small RGBA thumbnail of one layer, `w` by `h`, nearest-neighbour.
+     * A small RGBA thumbnail of one layer's pixels, `w` by `h`,
+     * nearest-neighbour. Transparent for an adjustment layer, which has none.
      * @param {number} index
      * @param {number} w
      * @param {number} h
@@ -482,6 +673,27 @@ export class NPaint {
         return ret;
     }
     /**
+     * Places an image as a smart object above the active layer, fitted to
+     * the document and centred. The bytes are straight-alpha RGBA of
+     * `width` by `height`, at whatever size the picture is.
+     * @param {string} name
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     * @returns {number}
+     */
+    place_smart_object(name, width, height, bytes) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_place_smart_object(this.__wbg_ptr, ptr0, len0, width, height, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
      * @param {number} x
      * @param {number} y
      * @param {boolean} shift
@@ -531,6 +743,15 @@ export class NPaint {
         }
     }
     /**
+     * @param {number} index
+     */
+    rasterize_layer(index) {
+        const ret = wasm.npaint_rasterize_layer(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {boolean}
      */
     redo() {
@@ -542,6 +763,15 @@ export class NPaint {
      */
     remove_layer(index) {
         const ret = wasm.npaint_remove_layer(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
+     */
+    remove_layer_mask(index) {
+        const ret = wasm.npaint_remove_layer_mask(this.__wbg_ptr, index);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -566,6 +796,21 @@ export class NPaint {
     render() {
         const ret = wasm.npaint_render(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Swaps a smart object's picture for another, keeping its place.
+     * @param {number} index
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     */
+    replace_smart_contents(index, width, height, bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_replace_smart_contents(this.__wbg_ptr, index, width, height, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     reset_colors() {
         wasm.npaint_reset_colors(this.__wbg_ptr);
@@ -672,6 +917,18 @@ export class NPaint {
     select_invert() {
         const ret = wasm.npaint_select_invert(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Loads a layer's mask as the selection.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    select_layer_mask(index) {
+        const ret = wasm.npaint_select_layer_mask(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * Selects everything one particular layer draws — Ctrl-clicking its
@@ -809,10 +1066,31 @@ export class NPaint {
     }
     /**
      * @param {number} index
+     * @param {boolean} enabled
+     */
+    set_layer_mask_enabled(index, enabled) {
+        const ret = wasm.npaint_set_layer_mask_enabled(this.__wbg_ptr, index, enabled);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
      * @param {number} opacity
      */
     set_layer_opacity(index, opacity) {
         const ret = wasm.npaint_set_layer_opacity(this.__wbg_ptr, index, opacity);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Points the tools at the layer's mask (`true`) or its pixels.
+     * @param {number} index
+     * @param {boolean} mask
+     */
+    set_layer_target(index, mask) {
+        const ret = wasm.npaint_set_layer_target(this.__wbg_ptr, index, mask);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -1102,6 +1380,11 @@ function __wbg_get_imports() {
 const NPaintFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_npaint_free(ptr, 1));
+
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
 
 function getArrayF64FromWasm0(ptr, len) {
     ptr = ptr >>> 0;

@@ -15,9 +15,10 @@ use crate::adjust::Adjustment;
 use crate::autoselect::SampleMode;
 use crate::color::Rgba;
 use crate::editor::Editor;
-use crate::transform::{Handle, Hit};
 use crate::geometry::Point;
+use crate::layer::{mask_cover, Target};
 use crate::mask::SelectMode;
+use crate::transform::{Handle, Hit};
 use crate::raster::Raster;
 use crate::tools::ToolKind;
 
@@ -288,23 +289,136 @@ impl NPaint {
         Ok(self.layer(index)?.opacity)
     }
 
-    /// A small RGBA thumbnail of one layer, `w` by `h`, nearest-neighbour.
+    /// A small RGBA thumbnail of one layer's pixels, `w` by `h`,
+    /// nearest-neighbour. Transparent for an adjustment layer, which has none.
     pub fn layer_thumbnail(&self, index: usize, w: u32, h: u32) -> Result<Vec<u8>, String> {
-        let raster = &self.layer(index)?.raster;
-        let mut out = Vec::with_capacity((w * h * 4) as usize);
-        for y in 0..h {
-            let sy = (u64::from(y) * u64::from(raster.height()) / u64::from(h.max(1))) as i32;
-            for x in 0..w {
-                let sx = (u64::from(x) * u64::from(raster.width()) / u64::from(w.max(1))) as i32;
-                let p = raster.get(sx, sy);
-                out.extend_from_slice(&[p.r, p.g, p.b, p.a]);
-            }
-        }
-        Ok(out)
+        Ok(thumbnail(&self.layer(index)?.raster, w, h, |p| p))
+    }
+
+    /// The same for a layer's mask, as grey. Empty when it has no mask.
+    pub fn layer_mask_thumbnail(&self, index: usize, w: u32, h: u32) -> Result<Vec<u8>, String> {
+        Ok(match &self.layer(index)?.mask {
+            Some(mask) => thumbnail(mask, w, h, |p| {
+                let v = mask_cover(p);
+                Rgba::opaque(v, v, v)
+            }),
+            None => Vec::new(),
+        })
+    }
+
+    /// `"pixels"`, `"adjustment"` or `"smart"`.
+    pub fn layer_kind(&self, index: usize) -> Result<String, String> {
+        Ok(self.layer(index)?.kind.name().to_owned())
+    }
+
+    pub fn layer_has_mask(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.mask.is_some())
+    }
+
+    pub fn layer_mask_enabled(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.mask_enabled)
+    }
+
+    /// Whether the tools are painting on the layer's mask rather than its
+    /// pixels.
+    pub fn layer_editing_mask(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.editing_mask())
+    }
+
+    /// Points the tools at the layer's mask (`true`) or its pixels.
+    pub fn set_layer_target(&mut self, index: usize, mask: bool) -> Result<(), String> {
+        let target = if mask { Target::Mask } else { Target::Pixels };
+        self.editor.set_layer_target(index, target).map_err(err)
+    }
+
+    /// Why the current tool cannot paint on the active layer, or an empty
+    /// string when it can — the message the page shows when a click on the
+    /// canvas is declined.
+    pub fn edit_refusal(&self) -> String {
+        self.editor.edit_refusal().map(|why| why.to_string()).unwrap_or_default()
     }
 
     fn layer(&self, index: usize) -> Result<&crate::layer::Layer, String> {
         self.editor.document().layer(index).ok_or_else(|| "no such layer".to_owned())
+    }
+
+    // ---- Layer masks ---------------------------------------------------------------
+
+    /// Gives a layer a mask from the selection — revealing it, or hiding it
+    /// when `hide` is set — or one revealing everything when nothing is
+    /// selected.
+    pub fn add_layer_mask(&mut self, index: usize, hide: bool) -> Result<(), String> {
+        self.editor.add_layer_mask(index, hide).map_err(err)
+    }
+
+    pub fn remove_layer_mask(&mut self, index: usize) -> Result<(), String> {
+        self.editor.remove_layer_mask(index).map_err(err)
+    }
+
+    /// Bakes the mask into the layer and drops it.
+    pub fn apply_layer_mask(&mut self, index: usize) -> Result<(), String> {
+        self.editor.apply_layer_mask(index).map_err(err)
+    }
+
+    pub fn set_layer_mask_enabled(&mut self, index: usize, enabled: bool) -> Result<(), String> {
+        self.editor.set_layer_mask_enabled(index, enabled).map_err(err)
+    }
+
+    /// Loads a layer's mask as the selection.
+    pub fn select_layer_mask(&mut self, index: usize) -> Result<bool, String> {
+        self.editor.select_layer_mask(index, SelectMode::Replace).map_err(err)
+    }
+
+    // ---- Adjustment layers ----------------------------------------------------------
+
+    /// A new adjustment layer above the active one, with `params` (as the
+    /// adjustment's dialog gives them; empty for neutral). Returns its index.
+    pub fn add_adjustment_layer(&mut self, name: &str, params: &[f32]) -> Result<usize, String> {
+        self.editor.add_adjustment_layer(name, params).map_err(err)
+    }
+
+    /// The adjustment an adjustment layer applies, or an empty string.
+    pub fn layer_adjustment_name(&self, index: usize) -> Result<String, String> {
+        self.layer(index)?;
+        Ok(self.editor.layer_adjustment(index).map(|a| a.name().to_owned()).unwrap_or_default())
+    }
+
+    /// Its parameters, in the order the dialog shows them.
+    pub fn layer_adjustment_params(&self, index: usize) -> Result<Vec<f32>, String> {
+        self.layer(index)?;
+        Ok(self.editor.layer_adjustment(index).map(|a| a.params()).unwrap_or_default())
+    }
+
+    /// Opens an adjustment layer's settings as a session: `preview_adjustment`
+    /// then changes the layer live, and `commit_session` keeps it.
+    pub fn begin_adjustment_layer(&mut self, index: usize) -> Result<(), String> {
+        self.editor.begin_adjustment_layer(index).map_err(err)
+    }
+
+    // ---- Smart objects -----------------------------------------------------------------
+
+    /// Places an image as a smart object above the active layer, fitted to
+    /// the document and centred. The bytes are straight-alpha RGBA of
+    /// `width` by `height`, at whatever size the picture is.
+    pub fn place_smart_object(&mut self, name: &str, width: u32, height: u32, bytes: &[u8]) -> Result<usize, String> {
+        let raster = Raster::from_rgba_bytes(width, height, bytes)
+            .ok_or_else(|| "image bytes do not match the size given".to_owned())?;
+        Ok(self.editor.place_smart_object(name, raster))
+    }
+
+    pub fn convert_to_smart_object(&mut self, index: usize) -> Result<(), String> {
+        self.editor.convert_to_smart_object(index).map_err(err)
+    }
+
+    pub fn rasterize_layer(&mut self, index: usize) -> Result<(), String> {
+        self.editor.rasterize_layer(index).map_err(err)
+    }
+
+    /// Swaps a smart object's picture for another, keeping its place.
+    pub fn replace_smart_contents(&mut self, index: usize, width: u32, height: u32, bytes: &[u8]) -> Result<(), String> {
+        let raster = Raster::from_rgba_bytes(width, height, bytes)
+            .ok_or_else(|| "image bytes do not match the size given".to_owned())?;
+        self.editor.replace_smart_contents(index, raster).map_err(err)
     }
 
     pub fn add_layer(&mut self) -> usize {
@@ -683,6 +797,21 @@ impl NPaint {
     }
 }
 
+/// A `w` by `h` nearest-neighbour thumbnail of `raster`, each pixel through
+/// `map`, as RGBA bytes.
+fn thumbnail(raster: &Raster, w: u32, h: u32, map: impl Fn(Rgba) -> Rgba) -> Vec<u8> {
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        let sy = (u64::from(y) * u64::from(raster.height()) / u64::from(h.max(1))) as i32;
+        for x in 0..w {
+            let sx = (u64::from(x) * u64::from(raster.width()) / u64::from(w.max(1))) as i32;
+            let p = map(raster.get(sx, sy));
+            out.extend_from_slice(&[p.r, p.g, p.b, p.a]);
+        }
+    }
+    out
+}
+
 fn parse_background(text: &str) -> Result<Rgba, String> {
     if text.trim().is_empty() {
         Ok(Rgba::TRANSPARENT)
@@ -911,6 +1040,79 @@ mod tests {
         assert!(np.select_subject_from_matte(&matte, 8, 8));
         assert!(!np.selection_rect().is_empty());
         assert!(!np.select_subject_from_matte(&[7u8; 4], 8, 8), "a matte that is not the size it claims");
+    }
+
+    #[test]
+    fn masks_cross_the_boundary() {
+        let mut np = NPaint::new(2, 2, "#ff0000").unwrap();
+        assert!(!np.layer_has_mask(0).unwrap());
+        assert!(np.layer_mask_thumbnail(0, 2, 2).unwrap().is_empty());
+        assert!(np.remove_layer_mask(0).is_err());
+        np.select_all();
+        np.select_contract(1);
+        assert!(np.selection_rect().is_empty(), "a 2x2 contracted by one is nothing");
+        np.add_layer_mask(0, false).unwrap();
+        assert!(np.layer_has_mask(0).unwrap());
+        assert!(np.layer_editing_mask(0).unwrap());
+        assert_eq!(np.layer_mask_thumbnail(0, 1, 1).unwrap(), vec![255, 255, 255, 255]);
+        np.set_layer_target(0, false).unwrap();
+        assert!(!np.layer_editing_mask(0).unwrap());
+        np.set_layer_target(0, true).unwrap();
+        np.apply_adjustment("invert").unwrap();
+        assert_eq!(np.frame_copy()[3], 0, "an all-black mask hides the layer");
+        assert!(np.select_layer_mask(0).is_ok());
+        np.set_layer_mask_enabled(0, false).unwrap();
+        assert!(!np.layer_mask_enabled(0).unwrap());
+        assert_eq!(np.frame_copy()[3], 255);
+        np.apply_layer_mask(0).unwrap();
+        assert!(!np.layer_has_mask(0).unwrap());
+    }
+
+    #[test]
+    fn adjustment_layers_cross_the_boundary() {
+        let mut np = NPaint::new(1, 1, "#ffffff").unwrap();
+        assert_eq!(np.layer_kind(0).unwrap(), "pixels");
+        assert_eq!(np.layer_adjustment_name(0).unwrap(), "");
+        let i = np.add_adjustment_layer("levels", &[]).unwrap();
+        assert_eq!(np.layer_kind(i).unwrap(), "adjustment");
+        assert_eq!(np.layer_adjustment_name(i).unwrap(), "levels");
+        assert_eq!(np.layer_adjustment_params(i).unwrap(), vec![0.0, 255.0, 1.0]);
+        assert!(np.layer_thumbnail(i, 2, 2).unwrap().iter().all(|b| *b == 0), "no pixels to show");
+        np.begin_adjustment_layer(i).unwrap();
+        assert!(np.is_adjusting());
+        np.preview_adjustment("invert", &[]).unwrap();
+        assert!(np.commit_session());
+        assert_eq!(np.layer_adjustment_name(i).unwrap(), "invert");
+        assert_eq!(np.frame_copy()[..3], [0, 0, 0]);
+        assert!(np.begin_adjustment_layer(0).is_err());
+        assert!(np.add_adjustment_layer("sepia", &[]).is_err());
+        np.set_tool("brush").unwrap();
+        assert_eq!(np.edit_refusal(), "", "the mask is the target");
+        np.set_layer_target(i, false).unwrap();
+        assert!(!np.edit_refusal().is_empty());
+    }
+
+    #[test]
+    fn smart_objects_cross_the_boundary() {
+        let mut np = NPaint::new(4, 4, "").unwrap();
+        let red = [255u8, 0, 0, 255].repeat(4);
+        let i = np.place_smart_object("photo", 2, 2, &red).unwrap();
+        assert_eq!(np.layer_kind(i).unwrap(), "smart");
+        assert!(np.place_smart_object("x", 3, 3, &red).is_err(), "bytes that do not match");
+        np.set_tool("brush").unwrap();
+        assert!(!np.edit_refusal().is_empty());
+        assert!(!np.pointer_down(2.0, 2.0, false, false));
+        np.begin_transform().unwrap();
+        assert!(np.transform_nudge(1.0, 0.0));
+        assert!(np.commit_session());
+        assert_eq!(np.layer_kind(i).unwrap(), "smart");
+        np.replace_smart_contents(i, 1, 1, &[0, 0, 255, 255]).unwrap();
+        assert!(np.replace_smart_contents(0, 1, 1, &[0, 0, 255, 255]).is_err());
+        np.rasterize_layer(i).unwrap();
+        assert_eq!(np.layer_kind(i).unwrap(), "pixels");
+        assert_eq!(np.edit_refusal(), "");
+        np.convert_to_smart_object(i).unwrap();
+        assert_eq!(np.layer_kind(i).unwrap(), "smart");
     }
 
     #[test]

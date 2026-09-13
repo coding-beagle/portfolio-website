@@ -89,6 +89,32 @@ impl Adjustment {
         }
     }
 
+    /// The name the layers panel shows an adjustment layer under.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Adjustment::BrightnessContrast { .. } => "Brightness/Contrast",
+            Adjustment::HueSaturation { .. } => "Hue/Saturation",
+            Adjustment::Levels { .. } => "Levels",
+            Adjustment::Invert => "Invert",
+            Adjustment::Desaturate => "Desaturate",
+            Adjustment::Posterize { .. } => "Posterize",
+            Adjustment::Threshold { .. } => "Threshold",
+        }
+    }
+
+    /// The parameters in the order [`Adjustment::from_params`] takes them,
+    /// so an adjustment layer's dialog can open showing what it has.
+    pub fn params(&self) -> Vec<f32> {
+        match *self {
+            Adjustment::BrightnessContrast { brightness, contrast } => vec![brightness, contrast],
+            Adjustment::HueSaturation { hue, saturation, lightness } => vec![hue, saturation, lightness],
+            Adjustment::Levels { black, white, gamma } => vec![black, white, gamma],
+            Adjustment::Invert | Adjustment::Desaturate => Vec::new(),
+            Adjustment::Posterize { levels } => vec![levels],
+            Adjustment::Threshold { level } => vec![level],
+        }
+    }
+
     /// Whether the adjustment has parameters worth a dialog.
     pub fn has_params(&self) -> bool {
         !matches!(self, Adjustment::Invert | Adjustment::Desaturate)
@@ -230,6 +256,15 @@ mod tests {
             assert!((out.r as i32 - 200).abs() <= 1 && (out.g as i32 - 100).abs() <= 1 && (out.b as i32 - 50).abs() <= 1, "{name} with defaults changed the colour: {out}");
         }
         assert!(Adjustment::from_params("sepia", &[]).is_err());
+    }
+
+    #[test]
+    fn params_round_trip_through_from_params() {
+        for name in Adjustment::NAMES {
+            let adj = Adjustment::from_params(name, &[30.0, 200.0, 2.0]).unwrap();
+            assert_eq!(Adjustment::from_params(name, &adj.params()).unwrap(), adj, "{name}");
+            assert!(!adj.label().is_empty());
+        }
     }
 
     #[test]

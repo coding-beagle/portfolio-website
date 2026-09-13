@@ -385,13 +385,58 @@ button.opt {
 }
 .layer {
   display: grid;
-  grid-template-columns: 26px 44px 1fr;
+  grid-template-columns: 26px auto 1fr;
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--border-soft);
   cursor: pointer;
   user-select: none;
+}
+.layer .thumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The mask sits beside the pixels with a link between; the one the tools
+   are editing wears the accent. */
+.layer .thumb-wrap {
+  position: relative;
+  display: block;
+  border: 2px solid transparent;
+  border-radius: 3px;
+}
+.layer .thumb-wrap.target {
+  border-color: var(--accent);
+}
+.layer .thumb-wrap.mask-off .thumb {
+  opacity: 0.45;
+}
+.layer .thumb-wrap.mask-off::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: linear-gradient(to top right, transparent 46%, var(--danger) 46% 54%, transparent 54%);
+  pointer-events: none;
+}
+.layer .badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 3px 0 0 0;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  pointer-events: none;
+}
+.layer .thumb-link {
+  color: var(--text-dim);
+  font-size: 11px;
 }
 .layer.active {
   background: var(--accent-soft);
@@ -419,11 +464,20 @@ button.opt {
   opacity: 0.35;
 }
 .layer .thumb {
+  display: block;
   width: 40px;
   height: 30px;
   border: 1px solid var(--border);
   background: repeating-conic-gradient(#666 0 25%, #999 0 50%) 0 0 / 8px 8px;
   image-rendering: pixelated;
+}
+.layer .thumb.mask-thumb {
+  background: #000;
+}
+.layer-kind {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .layer-name {
   white-space: nowrap;
@@ -448,6 +502,9 @@ button.opt {
 .layer-buttons button {
   flex: 1;
   padding: 4px 0;
+}
+.layer-buttons button.on {
+  color: var(--accent);
 }
 
 /* ---- Status bar ---- */

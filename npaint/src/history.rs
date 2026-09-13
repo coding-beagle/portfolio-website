@@ -8,26 +8,36 @@
 //! an undo.
 
 use crate::document::Document;
-use crate::layer::LayerId;
+use crate::layer::{Layer, LayerId, Target};
 use crate::raster::Raster;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Snapshot {
-    /// The pixels of one layer, found by id so a later reorder does not
-    /// point the restore at the wrong layer.
-    LayerPixels { id: LayerId, raster: Raster },
+    /// One surface of one layer — its pixels or its mask — found by id so a
+    /// later reorder does not point the restore at the wrong layer.
+    LayerPixels { id: LayerId, target: Target, raster: Raster },
+    /// A whole layer: pixels, mask, kind and properties. For the edits that
+    /// touch more than one of those at once, such as flipping a layer or
+    /// transforming a smart object.
+    Layer(Layer),
     /// Everything: the layer list, its order, the active layer.
     Structure(Document),
 }
 
 impl Snapshot {
+    /// The surface the layer is currently editing.
     pub fn of_layer(doc: &Document, index: usize) -> Option<Snapshot> {
         let layer = doc.layer(index)?;
-        Some(Snapshot::LayerPixels { id: layer.id(), raster: layer.raster.clone() })
+        let target = if layer.editing_mask() { Target::Mask } else { Target::Pixels };
+        Some(Snapshot::LayerPixels { id: layer.id(), target, raster: layer.surface().clone() })
     }
 
     pub fn of_active_layer(doc: &Document) -> Snapshot {
         Snapshot::of_layer(doc, doc.active_index()).expect("the active layer exists")
+    }
+
+    pub fn of_whole_layer(doc: &Document, index: usize) -> Option<Snapshot> {
+        Some(Snapshot::Layer(doc.layer(index)?.clone()))
     }
 
     pub fn of_structure(doc: &Document) -> Snapshot {
@@ -39,13 +49,27 @@ impl Snapshot {
     /// that returns itself; the history stays consistent either way.
     fn restore(self, doc: &mut Document) -> Snapshot {
         match self {
-            Snapshot::LayerPixels { id, raster } => match doc.index_of(id) {
+            Snapshot::LayerPixels { id, target, raster } => match doc.index_of(id) {
                 Some(index) => {
                     let layer = doc.layer_mut(index).expect("index came from index_of");
-                    let previous = std::mem::replace(&mut layer.raster, raster);
-                    Snapshot::LayerPixels { id, raster: previous }
+                    let slot = match (target, &mut layer.mask) {
+                        (Target::Mask, Some(mask)) => mask,
+                        // The mask this snapshot holds has been deleted since;
+                        // there is nowhere to put it back, so leave things be.
+                        (Target::Mask, None) => return Snapshot::LayerPixels { id, target, raster },
+                        (Target::Pixels, _) => &mut layer.raster,
+                    };
+                    let previous = std::mem::replace(slot, raster);
+                    Snapshot::LayerPixels { id, target, raster: previous }
                 }
-                None => Snapshot::LayerPixels { id, raster },
+                None => Snapshot::LayerPixels { id, target, raster },
+            },
+            Snapshot::Layer(layer) => match doc.index_of(layer.id()) {
+                Some(index) => {
+                    let slot = doc.layer_mut(index).expect("index came from index_of");
+                    Snapshot::Layer(std::mem::replace(slot, layer))
+                }
+                None => Snapshot::Layer(layer),
             },
             Snapshot::Structure(saved) => Snapshot::Structure(std::mem::replace(doc, saved)),
         }
@@ -206,6 +230,43 @@ mod tests {
         history.undo(&mut doc);
         assert_eq!(doc.layer(0).unwrap().raster.get(0, 0), Rgba::TRANSPARENT, "the painted layer was restored");
         assert_eq!(doc.layer(1).unwrap().raster.get(0, 0), Rgba::WHITE, "the background was left alone");
+    }
+
+    #[test]
+    fn a_pixel_snapshot_of_a_mask_restores_the_mask_not_the_pixels() {
+        let mut doc = Document::new(1, 1, Rgba::WHITE);
+        let mut history = History::new(10);
+        doc.active_layer_mut().add_mask(Raster::filled(1, 1, Rgba::WHITE));
+        history.push(Snapshot::of_active_layer(&doc));
+        doc.active_surface_mut().set(0, 0, Rgba::BLACK);
+        assert_eq!(doc.composite().get(0, 0).a, 0, "masked out");
+        history.undo(&mut doc);
+        assert_eq!(doc.composite().get(0, 0), Rgba::WHITE, "the mask came back white");
+        assert_eq!(doc.active_layer().raster.get(0, 0), Rgba::WHITE, "the pixels were never involved");
+        history.redo(&mut doc);
+        assert_eq!(doc.composite().get(0, 0).a, 0);
+
+        // A mask deleted after the edit: nothing to restore into, no crash.
+        doc.active_layer_mut().remove_mask();
+        history.undo(&mut doc);
+        assert!(doc.active_layer().mask.is_none());
+    }
+
+    #[test]
+    fn a_whole_layer_snapshot_restores_everything_about_it() {
+        let mut doc = Document::new(1, 1, Rgba::WHITE);
+        let mut history = History::new(10);
+        history.push(Snapshot::of_whole_layer(&doc, 0).unwrap());
+        doc.active_layer_mut().raster.set(0, 0, RED);
+        doc.active_layer_mut().add_mask(Raster::filled(1, 1, Rgba::BLACK));
+        doc.active_layer_mut().name = "changed".to_owned();
+        history.undo(&mut doc);
+        assert_eq!(doc.active_layer().raster.get(0, 0), Rgba::WHITE);
+        assert!(doc.active_layer().mask.is_none());
+        assert_eq!(doc.active_layer().name, "Background");
+        history.redo(&mut doc);
+        assert_eq!(doc.active_layer().name, "changed");
+        assert!(doc.active_layer().mask.is_some());
     }
 
     #[test]

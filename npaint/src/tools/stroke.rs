@@ -61,7 +61,7 @@ impl StrokeTool {
         g.dirty = if g.dirty.is_empty() { segment } else { union(g.dirty, segment) };
 
         let region = g.dirty.intersect(&clip);
-        let layer = &mut ctx.document.active_layer_mut().raster;
+        let layer = ctx.document.active_surface_mut();
         let color = ctx.settings.color;
         let opacity = ctx.settings.opacity;
         let mode = self.mode;
@@ -102,7 +102,7 @@ impl Tool for StrokeTool {
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
-        let layer = &ctx.document.active_layer().raster;
+        let layer = ctx.document.active_surface();
         self.gesture = Some(InProgress {
             last: ev.pos,
             base: layer.clone(),
@@ -130,7 +130,7 @@ impl Tool for StrokeTool {
 
     fn cancel(&mut self, ctx: &mut ToolContext) {
         if let Some(g) = self.gesture.take() {
-            ctx.document.active_layer_mut().raster = g.base;
+            *ctx.document.active_surface_mut() = g.base;
         }
     }
 }

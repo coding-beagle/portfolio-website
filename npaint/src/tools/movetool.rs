@@ -35,7 +35,7 @@ impl MoveTool {
         g.offset = (dx, dy);
         let mut out = g.stationary.clone();
         out.merge_over(&g.moving.translated(dx, dy));
-        ctx.document.active_layer_mut().raster = out;
+        *ctx.document.active_surface_mut() = out;
         let bounds = ctx.document.bounds();
         *ctx.selection = g.selection.translated(dx, dy, bounds);
         true
@@ -48,7 +48,7 @@ impl Tool for MoveTool {
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
-        let layer = &ctx.document.active_layer().raster;
+        let layer = ctx.document.active_surface();
         let (moving, stationary) = ctx.selection.split(layer);
         let selection = ctx.selection.clone();
         self.gesture = Some(Moving { start: ev.pos, moving, stationary, selection, offset: (0, 0) });
@@ -69,7 +69,7 @@ impl Tool for MoveTool {
         if let Some(g) = self.gesture.take() {
             let mut back = g.stationary;
             back.merge_over(&g.moving);
-            ctx.document.active_layer_mut().raster = back;
+            *ctx.document.active_surface_mut() = back;
             *ctx.selection = g.selection;
         }
     }

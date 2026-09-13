@@ -2,6 +2,11 @@
 // name and its sliders — and the dialog is built from that. Sliders call
 // `preview_adjustment` on every input, so the canvas shows the result live;
 // OK commits it as one undo step and Cancel puts the pixels back.
+//
+// The same dialog edits an adjustment *layer*: `openLayer` opens it showing
+// the layer's current settings, and the engine's session applies each change
+// to the layer rather than to pixels. The dialog cannot tell the difference,
+// which is the point.
 
 export const ADJUSTMENTS = [
   {
@@ -63,10 +68,11 @@ export function createAdjustDialog(np, { onChange, onError }) {
     onChange();
   }
 
-  function build() {
+  /** Builds the sliders, starting at `values` (or the defaults). */
+  function build(values) {
     paramsRoot.replaceChildren();
     inputs = [];
-    for (const p of spec.params) {
+    spec.params.forEach((p, k) => {
       const row = document.createElement("div");
       row.className = "adjust-row";
       const label = document.createElement("label");
@@ -76,7 +82,7 @@ export function createAdjustDialog(np, { onChange, onError }) {
       range.min = p.min;
       range.max = p.max;
       range.step = p.step || 1;
-      range.value = p.value;
+      range.value = values && Number.isFinite(values[k]) ? values[k] : p.value;
       const out = document.createElement("output");
       const show = () => (out.value = `${range.value}${p.unit || ""}`);
       range.addEventListener("input", () => {
@@ -87,13 +93,22 @@ export function createAdjustDialog(np, { onChange, onError }) {
       row.append(label, range, out);
       paramsRoot.appendChild(row);
       inputs.push(range);
-    }
+    });
   }
 
   function finish(commit) {
     if (!dlg.open) return;
     if (commit) np.commit_session();
     else np.cancel_session();
+    dlg.close();
+    spec = null;
+    onChange();
+  }
+
+  /** Closes the dialog when the engine has already dropped the session —
+   *  another layer was clicked while it was open, say. */
+  function abandon() {
+    if (!dlg.open) return;
     dlg.close();
     spec = null;
     onChange();
@@ -146,5 +161,37 @@ export function createAdjustDialog(np, { onChange, onError }) {
     inputs[0].focus();
   }
 
-  return { open, isOpen: () => dlg.open, cancel: () => finish(false), commit: () => finish(true) };
+  /**
+   * Opens the dialog on an adjustment layer, showing what it has now.
+   * Returns false when there is nothing to show: not an adjustment layer,
+   * or one without parameters (Invert, Desaturate).
+   */
+  function openLayer(index) {
+    let name;
+    try {
+      name = np.layer_adjustment_name(index);
+    } catch {
+      return false;
+    }
+    const found = ADJUSTMENTS.find((a) => a.name === name);
+    if (!found || found.params.length === 0) return false;
+    if (dlg.open) finish(false);
+    let values;
+    try {
+      values = np.layer_adjustment_params(index);
+      np.begin_adjustment_layer(index);
+    } catch (e) {
+      onError(String(e));
+      return true;
+    }
+    spec = found;
+    title.textContent = found.label.replace(/…$/, "");
+    build(values);
+    dlg.show();
+    onChange();
+    inputs[0].focus();
+    return true;
+  }
+
+  return { open, openLayer, abandon, isOpen: () => dlg.open, cancel: () => finish(false), commit: () => finish(true) };
 }

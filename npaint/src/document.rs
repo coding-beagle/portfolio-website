@@ -4,9 +4,13 @@
 //! bottom of the stack. The page reverses the order for display so the top
 //! layer is at the top of the panel, as in every layer-based editor.
 
+use crate::adjust::Adjustment;
 use crate::color::Rgba;
-use crate::layer::{BlendMode, Layer, LayerId};
+use crate::geometry::Rect;
+use crate::layer::{mask_raster, BlendMode, Layer, LayerId, LayerKind, SmartObject, Target};
+use crate::mask::Mask;
 use crate::raster::Raster;
+use crate::transform::Affine;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
@@ -27,6 +31,14 @@ pub enum DocumentError {
     /// The raster handed in is not the document's size.
     SizeMismatch,
     NothingBelow,
+    /// The layer below is an adjustment layer or a smart object, which
+    /// pixels cannot be merged into.
+    CannotMergeInto,
+    /// The layer has no mask to work on.
+    NoMask,
+    /// The operation wants a pixel layer (converting to a smart object) or a
+    /// smart object (replacing its contents), and this is not one.
+    WrongKind,
 }
 
 impl std::fmt::Display for DocumentError {
@@ -36,6 +48,9 @@ impl std::fmt::Display for DocumentError {
             DocumentError::LastLayer => "a document needs at least one layer",
             DocumentError::SizeMismatch => "the image is not the document's size",
             DocumentError::NothingBelow => "there is no layer below to merge into",
+            DocumentError::CannotMergeInto => "rasterize the layer below first: pixels cannot be merged into it",
+            DocumentError::NoMask => "this layer has no mask",
+            DocumentError::WrongKind => "this kind of layer cannot do that",
         })
     }
 }
@@ -91,8 +106,8 @@ impl Document {
         self.height
     }
 
-    pub fn bounds(&self) -> crate::geometry::Rect {
-        crate::geometry::Rect::new(0, 0, self.width as i32, self.height as i32)
+    pub fn bounds(&self) -> Rect {
+        Rect::new(0, 0, self.width as i32, self.height as i32)
     }
 
     pub fn layers(&self) -> &[Layer] {
@@ -123,6 +138,16 @@ impl Document {
         &mut self.layers[self.active]
     }
 
+    /// The raster the tools are editing on the active layer: its mask while
+    /// that is the target, otherwise its pixels.
+    pub fn active_surface(&self) -> &Raster {
+        self.active_layer().surface()
+    }
+
+    pub fn active_surface_mut(&mut self) -> &mut Raster {
+        self.active_layer_mut().surface_mut()
+    }
+
     pub fn set_active(&mut self, index: usize) -> Result<(), DocumentError> {
         if index < self.layers.len() {
             self.active = index;
@@ -151,20 +176,159 @@ impl Document {
     fn insert_layer_above_active(&mut self, raster: Raster, name: Option<&str>) -> usize {
         let id = self.take_id();
         let name = name.map_or_else(|| format!("Layer {}", id.0), str::to_owned);
+        self.insert_above_active(Layer::new(id, name, raster))
+    }
+
+    fn insert_above_active(&mut self, layer: Layer) -> usize {
         let index = self.active + 1;
-        self.layers.insert(index, Layer::new(id, name, raster));
+        self.layers.insert(index, layer);
         self.active = index;
         index
     }
 
+    /// Adds an adjustment layer above the active one. Its mask is `mask`
+    /// (from the selection, say) or all white — everything below shows
+    /// through it adjusted.
+    pub fn add_adjustment_layer(&mut self, adjustment: Adjustment, mask: Option<Mask>) -> usize {
+        let id = self.take_id();
+        let name = format!("{} {}", adjustment.label(), id.0);
+        let mask = match mask {
+            Some(m) => mask_raster(&m),
+            None => Raster::filled(self.width, self.height, Rgba::WHITE),
+        };
+        self.insert_above_active(Layer::new_adjustment(id, name, adjustment, mask))
+    }
+
+    /// Places a picture as a smart object above the active layer, fitted
+    /// to the document and centred.
+    pub fn place_smart_object(&mut self, name: &str, source: Raster) -> usize {
+        let id = self.take_id();
+        let object = SmartObject::placed(source, self.width, self.height);
+        self.insert_above_active(Layer::new_smart(id, name, object, self.width, self.height))
+    }
+
+    /// Turns a pixel layer into a smart object whose source is what it has
+    /// painted on it, cropped to that. Nothing changes on screen; from now
+    /// on it transforms without loss.
+    pub fn convert_to_smart_object(&mut self, index: usize) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        match layer.kind {
+            LayerKind::Smart(_) => return Ok(()),
+            LayerKind::Adjustment(_) => return Err(DocumentError::WrongKind),
+            LayerKind::Pixels => {}
+        }
+        let bounds = layer.raster.content_bounds().unwrap_or(Rect::new(0, 0, 1, 1));
+        let source = layer.raster.resized(bounds.w as u32, bounds.h as u32, -bounds.x, -bounds.y);
+        let transform = Affine::translation(f64::from(bounds.x), f64::from(bounds.y));
+        layer.kind = LayerKind::Smart(SmartObject { source, transform });
+        Ok(())
+    }
+
+    /// Makes a smart object ordinary pixels again: what it renders to now.
+    pub fn rasterize_layer(&mut self, index: usize) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        if !layer.is_smart() {
+            return Err(DocumentError::WrongKind);
+        }
+        layer.rasterize();
+        Ok(())
+    }
+
+    /// Swaps a smart object's picture for another, keeping the box it
+    /// occupies: the new source is scaled to fill the old one's footprint.
+    pub fn replace_smart_contents(&mut self, index: usize, source: Raster) -> Result<(), DocumentError> {
+        let (width, height) = (self.width, self.height);
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        let LayerKind::Smart(object) = &mut layer.kind else {
+            return Err(DocumentError::WrongKind);
+        };
+        let sx = f64::from(object.source.width().max(1)) / f64::from(source.width().max(1));
+        let sy = f64::from(object.source.height().max(1)) / f64::from(source.height().max(1));
+        object.transform = object.transform.then(&Affine::scaling(sx, sy));
+        object.source = source;
+        layer.raster = object.render(width, height);
+        Ok(())
+    }
+
+    /// Moves a smart object and re-renders it. Not an error on other kinds;
+    /// it simply does nothing.
+    pub fn set_smart_transform(&mut self, index: usize, transform: Affine) -> Result<(), DocumentError> {
+        let (width, height) = (self.width, self.height);
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        layer.set_smart_transform(transform, width, height);
+        Ok(())
+    }
+
+    /// Replaces an adjustment layer's adjustment.
+    pub fn set_adjustment(&mut self, index: usize, adjustment: Adjustment) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        match &mut layer.kind {
+            LayerKind::Adjustment(a) => {
+                *a = adjustment;
+                Ok(())
+            }
+            _ => Err(DocumentError::WrongKind),
+        }
+    }
+
+    // ---- Masks -----------------------------------------------------------------
+
+    /// Gives a layer a mask: white where `shape` covers (or everywhere
+    /// without one), inverted when `hide` is set. Replaces any mask it had.
+    pub fn add_mask(&mut self, index: usize, shape: Option<Mask>, hide: bool) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        let mut mask = shape.unwrap_or_else(|| Mask::filled(self.width, self.height));
+        if hide {
+            mask.invert();
+        }
+        layer.add_mask(mask_raster(&mask));
+        Ok(())
+    }
+
+    pub fn remove_mask(&mut self, index: usize) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        layer.remove_mask().map(|_| ()).ok_or(DocumentError::NoMask)
+    }
+
+    /// Bakes the mask into the layer's alpha and removes it.
+    pub fn apply_mask(&mut self, index: usize) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        if layer.mask.is_none() {
+            return Err(DocumentError::NoMask);
+        }
+        if layer.is_adjustment() {
+            return Err(DocumentError::WrongKind);
+        }
+        layer.apply_mask();
+        Ok(())
+    }
+
+    pub fn set_mask_enabled(&mut self, index: usize, enabled: bool) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        if layer.mask.is_none() {
+            return Err(DocumentError::NoMask);
+        }
+        layer.mask_enabled = enabled;
+        Ok(())
+    }
+
+    pub fn set_target(&mut self, index: usize, target: Target) -> Result<(), DocumentError> {
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        if target == Target::Mask && layer.mask.is_none() {
+            return Err(DocumentError::NoMask);
+        }
+        layer.set_target(target);
+        Ok(())
+    }
+
     /// Copies a layer, placing the copy directly above it and making it active.
     pub fn duplicate_layer(&mut self, index: usize) -> Result<usize, DocumentError> {
-        let source = self.layers.get(index).ok_or(DocumentError::NoSuchLayer)?.clone();
+        if index >= self.layers.len() {
+            return Err(DocumentError::NoSuchLayer);
+        }
         let id = self.take_id();
-        let mut copy = Layer::new(id, format!("{} copy", source.name), source.raster);
-        copy.visible = source.visible;
-        copy.opacity = source.opacity;
-        copy.blend = source.blend;
+        let mut copy = self.layers[index].with_id(id);
+        copy.name = format!("{} copy", copy.name);
         self.layers.insert(index + 1, copy);
         self.active = index + 1;
         Ok(index + 1)
@@ -200,7 +364,10 @@ impl Document {
     }
 
     /// Composites the layer at `index` onto the one below it and removes it.
-    /// The result keeps the lower layer's identity and name.
+    /// The result keeps the lower layer's identity and name, and both masks
+    /// are baked in on the way. An adjustment layer merges by applying its
+    /// adjustment to the layer below for good; nothing can merge *into* an
+    /// adjustment layer or a smart object.
     pub fn merge_down(&mut self, index: usize) -> Result<(), DocumentError> {
         if index >= self.layers.len() {
             return Err(DocumentError::NoSuchLayer);
@@ -208,8 +375,12 @@ impl Document {
         if index == 0 {
             return Err(DocumentError::NothingBelow);
         }
+        if !matches!(self.layers[index - 1].kind, LayerKind::Pixels) {
+            return Err(DocumentError::CannotMergeInto);
+        }
         let top = self.layers.remove(index);
         let below = &mut self.layers[index - 1];
+        below.apply_mask();
         if top.visible {
             Self::blend_layer(&mut below.raster, &top);
         }
@@ -229,8 +400,10 @@ impl Document {
 
     /// A new layer above the active one holding a copy of the active
     /// layer's pixels inside `clip` — "layer via copy".
-    pub fn layer_via_copy(&mut self, clip: crate::geometry::Rect) -> usize {
+    /// An adjustment layer has no pixels to copy, so the copy is empty.
+    pub fn layer_via_copy(&mut self, clip: Rect) -> usize {
         let (inside, _) = self.active_layer().raster.split(&clip);
+        let inside = if self.active_layer().is_adjustment() { Raster::new(self.width, self.height) } else { inside };
         let name = format!("{} copy", self.active_layer().name);
         self.insert_layer_above_active(inside, Some(&name))
     }
@@ -238,11 +411,22 @@ impl Document {
     /// Rotates the whole canvas, every layer, by quarter turns clockwise.
     /// Odd turns swap the document's width and height.
     pub fn rotate_canvas(&mut self, turns: i32) {
-        for layer in &mut self.layers {
-            layer.raster = layer.raster.rotated_quarter(turns);
-        }
+        let (w, h) = (f64::from(self.width), f64::from(self.height));
+        // Where a point of the old canvas lands on the new one, so a smart
+        // object's placement turns with the canvas rather than being
+        // resampled.
+        let turn = match turns.rem_euclid(4) {
+            0 => Affine::IDENTITY,
+            1 => Affine { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: h, f: 0.0 },
+            2 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
+            _ => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
+        };
         if turns.rem_euclid(2) == 1 {
             std::mem::swap(&mut self.width, &mut self.height);
+        }
+        let (width, height) = (self.width, self.height);
+        for layer in &mut self.layers {
+            layer.map_rasters(|r| r.rotated_quarter(turns), |m| turn.then(m), width, height);
         }
     }
 
@@ -250,28 +434,54 @@ impl Document {
     /// new one. Every layer is document-sized, so they all move together.
     pub fn resize_canvas(&mut self, width: u32, height: u32, dx: i32, dy: i32) {
         let (width, height) = (width.max(1), height.max(1));
+        let shift = Affine::translation(f64::from(dx), f64::from(dy));
         for layer in &mut self.layers {
-            layer.raster = layer.raster.resized(width, height, dx, dy);
+            layer.map_rasters(|r| r.resized(width, height, dx, dy), |m| shift.then(m), width, height);
         }
         self.width = width;
         self.height = height;
     }
 
     pub fn flip_canvas_horizontal(&mut self) {
+        let (width, height) = (self.width, self.height);
+        let flip = Affine { a: -1.0, e: f64::from(width), ..Affine::IDENTITY };
         for layer in &mut self.layers {
-            layer.raster = layer.raster.flipped_horizontal();
+            layer.map_rasters(Raster::flipped_horizontal, |m| flip.then(m), width, height);
         }
     }
 
     pub fn flip_canvas_vertical(&mut self) {
+        let (width, height) = (self.width, self.height);
+        let flip = Affine { d: -1.0, f: f64::from(height), ..Affine::IDENTITY };
         for layer in &mut self.layers {
-            layer.raster = layer.raster.flipped_vertical();
+            layer.map_rasters(Raster::flipped_vertical, |m| flip.then(m), width, height);
         }
     }
 
+    /// Composites one layer onto `dst`, through its mask and opacity. An
+    /// adjustment layer has nothing of its own to draw: it adjusts what is
+    /// already there, and its opacity and mask say how much of that shows.
     fn blend_layer(dst: &mut Raster, layer: &Layer) {
-        match layer.blend {
-            BlendMode::Normal => dst.composite_over(&layer.raster, layer.opacity),
+        match (&layer.kind, layer.blend) {
+            (LayerKind::Adjustment(adjustment), BlendMode::Normal) => {
+                if layer.opacity <= 0.0 {
+                    return;
+                }
+                let mut adjusted = dst.clone();
+                adjustment.apply(&mut adjusted, &dst.bounds());
+                for y in 0..dst.height() as i32 {
+                    for x in 0..dst.width() as i32 {
+                        let t = layer.opacity * f32::from(layer.mask_cover(x, y)) / 255.0;
+                        if t <= 0.0 {
+                            continue;
+                        }
+                        let was = dst.get(x, y);
+                        let now = adjusted.get(x, y);
+                        dst.set(x, y, if t >= 1.0 { now } else { was.lerp(now, t) });
+                    }
+                }
+            }
+            (_, BlendMode::Normal) => dst.composite_over(&layer.rendered(), layer.opacity),
         }
     }
 
@@ -475,6 +685,16 @@ mod tests {
     }
 
     #[test]
+    fn layer_via_copy_of_an_adjustment_layer_is_an_empty_pixel_layer() {
+        let mut doc = Document::new(3, 2, Rgba::WHITE);
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        let i = doc.layer_via_copy(doc.bounds());
+        let layer = doc.layer(i).unwrap();
+        assert_eq!(layer.kind, LayerKind::Pixels);
+        assert_eq!((layer.raster.width(), layer.raster.height()), (3, 2), "document-sized, so it can be painted");
+    }
+
+    #[test]
     fn rotating_the_canvas_swaps_the_size() {
         let mut doc = Document::new(3, 2, Rgba::WHITE);
         doc.add_layer();
@@ -496,6 +716,201 @@ mod tests {
         assert_eq!(doc.composite().get(2, 0), RED);
         doc.flip_canvas_vertical();
         assert_eq!(doc.composite().get(2, 1), RED);
+    }
+
+    fn white_mask_with_black_at(w: u32, h: u32, x: i32, y: i32) -> Mask {
+        Mask::from_fn(w, h, |px, py| if (px, py) == (x, y) { 0 } else { 255 })
+    }
+
+    #[test]
+    fn a_mask_hides_part_of_a_layer_until_it_is_disabled_or_removed() {
+        let mut doc = Document::new(2, 1, Rgba::WHITE);
+        doc.add_layer();
+        doc.active_layer_mut().raster = Raster::filled(2, 1, RED);
+        doc.add_mask(1, Some(white_mask_with_black_at(2, 1, 1, 0)), false).unwrap();
+        assert!(doc.active_layer().editing_mask(), "a new mask becomes the target");
+        assert_eq!(doc.composite().get(0, 0), RED);
+        assert_eq!(doc.composite().get(1, 0), Rgba::WHITE, "masked out, the background shows");
+
+        doc.set_mask_enabled(1, false).unwrap();
+        assert_eq!(doc.composite().get(1, 0), RED);
+        doc.set_mask_enabled(1, true).unwrap();
+
+        doc.add_mask(1, Some(white_mask_with_black_at(2, 1, 1, 0)), true).unwrap();
+        assert_eq!(doc.composite().get(1, 0), RED, "hide-selection inverts the shape");
+        assert_eq!(doc.composite().get(0, 0), Rgba::WHITE);
+
+        doc.remove_mask(1).unwrap();
+        assert_eq!(doc.composite().get(0, 0), RED);
+        assert_eq!(doc.remove_mask(1), Err(DocumentError::NoMask));
+        assert_eq!(doc.set_mask_enabled(1, false), Err(DocumentError::NoMask));
+        assert_eq!(doc.set_target(1, Target::Mask), Err(DocumentError::NoMask));
+    }
+
+    #[test]
+    fn applying_a_mask_bakes_it_and_merge_down_bakes_both() {
+        let mut doc = Document::new(2, 1, Rgba::WHITE);
+        doc.add_layer();
+        doc.active_layer_mut().raster = Raster::filled(2, 1, RED);
+        doc.add_mask(1, Some(white_mask_with_black_at(2, 1, 1, 0)), false).unwrap();
+        doc.apply_mask(1).unwrap();
+        assert!(doc.active_layer().mask.is_none());
+        assert_eq!(doc.active_layer().raster.get(1, 0).a, 0);
+        assert_eq!(doc.apply_mask(1), Err(DocumentError::NoMask));
+
+        doc.add_mask(0, Some(white_mask_with_black_at(2, 1, 0, 0)), false).unwrap();
+        doc.add_mask(1, Some(white_mask_with_black_at(2, 1, 0, 0)), false).unwrap();
+        doc.merge_down(1).unwrap();
+        assert_eq!(names(&doc), vec!["Background"]);
+        assert!(doc.layer(0).unwrap().mask.is_none());
+        assert_eq!(doc.layer(0).unwrap().raster.get(0, 0).a, 0, "both masks hid this pixel");
+        assert_eq!(doc.layer(0).unwrap().raster.get(1, 0), Rgba::WHITE);
+    }
+
+    #[test]
+    fn an_adjustment_layer_adjusts_everything_below_through_its_mask() {
+        let mut doc = Document::new(2, 1, Rgba::WHITE);
+        let i = doc.add_adjustment_layer(Adjustment::Invert, None);
+        assert_eq!(i, 1);
+        assert_eq!(doc.layer(1).unwrap().name, "Invert 2");
+        assert!(doc.active_layer().editing_mask());
+        assert_eq!(doc.composite().get(0, 0), Rgba::BLACK);
+
+        // Paint black on the mask: the adjustment stops there.
+        doc.active_surface_mut().set(1, 0, Rgba::BLACK);
+        assert_eq!(doc.composite().get(1, 0), Rgba::WHITE);
+        assert_eq!(doc.composite().get(0, 0), Rgba::BLACK);
+
+        // Half opacity is half the adjustment.
+        doc.active_layer_mut().set_opacity(0.5);
+        assert_eq!(doc.composite().get(0, 0).r, 128);
+
+        // Above it, a pixel layer is not adjusted; below it, a new one is.
+        doc.active_layer_mut().set_opacity(1.0);
+        doc.add_layer();
+        doc.active_layer_mut().raster.set(0, 0, RED);
+        assert_eq!(doc.composite().get(0, 0), RED);
+        doc.set_active(0).unwrap();
+        doc.add_layer();
+        doc.active_layer_mut().raster.set(1, 0, RED);
+        assert_eq!(doc.composite().get(1, 0), RED, "under the black part of the mask");
+        doc.active_layer_mut().raster.set(0, 0, RED);
+        doc.set_active(3).unwrap();
+        doc.active_layer_mut().visible = false;
+        assert_eq!(doc.composite().get(0, 0), Rgba::opaque(0, 255, 255), "inverted red");
+
+        // A hidden adjustment layer does nothing.
+        doc.set_active(2).unwrap();
+        doc.active_layer_mut().visible = false;
+        assert_eq!(doc.composite().get(0, 0), RED);
+    }
+
+    #[test]
+    fn an_adjustment_layer_made_with_a_selection_takes_it_as_its_mask() {
+        let mut doc = Document::new(2, 1, Rgba::WHITE);
+        doc.add_adjustment_layer(Adjustment::Invert, Some(white_mask_with_black_at(2, 1, 1, 0)));
+        assert_eq!(doc.composite().get(0, 0), Rgba::BLACK);
+        assert_eq!(doc.composite().get(1, 0), Rgba::WHITE);
+        let levels = Adjustment::from_params("levels", &[0.0, 255.0, 1.0]).unwrap();
+        doc.set_adjustment(1, levels).unwrap();
+        assert_eq!(doc.active_layer().adjustment(), Some(levels));
+        assert_eq!(doc.set_adjustment(0, levels), Err(DocumentError::WrongKind));
+    }
+
+    #[test]
+    fn merging_an_adjustment_layer_down_bakes_it_and_nothing_merges_into_one() {
+        let mut doc = Document::new(1, 1, Rgba::WHITE);
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.merge_down(1).unwrap();
+        assert_eq!(names(&doc), vec!["Background"]);
+        assert_eq!(doc.layer(0).unwrap().raster.get(0, 0), Rgba::BLACK);
+
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_layer();
+        assert_eq!(doc.merge_down(2), Err(DocumentError::CannotMergeInto));
+        doc.set_active(0).unwrap();
+        doc.place_smart_object("p", Raster::filled(1, 1, RED));
+        doc.add_layer();
+        assert_eq!(doc.merge_down(2), Err(DocumentError::CannotMergeInto));
+        doc.rasterize_layer(1).unwrap();
+        doc.merge_down(2).unwrap();
+    }
+
+    #[test]
+    fn a_smart_object_converts_rasterizes_and_replaces() {
+        let mut doc = Document::new(4, 4, Rgba::TRANSPARENT);
+        assert_eq!(doc.convert_to_smart_object(0), Ok(()), "an empty layer converts to a 1x1 object");
+        doc.rasterize_layer(0).unwrap();
+        doc.active_layer_mut().raster.set(2, 1, RED);
+        doc.convert_to_smart_object(0).unwrap();
+        let object = doc.active_layer().smart_object().unwrap();
+        assert_eq!((object.source.width(), object.source.height()), (1, 1), "cropped to what is painted");
+        assert_eq!(doc.composite().get(2, 1), RED, "and it looks the same");
+        doc.convert_to_smart_object(0).unwrap();
+        assert!(doc.active_layer().is_smart(), "converting twice is harmless");
+
+        doc.replace_smart_contents(0, Raster::filled(2, 2, Rgba::BLACK)).unwrap();
+        assert_eq!(doc.composite().get(2, 1), Rgba::BLACK, "a bigger picture is scaled into the old box");
+        assert_eq!(doc.composite().get(3, 1).a, 0);
+
+        doc.rasterize_layer(0).unwrap();
+        assert!(!doc.active_layer().is_smart());
+        assert_eq!(doc.rasterize_layer(0), Err(DocumentError::WrongKind));
+        assert_eq!(doc.replace_smart_contents(0, Raster::new(1, 1)), Err(DocumentError::WrongKind));
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        assert_eq!(doc.convert_to_smart_object(1), Err(DocumentError::WrongKind));
+    }
+
+    /// Whatever the canvas does, a smart object must end up exactly where
+    /// the same pixels would have — its placement turns and shifts with the
+    /// canvas instead of being resampled.
+    #[test]
+    fn canvas_operations_carry_smart_objects_and_masks_along() {
+        let mut picture = Raster::new(3, 2);
+        picture.set(0, 0, RED);
+        picture.set(2, 1, Rgba::BLACK);
+        let mut doc = Document::new(5, 4, Rgba::TRANSPARENT);
+        doc.add_layer();
+        doc.active_layer_mut().raster = picture.resized(5, 4, 1, 1);
+        doc.add_mask(1, Some(white_mask_with_black_at(5, 4, 3, 2)), false).unwrap();
+        doc.set_active(0).unwrap();
+        doc.place_smart_object("p", picture.clone());
+        doc.set_smart_transform(1, Affine::translation(1.0, 1.0)).unwrap();
+        doc.add_mask(1, Some(white_mask_with_black_at(5, 4, 3, 2)), false).unwrap();
+        let same = |doc: &Document| {
+            let pixels = doc.layer(2).unwrap();
+            let smart = doc.layer(1).unwrap();
+            assert_eq!(smart.raster, pixels.raster, "smart raster differs");
+            assert_eq!(smart.mask, pixels.mask, "masks differ");
+        };
+        same(&doc);
+        for turns in [1, 1, 1, 1, -1, 2] {
+            doc.rotate_canvas(turns);
+            same(&doc);
+        }
+        doc.flip_canvas_horizontal();
+        same(&doc);
+        doc.flip_canvas_vertical();
+        same(&doc);
+        doc.resize_canvas(8, 7, 2, 1);
+        same(&doc);
+        doc.resize_canvas(4, 4, -1, -1);
+        same(&doc);
+        assert!(doc.composite().pixels().contains(&RED), "the picture survived the round trip");
+    }
+
+    #[test]
+    fn duplicating_keeps_the_kind_and_the_mask() {
+        let mut doc = Document::new(2, 2, Rgba::WHITE);
+        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.active_layer_mut().set_opacity(0.5);
+        let copy = doc.duplicate_layer(1).unwrap();
+        let layer = doc.layer(copy).unwrap();
+        assert!(layer.is_adjustment());
+        assert!(layer.mask.is_some());
+        assert_eq!(layer.opacity, 0.5);
+        assert_eq!(layer.name, "Invert 2 copy");
+        assert_ne!(layer.id(), doc.layer(1).unwrap().id());
     }
 
     #[test]

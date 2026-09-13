@@ -25,13 +25,16 @@ npaint/
     color.rs       Rgba, hex parsing, source-over compositing
     geometry.rs    Point, Rect
     raster.rs      the pixel buffer and every drawing primitive
-    layer.rs       Layer, LayerId, BlendMode
+    layer.rs       Layer, LayerId, BlendMode, and what kind of layer it is:
+                   pixels, an adjustment layer, or a smart object; the
+                   layer mask and which of the two rasters the tools edit
     mask.rs        per-pixel selection coverage: combine, grow/contract,
                    feather, smooth, antialias, contours (the marching ants)
     document.rs    the layer stack; add/remove/move/merge/composite
     selection.rs   what painting may touch: nothing, a rect, or a Mask
     viewport.rs    zoom and pan, screen <-> document mapping
-    history.rs     undo/redo as before-snapshots
+    history.rs     undo/redo as before-snapshots: one surface of a layer
+                   (pixels or mask), a whole layer, or the whole stack
     tools/
       mod.rs       Tool trait, ToolKind, ToolSettings, PointerEvent
       select.rs    marquee
@@ -248,6 +251,52 @@ context menus, so add to those rather than to one menu.
 (pure, tested), wrap it in `Editor` through `structural()` so it is an undo
 step, expose it in `wasm.rs`, bind a button in `app.js`.
 
+## Masks, adjustment layers and smart objects
+
+Every layer is one struct with a `kind`, and the tools do not know which:
+
+* **The surface.** A layer may carry a *mask* — a second, grey, document-
+  sized `Raster` — and a `Target` saying whether the tools edit the mask or
+  the pixels. `Document::active_surface()` is the raster the tools paint,
+  and it is the *only* thing the tools, the fills, the adjustment dialog and
+  the free transform touch. That is why a mask can be painted with the
+  brush, levelled, feathered through a selection or transformed without a
+  line of mask-specific code in any of them. The mask is a raster rather than
+  a `Mask` for the same reason. Its coverage is the pixel's brightness, with
+  transparent counting as white, so a fresh mask reveals and the eraser
+  reveals (`layer::mask_cover`). Compositing goes through
+  `Layer::rendered()`, which applies the mask to the alpha.
+* **Refusals.** A smart object's pixels and an adjustment layer's (it has
+  none) cannot be painted. `Layer::edit_refusal` says so; `pointer_down`,
+  `pixel_edit`, `begin_adjustment` and `begin_transform` all consult it, and
+  the page shows `edit_refusal()` when a click is declined. The mask of
+  either can always be painted, which is how an adjustment layer is shaped.
+* **Adjustment layers** hold an `Adjustment` and an empty (0x0) raster.
+  `Document::blend_layer` applies the adjustment to the composite so far and
+  mixes the result in by opacity and mask. Editing the settings is a
+  `Session::AdjustmentLayer`: the same dialog and the same
+  `preview_adjustment` call, with the engine writing to the layer rather than
+  to pixels; commit is one structure snapshot. The layer starts with the
+  selection as its mask, as in Photoshop. Merge Down bakes it into the layer
+  below; nothing merges *into* an adjustment layer or a smart object
+  (`DocumentError::CannotMergeInto`), and the page greys the item out.
+* **Smart objects** keep the picture at its own size (`SmartObject::source`)
+  and an `Affine` placing it; `raster` is only the rendering. Free transform
+  on one is `TransformSession::placed`, starting from that matrix, and commit
+  stores the new matrix and re-renders — so nothing degrades however many
+  times it is scaled. Layer flips and turns, and every canvas operation, go
+  through `Layer::map_rasters`, which changes the placement rather than
+  resampling the rendering. Place puts a file in as a smart object at its
+  own resolution; Convert crops a pixel layer to its content; Rasterize goes
+  back; Replace Contents swaps the source and keeps the box.
+* **History.** A pixel edit snapshots the *surface* it touched
+  (`Snapshot::LayerPixels` carries the `Target`); a layer flip or a smart
+  transform snapshots the whole `Layer`; everything else the stack.
+
+The layers panel shows the mask beside the pixels with the target outlined;
+click either to switch, Shift-click the mask to disable it, Ctrl-click it to
+load it as a selection. Adjustment layers open their dialog on double-click.
+
 ## Conventions
 
 - Layers are stored **bottom-first** (index 0 is the bottom); the panel
@@ -283,7 +332,11 @@ step, expose it in `wasm.rs`, bind a button in `app.js`.
 No lasso or polygon drawn by hand, though the mask machinery is there for
 one; Select Subject is classical computer vision rather than a model, so it
 wants a subject that stands out from its background and will not cut hair;
-no layer masks, text, gradients or blur-type filters; no non-destructive
-adjustment layers (adjustments bake into the layer); no file format of its own (export is a flattened PNG); layers are
-always document-sized (a transform resamples into the canvas, and what
-leaves it is lost).
+no text, gradients or blur-type filters; no file format of its own (export is
+a flattened PNG); pixel layers are always document-sized (a transform
+resamples into the canvas, and what leaves it is lost — a smart object keeps
+what leaves, since it re-renders from its source); a mask is not linked to
+its layer (moving or transforming the pixels leaves the mask where it was;
+the canvas operations and the layer flips do carry it along); a smart
+object's contents cannot be opened for editing, only replaced; adjustment
+layers have no clipping to the layer below.

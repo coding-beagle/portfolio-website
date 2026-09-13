@@ -105,18 +105,25 @@ impl Raster {
     /// buffer of the same size, with bilinear filtering on premultiplied
     /// colour so that edges against transparency do not go dark.
     pub fn transformed(&self, m: &Affine) -> Raster {
+        self.transformed_into(m, self.width(), self.height())
+    }
+
+    /// [`Raster::transformed`] into a buffer of another size — how a smart
+    /// object's source, which is whatever size the picture was, lands on the
+    /// document.
+    pub fn transformed_into(&self, m: &Affine, width: u32, height: u32) -> Raster {
         let Some(inv) = m.inverse() else {
-            return Raster::new(self.width(), self.height());
+            return Raster::new(width, height);
         };
-        let mut out = Raster::new(self.width(), self.height());
+        let mut out = Raster::new(width, height);
         // Only destination pixels the source's bounds can reach need
         // sampling: transform the source corners and take their extent.
         let (w, h) = (self.width() as f64, self.height() as f64);
         let corners = [Point::new(0.0, 0.0), Point::new(w, 0.0), Point::new(0.0, h), Point::new(w, h)].map(|p| m.apply(p));
         let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min).floor().max(0.0) as i32;
         let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min).floor().max(0.0) as i32;
-        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).ceil().min(w) as i32;
-        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).ceil().min(h) as i32;
+        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(width)) as i32;
+        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(height)) as i32;
         for y in y0..y1 {
             for x in x0..x1 {
                 let src = inv.apply(Point::new(f64::from(x) + 0.5, f64::from(y) + 0.5));
@@ -307,6 +314,17 @@ impl TransformSession {
             return None;
         }
         Some(TransformSession { moving, stationary, bounds, matrix: Affine::IDENTITY, drag: None, selection })
+    }
+
+    /// A session that starts from a placement already made: a smart
+    /// object's source (at its own size) and the transform that puts it on
+    /// the document. `stationary` gives the document's size.
+    pub fn placed(moving: Raster, stationary: Raster, matrix: Affine) -> Option<TransformSession> {
+        let bounds = moving.bounds();
+        if bounds.is_empty() {
+            return None;
+        }
+        Some(TransformSession { moving, stationary, bounds, matrix, drag: None, selection: None })
     }
 
     pub fn matrix(&self) -> Affine {
@@ -502,10 +520,11 @@ impl TransformSession {
     /// The layer as it looks with the transform applied.
     pub fn render(&self) -> Raster {
         let mut out = self.stationary.clone();
-        let moved = if self.matrix == Affine::IDENTITY {
+        let same_size = (self.moving.width(), self.moving.height()) == (out.width(), out.height());
+        let moved = if self.matrix == Affine::IDENTITY && same_size {
             self.moving.clone()
         } else {
-            self.moving.transformed(&self.matrix)
+            self.moving.transformed_into(&self.matrix, out.width(), out.height())
         };
         out.merge_over(&moved);
         out
@@ -722,6 +741,35 @@ mod tests {
         s.flip_horizontal();
         s.rotate(std::f64::consts::PI);
         assert!(close(s.handles()[0], Point::new(10.0, 8.0)));
+    }
+
+    #[test]
+    fn a_placed_session_starts_where_the_object_already_is() {
+        // A 2x2 red source placed at (4, 4) on a 10x10 document.
+        let source = Raster::filled(2, 2, RED);
+        let mut s = TransformSession::placed(source, Raster::new(10, 10), Affine::translation(4.0, 4.0)).unwrap();
+        assert!(close(s.handles()[0], Point::new(4.0, 4.0)));
+        assert!(close(s.handles()[4], Point::new(6.0, 6.0)));
+        let out = s.render();
+        assert_eq!((out.width(), out.height()), (10, 10), "rendered at the document's size, not the source's");
+        assert_eq!(out.get(5, 5), RED);
+        assert_eq!(out.get(0, 0), Rgba::TRANSPARENT);
+        s.translate(-4.0, -4.0);
+        let out = s.render();
+        assert_eq!(out.get(0, 0), RED);
+        assert_eq!(out.get(5, 5), Rgba::TRANSPARENT);
+        assert!(TransformSession::placed(Raster::new(0, 0), Raster::new(4, 4), Affine::IDENTITY).is_none());
+    }
+
+    #[test]
+    fn transformed_into_lands_on_a_canvas_of_another_size() {
+        let src = Raster::filled(2, 2, RED);
+        let out = src.transformed_into(&Affine::translation(1.0, 1.0), 4, 4);
+        assert_eq!((out.width(), out.height()), (4, 4));
+        assert_eq!(out.get(1, 1), RED);
+        assert_eq!(out.get(2, 2), RED);
+        assert_eq!(out.get(3, 3), Rgba::TRANSPARENT);
+        assert_eq!(out.get(0, 0), Rgba::TRANSPARENT);
     }
 
     #[test]

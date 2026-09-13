@@ -208,7 +208,7 @@ impl ToolContext<'_> {
         if self.settings.sample_all_layers {
             self.document.composite()
         } else {
-            self.document.active_layer().raster.clone()
+            self.document.active_surface().clone()
         }
     }
 

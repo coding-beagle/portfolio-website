@@ -45,7 +45,7 @@ impl ShapeTool {
         let clip = ctx.clip();
         let settings = ctx.settings;
         let size = settings.size.max(1);
-        let raster = &mut ctx.document.active_layer_mut().raster;
+        let raster = ctx.document.active_surface_mut();
         *raster = base.clone();
         match self.shape {
             Shape::Line => {
@@ -82,7 +82,7 @@ impl Tool for ShapeTool {
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
-        self.gesture = Some((ev.pos, ctx.document.active_layer().raster.clone()));
+        self.gesture = Some((ev.pos, ctx.document.active_surface().clone()));
         Gesture::EditsActiveLayer
     }
 
@@ -102,7 +102,7 @@ impl Tool for ShapeTool {
 
     fn cancel(&mut self, ctx: &mut ToolContext) {
         if let Some((_, base)) = self.gesture.take() {
-            ctx.document.active_layer_mut().raster = base;
+            *ctx.document.active_surface_mut() = base;
         }
     }
 }

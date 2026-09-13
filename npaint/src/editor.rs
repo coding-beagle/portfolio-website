@@ -12,21 +12,26 @@ use crate::color::Rgba;
 use crate::document::{Document, DocumentError};
 use crate::geometry::{Point, Rect};
 use crate::history::{History, Snapshot};
+use crate::layer::{EditRefusal, Layer, Target};
 use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::tools::{Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
-use crate::transform::{Hit, TransformInfo, TransformSession};
+use crate::transform::{Affine, Hit, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
 
 /// How close to a transform handle counts as grabbing it, in screen pixels.
 pub const HANDLE_GRAB_PX: f64 = 8.0;
 
 /// A live edit of the active layer that the page previews and then commits
-/// or cancels: an adjustment dialog or a free transform. Only one can be
-/// open, and it takes over the pointer while it is.
+/// or cancels: an adjustment dialog, an adjustment layer's dialog, or a free
+/// transform. Only one can be open, and it takes over the pointer while it
+/// is.
 enum Session {
+    /// An adjustment baked into the active surface — the pixels, or the mask.
     Adjust { base: Raster, clip: Rect },
+    /// The adjustment *of an adjustment layer* being changed in place.
+    AdjustmentLayer { before: Adjustment },
     Transform(TransformSession),
 }
 
@@ -39,15 +44,22 @@ pub enum SessionError {
     Empty,
     /// The active layer is hidden.
     Hidden,
+    /// The active surface cannot be edited: a smart object's pixels, or an
+    /// adjustment layer's.
+    Uneditable(EditRefusal),
+    /// Editing an adjustment layer's settings needs an adjustment layer.
+    NotAdjustmentLayer,
 }
 
 impl std::fmt::Display for SessionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SessionError::Busy => "finish the current adjustment or transform first",
-            SessionError::Empty => "there is nothing on this layer to transform",
-            SessionError::Hidden => "the active layer is hidden",
-        })
+        match self {
+            SessionError::Busy => f.write_str("finish the current adjustment or transform first"),
+            SessionError::Empty => f.write_str("there is nothing on this layer to transform"),
+            SessionError::Hidden => f.write_str("the active layer is hidden"),
+            SessionError::Uneditable(why) => why.fmt(f),
+            SessionError::NotAdjustmentLayer => f.write_str("this is not an adjustment layer"),
+        }
     }
 }
 
@@ -81,8 +93,9 @@ pub struct Editor {
     gesture: Option<Gesture>,
     session: Option<Session>,
     /// The active layer before a transform began, restored on cancel and
-    /// used as the undo snapshot on commit.
-    transform_base: Option<Raster>,
+    /// used as the undo snapshot on commit. The whole layer, because a
+    /// smart object's transform changes its placement as well as its pixels.
+    transform_base: Option<Layer>,
     /// The active layer as it was when the current gesture began, kept only
     /// when the selection is a mask: painting clips to a rectangle, so what
     /// holds a ragged selection is putting these pixels back afterwards.
@@ -205,9 +218,21 @@ impl Editor {
         PointerEvent { pos: self.viewport.screen_to_doc(screen), screen, shift, alt }
     }
 
+    /// Why the current tool cannot paint on the active layer, if it cannot:
+    /// a smart object's pixels or an adjustment layer's. The page shows this
+    /// when [`Editor::pointer_down`] declines.
+    pub fn edit_refusal(&self) -> Option<EditRefusal> {
+        if self.tool.kind().edits_pixels() {
+            self.document.active_layer().edit_refusal()
+        } else {
+            None
+        }
+    }
+
     /// The pointer went down at a screen position. Returns whether a gesture
     /// started; painting on a hidden layer is refused, since the result would
-    /// be invisible and baffling.
+    /// be invisible and baffling, and so is painting on pixels that are not
+    /// there to paint (see [`Editor::edit_refusal`]).
     pub fn pointer_down(&mut self, screen: Point, shift: bool, alt: bool) -> bool {
         if self.gesture.is_some() {
             self.abort_gesture();
@@ -218,15 +243,15 @@ impl Editor {
                 let tolerance = HANDLE_GRAB_PX / self.viewport.zoom();
                 return t.pointer_down(ev.pos, tolerance);
             }
-            Some(Session::Adjust { .. }) => return false,
+            Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. }) => return false,
             None => {}
         }
-        if self.tool.kind().edits_pixels() && !self.document.active_layer().visible {
+        if self.tool.kind().edits_pixels() && (!self.document.active_layer().visible || self.edit_refusal().is_some()) {
             return false;
         }
         let snapshot = Snapshot::of_active_layer(&self.document);
         self.gesture_base = (self.selection.needs_base() && self.tool.kind().confined_to_selection())
-            .then(|| self.document.active_layer().raster.clone());
+            .then(|| self.document.active_surface().clone());
         let mut ctx = ToolContext {
             document: &mut self.document,
             selection: &mut self.selection,
@@ -247,7 +272,7 @@ impl Editor {
         if let Some(Session::Transform(t)) = &mut self.session {
             let changed = t.pointer_move(ev.pos, shift, alt);
             if changed {
-                self.document.active_layer_mut().raster = t.render();
+                *self.document.active_surface_mut() = t.render();
                 self.dirty = true;
             }
             return changed;
@@ -298,7 +323,7 @@ impl Editor {
     /// nothing unless the selection is a mask and a base was kept.
     fn enforce_selection(&mut self) {
         if let Some(base) = self.gesture_base.as_ref() {
-            let raster = &mut self.document.active_layer_mut().raster;
+            let raster = self.document.active_surface_mut();
             self.selection.apply(raster, base);
         }
     }
@@ -387,9 +412,85 @@ impl Editor {
     }
 
     /// Changing the active layer is not an edit, so it is not in the history.
+    /// A session previewing on the old layer cannot follow, so it is cancelled.
     pub fn set_active_layer(&mut self, index: usize) -> Result<(), DocumentError> {
+        if index != self.document.active_index() {
+            self.cancel_session();
+        }
         self.abort_gesture();
         self.document.set_active(index)
+    }
+
+    /// Switches the tools between a layer's pixels and its mask. Not an
+    /// edit either.
+    pub fn set_layer_target(&mut self, index: usize, target: Target) -> Result<(), DocumentError> {
+        self.cancel_session();
+        self.abort_gesture();
+        self.document.set_target(index, target)
+    }
+
+    // ---- Layer kinds ------------------------------------------------------------
+
+    /// A new adjustment layer above the active one, masked to the selection
+    /// if there is one. `params` are the adjustment's, as its dialog gives
+    /// them; missing ones are neutral.
+    pub fn add_adjustment_layer(&mut self, name: &str, params: &[f32]) -> Result<usize, AdjustmentError> {
+        let adjustment = Adjustment::from_params(name, params)?;
+        let shape = (!self.selection.is_none()).then(|| self.selection.to_mask(self.document.bounds()));
+        Ok(self.structural(|d| Ok(d.add_adjustment_layer(adjustment, shape))).expect("adding a layer cannot fail"))
+    }
+
+    /// Places a picture as a smart object above the active layer.
+    pub fn place_smart_object(&mut self, name: &str, source: Raster) -> usize {
+        self.structural(|d| Ok(d.place_smart_object(name, source))).expect("placing cannot fail")
+    }
+
+    pub fn convert_to_smart_object(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural(|d| d.convert_to_smart_object(index))
+    }
+
+    pub fn rasterize_layer(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural(|d| d.rasterize_layer(index))
+    }
+
+    pub fn replace_smart_contents(&mut self, index: usize, source: Raster) -> Result<(), DocumentError> {
+        self.structural(|d| d.replace_smart_contents(index, source))
+    }
+
+    // ---- Layer masks -------------------------------------------------------------
+
+    /// Gives a layer a mask shaped like the selection (or revealing all of
+    /// it when nothing is selected); `hide` inverts that, so the selection
+    /// is what disappears.
+    pub fn add_layer_mask(&mut self, index: usize, hide: bool) -> Result<(), DocumentError> {
+        let shape = (!self.selection.is_none()).then(|| self.selection.to_mask(self.document.bounds()));
+        self.structural(|d| d.add_mask(index, shape, hide))
+    }
+
+    pub fn remove_layer_mask(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural(|d| d.remove_mask(index))
+    }
+
+    pub fn apply_layer_mask(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural(|d| d.apply_mask(index))
+    }
+
+    pub fn set_layer_mask_enabled(&mut self, index: usize, enabled: bool) -> Result<(), DocumentError> {
+        self.structural(|d| d.set_mask_enabled(index, enabled))
+    }
+
+    /// Loads a layer's mask as the selection, the way Ctrl-clicking its
+    /// mask thumbnail does.
+    pub fn select_layer_mask(&mut self, index: usize, mode: SelectMode) -> Result<bool, DocumentError> {
+        let layer = self.document.layer(index).ok_or(DocumentError::NoSuchLayer)?;
+        let mask = layer.mask_as_selection().ok_or(DocumentError::NoMask)?;
+        if mask.is_empty() {
+            return Ok(false);
+        }
+        let bounds = self.document.bounds();
+        self.selection.combine(&mask, mode, bounds);
+        self.dirty = true;
+        Ok(true)
     }
 
     pub fn set_layer_visible(&mut self, index: usize, visible: bool) -> Result<(), DocumentError> {
@@ -421,20 +522,23 @@ impl Editor {
         })
     }
 
-    /// An undoable edit of the active layer's pixels inside the selection.
-    /// Returns false when the clip is empty or the layer hidden.
+    /// An undoable edit of the active surface's pixels inside the selection.
+    /// Returns false when the clip is empty or the surface cannot be edited.
     fn pixel_edit(&mut self, op: impl FnOnce(&mut Raster, Rect)) -> bool {
         self.cancel_session();
         self.abort_gesture();
+        if self.document.active_layer().edit_refusal().is_some() {
+            return false;
+        }
         let clip = self.selection.clip(self.document.bounds());
         if clip.is_empty() {
             return false;
         }
         self.history.push(Snapshot::of_active_layer(&self.document));
-        let base = self.selection.needs_base().then(|| self.document.active_layer().raster.clone());
-        op(&mut self.document.active_layer_mut().raster, clip);
+        let base = self.selection.needs_base().then(|| self.document.active_surface().clone());
+        op(self.document.active_surface_mut(), clip);
         if let Some(base) = base {
-            let raster = &mut self.document.active_layer_mut().raster;
+            let raster = self.document.active_surface_mut();
             self.selection.apply(raster, &base);
         }
         self.dirty = true;
@@ -479,30 +583,42 @@ impl Editor {
     }
 
     // ---- Layer transforms (whole layer, undoable) ------------------------------
+    //
+    // These act on the whole layer — pixels and mask together, and a smart
+    // object's placement rather than its rendering — so one undo step holds
+    // the whole layer.
 
-    fn layer_pixels(&mut self, op: impl FnOnce(&Raster) -> Raster) -> bool {
+    fn layer_geometry(&mut self, pixels: impl Fn(&Raster) -> Raster, place: impl Fn(&Affine) -> Affine) -> bool {
         self.cancel_session();
         self.abort_gesture();
-        self.history.push(Snapshot::of_active_layer(&self.document));
-        let layer = &mut self.document.active_layer_mut().raster;
-        *layer = op(layer);
+        let index = self.document.active_index();
+        self.history.push(Snapshot::of_whole_layer(&self.document, index).expect("the active layer exists"));
+        let (w, h) = (self.document.width(), self.document.height());
+        self.document.active_layer_mut().map_rasters(pixels, place, w, h);
         self.dirty = true;
         true
     }
 
     pub fn flip_layer_horizontal(&mut self) -> bool {
-        self.layer_pixels(Raster::flipped_horizontal)
+        let w = f64::from(self.document.width());
+        let flip = Affine { a: -1.0, e: w, ..Affine::IDENTITY };
+        self.layer_geometry(Raster::flipped_horizontal, |m| flip.then(m))
     }
 
     pub fn flip_layer_vertical(&mut self) -> bool {
-        self.layer_pixels(Raster::flipped_vertical)
+        let h = f64::from(self.document.height());
+        let flip = Affine { d: -1.0, f: h, ..Affine::IDENTITY };
+        self.layer_geometry(Raster::flipped_vertical, |m| flip.then(m))
     }
 
-    /// Rotates the active layer's pixels by quarter turns about the canvas
-    /// centre, exactly; what leaves the canvas is lost.
+    /// Rotates the active layer by quarter turns about the canvas centre,
+    /// exactly; what leaves the canvas is lost.
     pub fn rotate_layer(&mut self, turns: i32) -> bool {
         let (w, h) = (self.document.width(), self.document.height());
-        self.layer_pixels(|r| r.rotated_quarter(turns).recentred(w, h))
+        let centre = Point::new(f64::from(w) / 2.0, f64::from(h) / 2.0);
+        let turn = Affine::rotation(f64::from(turns) * std::f64::consts::FRAC_PI_2);
+        let about = Affine::IDENTITY.pre_about(&turn, centre);
+        self.layer_geometry(|r| r.rotated_quarter(turns).recentred(w, h), |m| about.then(m))
     }
 
     // ---- Canvas (every layer, undoable) -----------------------------------------
@@ -583,7 +699,7 @@ impl Editor {
     }
 
     pub fn is_adjusting(&self) -> bool {
-        matches!(self.session, Some(Session::Adjust { .. }))
+        matches!(self.session, Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. }))
     }
 
     pub fn is_transforming(&self) -> bool {
@@ -601,25 +717,55 @@ impl Editor {
         Ok(())
     }
 
-    /// Starts previewing adjustments on the active layer's selected pixels.
+    /// Starts previewing adjustments on the active surface's selected pixels
+    /// — the layer's pixels, or its mask while that is the target.
     pub fn begin_adjustment(&mut self) -> Result<(), SessionError> {
         self.open_session()?;
+        if let Some(why) = self.document.active_layer().edit_refusal() {
+            return Err(SessionError::Uneditable(why));
+        }
         let clip = self.selection.clip(self.document.bounds());
-        self.session = Some(Session::Adjust { base: self.document.active_layer().raster.clone(), clip });
+        self.session = Some(Session::Adjust { base: self.document.active_surface().clone(), clip });
         Ok(())
     }
 
+    /// Starts changing an adjustment layer's settings, with the canvas
+    /// showing each change. The layer becomes active.
+    pub fn begin_adjustment_layer(&mut self, index: usize) -> Result<(), SessionError> {
+        let before = self
+            .document
+            .layer(index)
+            .and_then(Layer::adjustment)
+            .ok_or(SessionError::NotAdjustmentLayer)?;
+        self.set_active_layer(index).map_err(|_| SessionError::NotAdjustmentLayer)?;
+        self.open_session()?;
+        self.session = Some(Session::AdjustmentLayer { before });
+        Ok(())
+    }
+
+    /// The adjustment a layer applies, if it is an adjustment layer.
+    pub fn layer_adjustment(&self, index: usize) -> Option<Adjustment> {
+        self.document.layer(index)?.adjustment()
+    }
+
     /// Shows `adjustment` applied to the original pixels (previews do not
-    /// stack). The session must be open.
+    /// stack), or as the adjustment layer's new settings. The session must
+    /// be open.
     pub fn preview_adjustment(&mut self, name: &str, params: &[f32]) -> Result<(), AdjustmentError> {
         let adjustment = Adjustment::from_params(name, params)?;
-        let Some(Session::Adjust { base, clip }) = &self.session else {
-            return Err(AdjustmentError("no adjustment in progress".to_owned()));
-        };
-        let mut out = base.clone();
-        adjustment.apply(&mut out, clip);
-        self.selection.apply(&mut out, base);
-        self.document.active_layer_mut().raster = out;
+        match &self.session {
+            Some(Session::Adjust { base, clip }) => {
+                let mut out = base.clone();
+                adjustment.apply(&mut out, clip);
+                self.selection.apply(&mut out, base);
+                *self.document.active_surface_mut() = out;
+            }
+            Some(Session::AdjustmentLayer { .. }) => {
+                let index = self.document.active_index();
+                self.document.set_adjustment(index, adjustment).map_err(|e| AdjustmentError(e.to_string()))?;
+            }
+            _ => return Err(AdjustmentError("no adjustment in progress".to_owned())),
+        }
         self.dirty = true;
         Ok(())
     }
@@ -629,16 +775,31 @@ impl Editor {
         let Some(session) = self.session.take() else { return false };
         match session {
             Session::Adjust { base, .. } => {
-                let now = std::mem::replace(&mut self.document.active_layer_mut().raster, base);
+                let now = std::mem::replace(self.document.active_surface_mut(), base);
                 self.history.push(Snapshot::of_active_layer(&self.document));
-                self.document.active_layer_mut().raster = now;
+                *self.document.active_surface_mut() = now;
+            }
+            Session::AdjustmentLayer { before } => {
+                let index = self.document.active_index();
+                let now = self.document.active_layer().adjustment().unwrap_or(before);
+                self.document.set_adjustment(index, before).expect("still the adjustment layer");
+                self.history.push(Snapshot::of_structure(&self.document));
+                self.document.set_adjustment(index, now).expect("still the adjustment layer");
             }
             Session::Transform(t) => {
-                let rendered = t.render();
                 let before = self.transform_base.take().expect("a transform keeps its base");
-                self.document.active_layer_mut().raster = before;
-                self.history.push(Snapshot::of_active_layer(&self.document));
-                self.document.active_layer_mut().raster = rendered;
+                let index = self.document.active_index();
+                let (w, h) = (self.document.width(), self.document.height());
+                let smart = before.is_smart() && !before.editing_mask();
+                let rendered = t.render();
+                *self.document.active_layer_mut() = before.clone();
+                if smart {
+                    self.history.push(Snapshot::Layer(before));
+                    self.document.active_layer_mut().set_smart_transform(t.matrix(), w, h);
+                } else {
+                    self.history.push(Snapshot::of_layer(&self.document, index).expect("the active layer exists"));
+                    *self.document.active_surface_mut() = rendered;
+                }
                 if let Some(rect) = t.moved_selection() {
                     let bounds = self.document.bounds();
                     self.selection.set_rect(rect, bounds);
@@ -653,10 +814,14 @@ impl Editor {
     pub fn cancel_session(&mut self) -> bool {
         let Some(session) = self.session.take() else { return false };
         match session {
-            Session::Adjust { base, .. } => self.document.active_layer_mut().raster = base,
+            Session::Adjust { base, .. } => *self.document.active_surface_mut() = base,
+            Session::AdjustmentLayer { before } => {
+                let index = self.document.active_index();
+                let _ = self.document.set_adjustment(index, before);
+            }
             Session::Transform(_) => {
                 if let Some(base) = self.transform_base.take() {
-                    self.document.active_layer_mut().raster = base;
+                    *self.document.active_layer_mut() = base;
                 }
             }
         }
@@ -667,18 +832,33 @@ impl Editor {
     // ---- Transform session (Ctrl+T) ------------------------------------------------
 
     /// Starts a free transform of the selected pixels, or of the whole layer
-    /// when nothing is selected.
+    /// when nothing is selected. A smart object is transformed whole, from
+    /// its source, so nothing is lost however many times it is done; its
+    /// mask, while that is the target, transforms like any other pixels.
     pub fn begin_transform(&mut self) -> Result<(), SessionError> {
         self.open_session()?;
-        let layer = &self.document.active_layer().raster;
-        let session = match self.selection.rect() {
-            // A selection hands over its own pixels: only it knows which ones
-            // it holds, and a mask holds less than its bounding box.
-            Some(rect) => {
-                let (moving, stationary) = self.selection.split(layer);
-                TransformSession::from_parts(moving, stationary, rect.intersect(&layer.bounds()), Some(rect))
+        let layer = self.document.active_layer();
+        if let Some(why) = layer.edit_refusal() {
+            if why != EditRefusal::SmartObject {
+                return Err(SessionError::Uneditable(why));
             }
-            None => TransformSession::new(layer, None),
+        }
+        let (w, h) = (self.document.width(), self.document.height());
+        let session = match (layer.smart_object(), layer.editing_mask()) {
+            (Some(object), false) => TransformSession::placed(object.source.clone(), Raster::new(w, h), object.transform),
+            _ => {
+                let surface = layer.surface();
+                match self.selection.rect() {
+                    // A selection hands over its own pixels: only it knows
+                    // which ones it holds, and a mask holds less than its
+                    // bounding box.
+                    Some(rect) => {
+                        let (moving, stationary) = self.selection.split(surface);
+                        TransformSession::from_parts(moving, stationary, rect.intersect(&surface.bounds()), Some(rect))
+                    }
+                    None => TransformSession::new(surface, None),
+                }
+            }
         }
         .ok_or(SessionError::Empty)?;
         self.transform_base = Some(layer.clone());
@@ -696,7 +876,7 @@ impl Editor {
     fn with_transform(&mut self, op: impl FnOnce(&mut TransformSession)) -> bool {
         let Some(Session::Transform(t)) = &mut self.session else { return false };
         op(t);
-        self.document.active_layer_mut().raster = t.render();
+        *self.document.active_surface_mut() = t.render();
         self.dirty = true;
         true
     }
@@ -766,13 +946,13 @@ impl Editor {
         }
     }
 
-    /// The pixels the automatic selections read: the active layer, or the
+    /// The pixels the automatic selections read: the active surface, or the
     /// flattened image when the options bar asks for it.
     fn sample(&self) -> Raster {
         if self.settings.sample_all_layers {
             self.document.composite()
         } else {
-            self.document.active_layer().raster.clone()
+            self.document.active_surface().clone()
         }
     }
 
@@ -815,7 +995,7 @@ impl Editor {
     /// Selects everything a particular layer draws, whatever is active —
     /// what Ctrl-clicking its thumbnail asks for.
     pub fn select_layer_opaque(&mut self, index: usize, mode: SelectMode) -> Result<bool, DocumentError> {
-        let raster = self.document.layer(index).ok_or(DocumentError::NoSuchLayer)?.raster.clone();
+        let raster = self.document.layer(index).ok_or(DocumentError::NoSuchLayer)?.rendered().into_owned();
         Ok(self.select_opaque_of(&raster, mode))
     }
 
@@ -1564,6 +1744,278 @@ mod tests {
         e.pointer_down(Point::new(0.0, 0.0), false, false);
         e.pointer_up(Point::new(5.0, 7.0), false, false);
         assert_eq!(e.pan(), Point::new(5.0, 7.0));
+    }
+
+    // ---- Layer masks --------------------------------------------------------------
+
+    #[test]
+    fn painting_on_a_mask_hides_the_layer_and_undoes_as_the_mask() {
+        let mut e = Editor::new(4, 4, Rgba::WHITE);
+        e.add_layer();
+        paint(&mut e, |r| *r = Raster::filled(4, 4, RED));
+        assert!(e.add_layer_mask(1, false).is_ok());
+        assert!(e.document().active_layer().editing_mask(), "a new mask is what the tools edit");
+        assert_eq!(px(&e, 1, 1), RED, "reveal-all shows everything");
+
+        e.settings_mut().color = Rgba::BLACK;
+        e.settings_mut().size = 1;
+        e.set_tool(ToolKind::Pencil);
+        click(&mut e, 1.0, 1.0);
+        assert_eq!(px(&e, 1, 1), Rgba::WHITE, "black on the mask hides the red");
+        assert_eq!(e.document().active_layer().raster.get(1, 1), RED, "the pixels are untouched");
+
+        assert!(e.undo());
+        assert_eq!(px(&e, 1, 1), RED);
+        assert!(e.redo());
+        assert_eq!(px(&e, 1, 1), Rgba::WHITE);
+
+        // Grey is half; the eraser reveals.
+        e.settings_mut().color = Rgba::opaque(128, 128, 128);
+        click(&mut e, 2.0, 2.0);
+        let half = px(&e, 2, 2);
+        assert!(half != RED && half != Rgba::WHITE, "{half}");
+        e.set_tool(ToolKind::Eraser);
+        click(&mut e, 1.0, 1.0);
+        assert_eq!(px(&e, 1, 1), RED, "erased mask reveals");
+
+        e.set_layer_mask_enabled(1, false).unwrap();
+        assert_eq!(px(&e, 2, 2), RED, "a disabled mask does nothing");
+        assert!(e.undo());
+        assert_eq!(px(&e, 2, 2), half);
+
+        assert!(e.set_layer_target(1, Target::Pixels).is_ok());
+        e.set_tool(ToolKind::Pencil);
+        e.settings_mut().color = Rgba::BLACK;
+        click(&mut e, 3.0, 3.0);
+        assert_eq!(e.document().active_layer().raster.get(3, 3), Rgba::BLACK, "back on the pixels");
+
+        e.apply_layer_mask(1).unwrap();
+        assert!(e.document().active_layer().mask.is_none());
+        assert_ne!(px(&e, 2, 2), RED, "baked in");
+        assert!(e.undo());
+        assert!(e.document().active_layer().mask.is_some());
+        e.remove_layer_mask(1).unwrap();
+        assert_eq!(px(&e, 2, 2), RED);
+        assert_eq!(e.remove_layer_mask(1), Err(DocumentError::NoMask));
+        assert_eq!(e.set_layer_target(1, Target::Mask), Err(DocumentError::NoMask));
+    }
+
+    #[test]
+    fn a_mask_from_the_selection_and_back_again() {
+        let mut e = Editor::new(6, 6, Rgba::WHITE);
+        e.add_layer();
+        paint(&mut e, |r| *r = Raster::filled(6, 6, RED));
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(0.0, 0.0), false, false);
+        e.pointer_up(Point::new(3.0, 3.0), false, false);
+        e.add_layer_mask(1, false).unwrap();
+        assert_eq!(px(&e, 1, 1), RED, "inside the selection: shown");
+        assert_eq!(px(&e, 4, 4), Rgba::WHITE, "outside: hidden");
+        e.add_layer_mask(1, true).unwrap();
+        assert_eq!(px(&e, 1, 1), Rgba::WHITE, "hide selection is the inverse");
+        assert_eq!(px(&e, 4, 4), RED);
+
+        e.deselect();
+        assert!(e.select_layer_mask(1, SelectMode::Replace).unwrap());
+        assert!(e.selection().contains(4, 4));
+        assert!(!e.selection().contains(1, 1));
+        assert!(e.select_layer_mask(0, SelectMode::Replace).is_err(), "no mask there");
+
+        assert!(e.select_layer_opaque(1, SelectMode::Replace).unwrap());
+        assert!(!e.selection().contains(1, 1), "what the layer draws is what its mask lets through");
+    }
+
+    #[test]
+    fn a_mask_can_be_adjusted_transformed_and_filled() {
+        let mut e = Editor::new(4, 4, Rgba::WHITE);
+        e.add_layer();
+        paint(&mut e, |r| *r = Raster::filled(4, 4, RED));
+        e.add_layer_mask(1, false).unwrap();
+        e.begin_adjustment().unwrap();
+        e.preview_adjustment("invert", &[]).unwrap();
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE, "inverting the mask hides all");
+        e.commit_session();
+        assert!(e.undo());
+        assert_eq!(px(&e, 0, 0), RED);
+
+        e.settings_mut().color = Rgba::BLACK;
+        assert!(e.fill_selection(), "fill works on the mask too");
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE);
+        assert!(e.clear_selection(), "a cleared mask reveals");
+        assert_eq!(px(&e, 0, 0), RED);
+
+        e.flip_layer_horizontal();
+        assert!(e.undo());
+        assert_eq!(e.begin_transform(), Err(SessionError::Empty), "a cleared mask has nothing to move");
+        assert!(e.fill_selection());
+        e.begin_transform().unwrap();
+        assert!(e.transform_nudge(1.0, 0.0));
+        assert!(e.commit_session());
+        assert_eq!(px(&e, 0, 0), RED, "the black slid off this column, which now reveals");
+        assert_eq!(px(&e, 1, 0), Rgba::WHITE);
+        assert!(e.undo(), "the transform of the mask is one step");
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE);
+    }
+
+    // ---- Adjustment layers ------------------------------------------------------
+
+    #[test]
+    fn an_adjustment_layer_is_edited_through_a_session_and_undoes_in_one_step() {
+        let mut e = Editor::new(2, 2, Rgba::WHITE);
+        let i = e.add_adjustment_layer("brightness-contrast", &[]).unwrap();
+        assert_eq!(i, 1);
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE, "neutral to begin with");
+        assert!(e.layer_adjustment(1).is_some());
+        assert!(e.layer_adjustment(0).is_none());
+        assert!(e.add_adjustment_layer("sepia", &[]).is_err());
+
+        e.begin_adjustment_layer(1).unwrap();
+        assert!(e.is_adjusting());
+        e.preview_adjustment("brightness-contrast", &[-50.0, 0.0]).unwrap();
+        assert_eq!(px(&e, 0, 0).r, 128);
+        e.preview_adjustment("brightness-contrast", &[-100.0, 0.0]).unwrap();
+        assert_eq!(px(&e, 0, 0).r, 0, "previews replace");
+        assert!(e.commit_session());
+        assert_eq!(e.layer_adjustment(1).unwrap().params(), vec![-100.0, 0.0]);
+        assert!(e.undo());
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE, "the whole dialog is one step");
+        assert!(e.undo(), "then the layer itself");
+        assert_eq!(e.document().layers().len(), 1);
+
+        e.redo();
+        e.begin_adjustment_layer(1).unwrap();
+        e.preview_adjustment("brightness-contrast", &[-100.0, 0.0]).unwrap();
+        assert!(e.cancel_session());
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE, "cancelled: as it was");
+        assert_eq!(e.begin_adjustment_layer(0), Err(SessionError::NotAdjustmentLayer));
+    }
+
+    #[test]
+    fn an_adjustment_layer_can_only_be_painted_on_its_mask() {
+        let mut e = Editor::new(2, 2, Rgba::WHITE);
+        e.add_adjustment_layer("invert", &[]).unwrap();
+        assert_eq!(px(&e, 0, 0), Rgba::BLACK);
+        e.settings_mut().color = Rgba::BLACK;
+        e.settings_mut().size = 1;
+        e.set_tool(ToolKind::Pencil);
+        assert_eq!(e.edit_refusal(), None, "the mask is the target");
+        click(&mut e, 0.0, 0.0);
+        assert_eq!(px(&e, 0, 0), Rgba::WHITE, "black on the mask stops the inversion there");
+        assert_eq!(px(&e, 1, 1), Rgba::BLACK);
+
+        e.set_layer_target(1, Target::Pixels).unwrap();
+        assert_eq!(e.edit_refusal(), Some(EditRefusal::AdjustmentLayer));
+        assert!(!e.pointer_down(Point::new(1.0, 1.0), false, false));
+        assert!(!e.fill_selection());
+        assert_eq!(e.begin_adjustment(), Err(SessionError::Uneditable(EditRefusal::AdjustmentLayer)));
+        assert_eq!(e.begin_transform(), Err(SessionError::Uneditable(EditRefusal::AdjustmentLayer)));
+        e.set_tool(ToolKind::Zoom);
+        assert_eq!(e.edit_refusal(), None, "view tools are always fine");
+
+        // With a selection, the new layer's mask is the selection.
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(0.0, 0.0), false, false);
+        e.pointer_up(Point::new(1.0, 1.0), false, false);
+        e.set_active_layer(0).unwrap();
+        e.add_adjustment_layer("invert", &[]).unwrap();
+        e.set_layer_visible(2, false).unwrap();
+        assert_eq!(px(&e, 0, 0), Rgba::BLACK, "inverted inside the selection");
+        assert_eq!(px(&e, 1, 1), Rgba::WHITE, "not outside");
+    }
+
+    // ---- Smart objects ------------------------------------------------------------
+
+    #[test]
+    fn a_smart_object_transforms_from_its_source_without_loss() {
+        let mut e = Editor::new(8, 8, Rgba::TRANSPARENT);
+        let index = e.place_smart_object("photo", Raster::filled(4, 4, RED));
+        assert_eq!(index, 1);
+        assert!(e.document().active_layer().is_smart());
+        assert_eq!(px(&e, 2, 2), RED, "placed in the middle");
+        assert_eq!(px(&e, 0, 0).a, 0);
+
+        // Shrink it to a quarter, then move it away and back: still crisp.
+        e.begin_transform().unwrap();
+        assert!(e.is_transforming());
+        let h = e.transform_handles().unwrap();
+        assert_eq!(h[0], Point::new(2.0, 2.0), "the box is the object's own");
+        e.transform_nudge(-2.0, -2.0);
+        assert!(e.commit_session());
+        assert_eq!(px(&e, 0, 0), RED);
+        assert_eq!(px(&e, 4, 4).a, 0);
+        assert!(e.document().active_layer().is_smart(), "still a smart object");
+        assert!(e.undo());
+        assert_eq!(px(&e, 2, 2), RED, "one step, the placement");
+        assert!(e.document().active_layer().is_smart());
+
+        e.begin_transform().unwrap();
+        e.transform_nudge(1.0, 0.0);
+        assert!(e.cancel_session());
+        assert_eq!(px(&e, 2, 2), RED);
+        assert_eq!(px(&e, 6, 2).a, 0, "cancelled: back where it was");
+    }
+
+    #[test]
+    fn a_smart_object_refuses_the_brush_until_rasterized() {
+        let mut e = Editor::new(4, 4, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(1, 1, RED));
+        e.convert_to_smart_object(0).unwrap();
+        e.settings_mut().color = Rgba::BLACK;
+        e.settings_mut().size = 1;
+        e.set_tool(ToolKind::Pencil);
+        assert_eq!(e.edit_refusal(), Some(EditRefusal::SmartObject));
+        assert!(!e.pointer_down(Point::new(0.0, 0.0), false, false));
+        assert!(!e.clear_selection());
+        assert_eq!(e.begin_adjustment(), Err(SessionError::Uneditable(EditRefusal::SmartObject)));
+        assert!(e.begin_transform().is_ok(), "but it can be transformed");
+        e.cancel_session();
+
+        e.add_layer_mask(0, false).unwrap();
+        assert_eq!(e.edit_refusal(), None, "its mask can be painted");
+        click(&mut e, 1.0, 1.0);
+        assert_eq!(px(&e, 1, 1).a, 0, "and hides it");
+
+        e.rasterize_layer(0).unwrap();
+        e.set_layer_target(0, Target::Pixels).unwrap();
+        assert_eq!(e.edit_refusal(), None);
+        click(&mut e, 0.0, 0.0);
+        assert_eq!(px(&e, 0, 0), Rgba::BLACK);
+        assert!(e.undo());
+        assert!(e.undo(), "rasterizing is undoable");
+        assert!(e.document().active_layer().is_smart());
+    }
+
+    #[test]
+    fn layer_flips_and_turns_keep_a_smart_object_smart() {
+        let mut e = Editor::new(4, 2, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(0, 0, RED));
+        e.convert_to_smart_object(0).unwrap();
+        e.flip_layer_horizontal();
+        assert_eq!(px(&e, 3, 0), RED);
+        assert!(e.document().active_layer().is_smart());
+        e.rotate_layer(2);
+        assert_eq!(px(&e, 0, 1), RED);
+        e.replace_smart_contents(0, Raster::filled(2, 2, Rgba::BLACK)).unwrap();
+        assert_eq!(px(&e, 0, 1), Rgba::BLACK, "the new picture fills the old box");
+        for _ in 0..3 {
+            assert!(e.undo());
+        }
+        assert_eq!(px(&e, 0, 0), RED);
+        assert!(e.document().active_layer().is_smart());
+    }
+
+    #[test]
+    fn switching_layers_or_targets_cancels_a_session() {
+        let mut e = Editor::new(2, 2, Rgba::WHITE);
+        e.add_layer();
+        e.begin_adjustment().unwrap();
+        e.set_active_layer(0).unwrap();
+        assert!(!e.has_session());
+        e.add_layer_mask(0, false).unwrap();
+        e.begin_adjustment().unwrap();
+        e.set_layer_target(0, Target::Pixels).unwrap();
+        assert!(!e.has_session());
+        assert!(!e.can_undo() || e.undo(), "and left nothing odd behind");
     }
 
     #[test]
