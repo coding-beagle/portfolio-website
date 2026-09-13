@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NPaint</title>
+    <meta name="description" content="A layer-based image editor that runs entirely in your browser." />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app" class="app" hidden>
+      <header class="menubar">
+        <a class="brand" href="https://www.nteague.com/#/?scene=desktop" title="Back to the desktop">
+          <span class="brand-mark">N</span>Paint
+        </a>
+        <nav class="menus" id="menus" aria-label="Menu"></nav>
+        <div class="menu-group zoom-group">
+          <button id="btn-zoom-out" title="Zoom out (-)">&minus;</button>
+          <button id="btn-zoom-level" class="zoom-level" title="Zoom to 100% (Ctrl+1)">100%</button>
+          <button id="btn-zoom-in" title="Zoom in (+)">+</button>
+          <button id="btn-fit" title="Fit to window (Ctrl+0)">Fit</button>
+        </div>
+        <a class="home" href="https://www.nteague.com/#/?scene=desktop">&larr; desktop</a>
+      </header>
+
+      <div class="optionbar" id="optionbar">
+        <label class="opt" id="opt-size-wrap">
+          <span>Size</span>
+          <input id="opt-size" type="range" min="1" max="200" value="8" />
+          <input id="opt-size-num" type="number" min="1" max="500" value="8" />
+        </label>
+        <label class="opt" id="opt-opacity-wrap">
+          <span>Opacity</span>
+          <input id="opt-opacity" type="range" min="1" max="100" value="100" />
+          <output id="opt-opacity-out">100%</output>
+        </label>
+        <div class="opt seg" id="opt-fill-wrap" role="radiogroup" aria-label="Shape style">
+          <button id="opt-fill" class="seg-on" aria-pressed="true">Fill</button>
+          <button id="opt-stroke" aria-pressed="false">Outline</button>
+        </div>
+        <div class="opt seg" id="opt-zoom-wrap" role="radiogroup" aria-label="Zoom direction">
+          <button id="opt-zoom-in" class="seg-on" aria-pressed="true" title="Click zooms in (hold Alt to zoom out)">Zoom in</button>
+          <button id="opt-zoom-out" aria-pressed="false" title="Click zooms out">Zoom out</button>
+        </div>
+        <div class="opt transform-bar" id="transform-bar" hidden>
+          <span class="tb-label">Transform</span>
+          <span id="tb-info" class="tb-info"></span>
+          <button id="tb-rot-ccw" title="Rotate 90° anticlockwise">⟲ 90°</button>
+          <button id="tb-rot-cw" title="Rotate 90° clockwise">⟳ 90°</button>
+          <button id="tb-flip-h" title="Flip horizontal">⇔</button>
+          <button id="tb-flip-v" title="Flip vertical">⇕</button>
+          <button id="tb-cancel" title="Cancel (Esc)">Cancel</button>
+          <button id="tb-commit" class="primary" title="Apply (Enter)">Apply</button>
+        </div>
+        <span class="hint" id="opt-hint"></span>
+      </div>
+
+      <div class="workspace">
+        <nav class="toolbox" aria-label="Tools">
+          <div class="tools" id="tools"></div>
+          <div class="swatches" id="swatches" title="Foreground and background colours">
+            <button class="swatch swatch-bg" id="swatch-bg" aria-label="Background colour"></button>
+            <button class="swatch swatch-fg" id="swatch-fg" aria-label="Foreground colour"></button>
+            <button class="swatch-mini swatch-swap" id="swatch-swap" title="Swap colours (X)">⇄</button>
+            <button class="swatch-mini swatch-reset" id="swatch-reset" title="Default colours (D)">▪</button>
+          </div>
+        </nav>
+
+        <div class="viewport" id="viewport">
+          <canvas id="view"></canvas>
+        </div>
+
+        <aside class="panel layers-panel">
+          <div class="panel-title">Layers</div>
+          <div class="layer-opacity">
+            <span>Opacity</span>
+            <input id="layer-opacity" type="range" min="0" max="100" value="100" />
+            <output id="layer-opacity-out">100%</output>
+          </div>
+          <ul class="layer-list" id="layer-list"></ul>
+          <div class="layer-buttons">
+            <button id="layer-add" title="New layer (Ctrl+Shift+N)">+</button>
+            <button id="layer-dup" title="Duplicate layer (Ctrl+J)">⧉</button>
+            <button id="layer-up" title="Move layer up">▲</button>
+            <button id="layer-down" title="Move layer down">▼</button>
+            <button id="layer-merge" title="Merge down (Ctrl+E)">⤓</button>
+            <button id="layer-delete" title="Delete layer">🗑</button>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="statusbar">
+        <span id="status-cursor">—</span>
+        <span id="status-size"></span>
+        <span id="status-selection"></span>
+        <span id="status-message" class="status-message"></span>
+        <span class="status-spacer"></span>
+        <span class="status-keys">Space+drag or middle mouse to pan · Ctrl+wheel to zoom · Right-click for options</span>
+      </footer>
+    </div>
+
+    <div id="loading" class="loading">Loading NPaint…</div>
+    <div id="unsupported" class="loading" hidden>
+      NPaint needs WebAssembly, which this browser does not offer.
+    </div>
+
+    <dialog id="dlg-new">
+      <form method="dialog" class="dialog-form">
+        <h2>New document</h2>
+        <label>Width <input id="new-width" type="number" min="1" max="8192" value="1024" /> px</label>
+        <label>Height <input id="new-height" type="number" min="1" max="8192" value="768" /> px</label>
+        <label>Background
+          <select id="new-bg">
+            <option value="#ffffff">White</option>
+            <option value="">Transparent</option>
+            <option value="#000000">Black</option>
+          </select>
+        </label>
+        <div class="dialog-buttons">
+          <button value="cancel">Cancel</button>
+          <button value="ok" class="primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Non-modal so the canvas stays live while an adjustment previews. -->
+    <dialog id="dlg-adjust" class="adjust-dialog">
+      <div class="dialog-form">
+        <h2 id="adjust-title">Adjustment</h2>
+        <div id="adjust-params"></div>
+        <div class="dialog-buttons">
+          <button id="adjust-reset">Reset</button>
+          <button id="adjust-cancel">Cancel</button>
+          <button id="adjust-ok" class="primary">OK</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="color-popover" class="color-popover" hidden></div>
+    <div id="menu-layer" class="popup-menu" hidden></div>
+
+    <input id="file-input" type="file" accept="image/*" hidden />
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

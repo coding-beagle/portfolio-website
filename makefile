@@ -94,6 +94,29 @@ sync_integration_doc:
 	cp php/registry/INTEGRATION.md cli/nt/data/INTEGRATION.md
 	@echo "Synced cli/nt/data/INTEGRATION.md"
 
+# Needs the wasm32 target and wasm-pack:
+#   rustup target add wasm32-unknown-unknown && cargo install wasm-pack
+# The build folder is committed, like the others: it is what cPanel pulls.
+# build NPaint: compile the Rust to wasm and assemble the static page
+build_npaint:
+	cd ./npaint; \
+	wasm-pack build --release --target web --no-typescript --out-dir build/pkg; \
+	rm -f build/pkg/.gitignore build/pkg/package.json; \
+	cp -r www/. build/; \
+	cd -; \
+
+# run the NPaint engine's unit tests, natively (no browser, no wasm)
+test_npaint:
+	cd ./npaint; \
+	cargo test; \
+	cargo clippy --all-targets -- -D warnings; \
+	cd -; \
+
+# serve the built NPaint on :8790 (run build_npaint first)
+run_npaint:
+	@test -f npaint/build/pkg/npaint_bg.wasm || { echo "No build yet: run make build_npaint"; exit 1; }
+	python3 -m http.server 8790 -d npaint/build
+
 # install the nt CLI into the current environment, editable
 install_nt:
 	pip install -e ./cli
@@ -105,6 +128,7 @@ clean:
 	rm -rf app/build
 	rm -rf app/build-hextool
 	rm -rf app/build-uploadthat
+	rm -rf npaint/target
 
 # install deps from the lockfile
 install:
@@ -155,7 +179,7 @@ build_uploadthat:
 	cd -; \
 
 # build every deployable
-build_all: build build_hextool build_uploadthat
+build_all: build build_hextool build_uploadthat build_npaint
 
 # prod only, sends the built app to the folder where the site is hosted
 deploy_manual:
@@ -198,5 +222,13 @@ deploy_registry:
 	cp -r php/registry/api $(REGISTRY_DEPLOYPATH)/; \
 	echo "Deployed registry to $(REGISTRY_DEPLOYPATH)"; \
 
+# prod only, sends the built NPaint page to its subdomain's document root
+NPAINT_DEPLOYPATH ?= /home/nteagvxe/public_npaint_html
+deploy_npaint:
+	test -d $(NPAINT_DEPLOYPATH) || { echo "No such directory: $(NPAINT_DEPLOYPATH)"; exit 1; }; \
+	rm -rf $(NPAINT_DEPLOYPATH)/*; \
+	cp -r npaint/build/. $(NPAINT_DEPLOYPATH)/; \
+	echo "Deployed NPaint to $(NPAINT_DEPLOYPATH)"; \
+
 # prod only, deploys the main site and every subdomain
-deploy: deploy_manual deploy_hextool deploy_uploadthat deploy_registry
+deploy: deploy_manual deploy_hextool deploy_uploadthat deploy_registry deploy_npaint

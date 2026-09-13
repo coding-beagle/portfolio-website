@@ -1,4 +1,4 @@
-import { faHashtag, faRightLeft } from "@fortawesome/free-solid-svg-icons";
+import { faHashtag, faPaintBrush, faRightLeft } from "@fortawesome/free-solid-svg-icons";
 
 /**
  * The utilities that live on their own subdomains.
@@ -25,6 +25,16 @@ export const SUBDOMAIN_APPS = [
     url: "https://uploadthat.nteague.com",
     // No local stand-in: it needs the PHP API, which the portfolio build does
     // not serve. Run it with `make run_uploadthat` instead.
+    localPath: null,
+  },
+  {
+    key: "npaint",
+    name: "NPaint",
+    icon: faPaintBrush,
+    description: "Layer-based image editor, in Rust and WebAssembly",
+    url: "https://npaint.nteague.com",
+    // A separate static build (npaint/build), not part of the portfolio
+    // bundle. Run it with `make build_npaint && make run_npaint`.
     localPath: null,
   },
 ];

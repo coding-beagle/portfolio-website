@@ -49,6 +49,15 @@ describe("hex tool", () => {
     expect(bit(4)).toHaveTextContent("0");
   });
 
+  it("shows a shifted word, bit columns and all", () => {
+    render(<HexApp />);
+    retype("0b1001 << 5");
+    // Nine bits wide: the four it started with, plus the five it moved by.
+    expect(screen.getAllByTitle(/^bit \d+$/)).toHaveLength(9);
+    expect(panel("whole word")).toHaveTextContent("0x120");
+    expect(readAs("whole word", "bin")).toContain("1_0010_0000");
+  });
+
   it("opens showing the opposite of what was pasted", () => {
     render(<HexApp />);
     retype("0xDEADBEEF");

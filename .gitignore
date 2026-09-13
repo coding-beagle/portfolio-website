@@ -21,3 +21,7 @@ cli/*.egg-info/
 cli/build/
 __pycache__/
 *.pyc
+
+# NPaint: cargo's build directory. npaint/build (the deployable page) IS
+# committed, like the other build folders — it is what cPanel pulls.
+npaint/target/

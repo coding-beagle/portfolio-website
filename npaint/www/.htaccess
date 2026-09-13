@@ -1,0 +1,14 @@
+# Deployed to the subdomain document root (npaint.nteague.com).
+Options -Indexes
+
+# `WebAssembly.instantiateStreaming` refuses a module served as anything but
+# application/wasm. wasm-bindgen falls back to a slower path when that
+# happens, so this is a speed-up rather than a requirement.
+AddType application/wasm .wasm
+AddType image/svg+xml .svg
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(wasm|js|css)$">
+    Header set Cache-Control "public, max-age=3600"
+  </FilesMatch>
+</IfModule>

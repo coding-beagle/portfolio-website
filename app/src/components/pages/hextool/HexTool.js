@@ -251,7 +251,7 @@ function OutputPanel({ title, value, width, autoFormat }) {
 
 /**
  * The hex tool: paste a hex or binary word and read it back in the other base,
- * column by column, with Verilog bit selects resolved against it.
+ * column by column, with Verilog bit selects and shifts resolved against it.
  */
 export default function HexTool() {
   const { theme } = useTheme();
@@ -354,7 +354,7 @@ export default function HexTool() {
         </h1>
         <p style={{ margin: "0.4em 0 0", opacity: 0.6, fontSize: "0.9rem" }}>
           Paste a hex or binary word to read it back the other way round, with
-          Verilog bit selects.
+          Verilog bit selects and shifts.
         </p>
       </header>
 
@@ -366,7 +366,7 @@ export default function HexTool() {
         autoCapitalize="off"
         autoCorrect="off"
         aria-label="Value to decode"
-        placeholder="word input"
+        placeholder="word input, e.g. 0b1001 << 5"
         style={{
           width: "100%",
           boxSizing: "border-box",
@@ -462,7 +462,8 @@ export default function HexTool() {
             }}
           >
             Click a bit to select it, shift-click another to take the range
-            between them.
+            between them. Shift a word with <code>&lt;&lt;</code> or{" "}
+            <code>&gt;&gt;</code>.
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "1em" }}>

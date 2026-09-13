@@ -257,6 +257,44 @@ run starts empty. Set `REGISTRY_DEV_DATA=~/somewhere` to keep them instead, or
 `make run_registry` is the bare server against your own config, for when you
 want to point it at real data.
 
+## NPaint
+
+`npaint.nteague.com` is a layer-based image editor in the manner of Photoshop
+and Photopea: a layer stack, marquee and move tools, brush, pencil and eraser,
+line, rectangle and ellipse, a Photoshop-style zoom tool, free transform
+(move, scale, rotate with handles), image adjustments with live preview,
+canvas and layer flips and rotations, a menu bar with right-click context
+menus, a colour wheel, undo and redo, and PNG export. It is a static page —
+the engine is Rust compiled to WebAssembly, and nothing the user draws or
+opens leaves the browser.
+
+Everything that decides what the document looks like is in `npaint/src`, plain
+Rust with no browser types, and is unit-tested natively. `npaint/www` is the
+page: one HTML file, one stylesheet and one ES module that turns browser events
+into calls on the wasm module and draws what it reports. There is no bundler.
+[`npaint/AGENTS.md`](npaint/AGENTS.md) is the guide to the layout and to adding
+a tool, a primitive, a selection shape or a blend mode.
+
+### Building it
+
+The wasm target and wasm-pack are needed once:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+```
+
+Then `make build_npaint` compiles the engine and assembles `npaint/build`,
+which is what the subdomain's document root gets. Like the other build folders
+it is committed, since cPanel deploys by copying it. `make run_npaint` serves
+it on :8790.
+
+### Checking it works
+
+`make test_npaint` runs the engine's tests and clippy — no browser, no wasm.
+The tests in `editor.rs` drive whole gestures (pointer down, move, up) through
+the same facade the page uses, so a tool is tested the way it is used.
+
 ## Make Commands:
 
 `make install` -> Install JS deps
@@ -280,3 +318,9 @@ want to point it at real data.
 `make test_registry_all` -> Every registry test: the API, then HTTP, then the CLI
 
 `make install_nt` -> Install the `nt` client into the current environment
+
+`make build_npaint` -> Build NPaint (Rust → wasm) into `npaint/build`
+
+`make test_npaint` -> Run NPaint's engine tests and clippy
+
+`make run_npaint` -> Serve the built NPaint on :8790

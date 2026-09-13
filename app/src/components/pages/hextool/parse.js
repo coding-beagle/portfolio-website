@@ -2,8 +2,9 @@
  * Parsing and formatting for the hex tool.
  *
  * Kept free of React so the awkward parts — width inference, Verilog part
- * selects, two's complement — can be unit tested directly. Everything numeric
- * runs through BigInt, so a 512-bit register is no different from a nibble.
+ * selects, shifts, two's complement — can be unit tested directly. Everything
+ * numeric runs through BigInt, so a 512-bit register is no different from a
+ * nibble.
  */
 
 const BASES = {
@@ -81,6 +82,27 @@ function parseLiteral(literal, baseHint) {
   if (!BASES[base].digits.test(cleaned))
     return { error: `"${cleaned}" is not a valid ${base} literal` };
   return { base, digits: cleaned, declaredWidth: null, signed: false };
+}
+
+/** How far a single shift may move, to keep a typo from asking for a megabit. */
+const MAX_SHIFT = 4096;
+
+/**
+ * Splits `0b1001 << 5` into the literal and the shifts applied to it. Shifts
+ * read left to right, so `0xFF << 8 >> 4` is the two steps in that order.
+ */
+function splitShifts(literal) {
+  const parts = literal.split(/(<<|>>)/);
+  const shifts = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    const amount = parts[i + 1].replace(/[_\s]/g, "");
+    if (!/^\d+$/.test(amount))
+      return { error: `"${amount.trim() || parts[i]}" is not a shift amount` };
+    if (Number(amount) > MAX_SHIFT)
+      return { error: `shift amount must be at most ${MAX_SHIFT}` };
+    shifts.push({ op: parts[i], amount: Number(amount) });
+  }
+  return { literal: parts[0].trim(), shifts };
 }
 
 /**
@@ -163,13 +185,21 @@ export function bitsOf(value, width) {
  * `widthOverride` is the width picked in the UI (null for "auto"); it wins over
  * both the digit count and a Verilog size, and truncates the value when it is
  * narrower, the way an assignment to a too-small reg would.
+ *
+ * A left shift widens the word by what it shifts by, so `0b1001 << 5` keeps all
+ * nine bits rather than dropping four off the top — picking a width is how you
+ * ask for the truncating, fixed-width reading instead.
  */
 export function parseInput(input, { baseHint = "auto", widthOverride = null } = {}) {
   const raw = (input ?? "").trim();
   if (!raw) return { ok: false, empty: true, warnings: [] };
 
-  const { literal, selector } = splitSelector(raw);
-  const parsed = parseLiteral(literal, baseHint);
+  const { literal: expression, selector } = splitSelector(raw);
+  const split = splitShifts(expression);
+  if (split.error) return { ok: false, empty: false, error: split.error, warnings: [] };
+  if (split.shifts.length && !split.literal)
+    return { ok: false, empty: false, error: "nothing to shift", warnings: [] };
+  const parsed = parseLiteral(split.literal, baseHint);
   if (parsed.error)
     return {
       ok: false,
@@ -180,14 +210,33 @@ export function parseInput(input, { baseHint = "auto", widthOverride = null } = 
 
   const warnings = [];
   const natural = widthOfDigits(parsed.base, parsed.digits);
-  const width = widthOverride ?? parsed.declaredWidth ?? natural;
+  let value = valueOfDigits(parsed.base, parsed.digits);
+  let shifted = parsed.declaredWidth ?? natural;
+
+  // A shifted literal is cut to its own declared size first: `8'hDEAD << 4` is
+  // 0xAD moved up, not 0xDEAD.
+  if (split.shifts.length && value > maskOf(shifted)) {
+    value &= maskOf(shifted);
+    warnings.push(`Literal needs ${natural} bits and was truncated to ${shifted}.`);
+  }
+  for (const { op, amount } of split.shifts) {
+    if (op === "<<") {
+      value <<= BigInt(amount);
+      shifted += amount;
+    } else {
+      value >>= BigInt(amount);
+    }
+  }
+
+  const width = widthOverride ?? shifted;
   if (width < 1) return { ok: false, error: "width must be at least 1", warnings };
 
-  let value = valueOfDigits(parsed.base, parsed.digits);
   if (value > maskOf(width)) {
     value &= maskOf(width);
     warnings.push(
-      `Literal needs ${natural} bits and was truncated to ${width}.`
+      split.shifts.length
+        ? `Result needs ${shifted} bits and was truncated to ${width}.`
+        : `Literal needs ${natural} bits and was truncated to ${width}.`
     );
   }
 
@@ -211,6 +260,7 @@ export function parseInput(input, { baseHint = "auto", widthOverride = null } = 
     width,
     base: parsed.base,
     signed: parsed.signed,
+    shifts: split.shifts,
     selection,
     warnings,
   };

@@ -91,6 +91,54 @@ describe("width", () => {
   });
 });
 
+describe("shifts", () => {
+  it("shifts left, widening so nothing falls off the top", () => {
+    const result = parseInput("0b1001 << 5");
+    expect(result.value).toBe(0b100100000n);
+    expect(result.width).toBe(9);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("shifts right, keeping the width it started with", () => {
+    const result = parseInput("0xFF >> 4");
+    expect(result.value).toBe(0xfn);
+    expect(result.width).toBe(8);
+  });
+
+  it("applies shifts left to right", () => {
+    expect(parseInput("0xFF << 8 >> 4").value).toBe(0xff0n);
+    expect(parseInput("0xFF << 8 >> 4").width).toBe(16);
+  });
+
+  it("cuts a sized literal down before shifting it", () => {
+    const result = parseInput("8'hDEAD << 4");
+    expect(result.value).toBe(0xad0n);
+    expect(result.width).toBe(12);
+    expect(result.warnings[0]).toMatch(/truncated to 8/);
+  });
+
+  it("truncates the result to a chosen width", () => {
+    const result = parseInput("0b1001 << 5", { widthOverride: 8 });
+    expect(result.value).toBe(0b00100000n);
+    expect(result.width).toBe(8);
+    expect(result.warnings[0]).toMatch(/Result needs 9 bits/);
+  });
+
+  it("takes a bit select of the shifted word", () => {
+    expect(parseInput("0xFF << 4 [11:8]").slice).toMatchObject({
+      width: 4,
+      value: 0xfn,
+    });
+  });
+
+  it("rejects a shift with nothing to shift, or nothing to shift by", () => {
+    expect(parseInput("<< 4").error).toMatch(/nothing to shift/);
+    expect(parseInput("0xFF <<").error).toMatch(/not a shift amount/);
+    expect(parseInput("0xFF << 0x4").error).toMatch(/not a shift amount/);
+    expect(parseInput("0xFF << 99999").error).toMatch(/at most/);
+  });
+});
+
 describe("bit selects", () => {
   it("picks out a single bit", () => {
     const result = parseInput("0xDEADBEEF[13]");

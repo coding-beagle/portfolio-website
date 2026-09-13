@@ -11,3 +11,6 @@ deployment:
     - export REGISTRYPATH=/home/nteagvxe/public_api_html
     - echo "Deploying registry to $REGISTRYPATH"
     - cd $REPOPATH && make deploy_registry
+    - export NPAINTPATH=/home/nteagvxe/public_npaint_html
+    - echo "Deploying NPaint to $NPAINTPATH"
+    - cd $REPOPATH && make deploy_npaint
