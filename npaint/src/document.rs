@@ -539,7 +539,13 @@ impl Document {
     /// [`Document::composite`] into an existing buffer, to avoid allocating a
     /// frame every redraw.
     pub fn composite_into(&self, out: &mut Raster) {
-        *out = Raster::new(self.width, self.height);
+        // Reusing the buffer matters: at 6000x4500 a fresh one is 108 MB,
+        // and this runs for every stroke update.
+        if out.width() == self.width && out.height() == self.height {
+            out.clear();
+        } else {
+            *out = Raster::new(self.width, self.height);
+        }
         for layer in self.layers.iter().filter(|l| l.visible) {
             Self::blend_layer(out, layer);
         }

@@ -23,6 +23,7 @@ const ICON = {
   wand: '<path d="M4 20l9-9M6.5 4.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L3 8l2.5-1zM17 3l.8 2.2L20 6l-2.2.8L17 9l-.8-2.2L14 6l2.2-.8zM19 14l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/><path d="M12.5 11.5l2 2"/>',
   quickselect: '<path d="M3 12a9 9 0 0113.5-7.8" stroke-dasharray="3 2"/><path d="M21 12a9 9 0 01-9 9" stroke-dasharray="3 2"/><path d="M8 17c1.5-.3 2.2-1.3 2.6-2.6L17 8l2 2-6.4 6.4C11.3 16.8 10 17.5 8 17.5z"/>',
   refine: '<path d="M4 20c2-.5 3-2 3.5-4l8.5-8.5 2.5 2.5L10 18.5c-2 .5-3.5 1.5-6 1.5z"/><circle cx="17" cy="6" r="3.2" stroke-dasharray="2.5 2"/>',
+  subject: '<rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="3 2"/><circle cx="12" cy="10" r="3"/><path d="M6.5 19c.8-3.2 2.8-4.5 5.5-4.5s4.7 1.3 5.5 4.5"/>',
   move: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
   brush: '<path d="M4 20c2-.5 3-2 3.5-4l8.5-8.5 2.5 2.5L10 18.5c-2 .5-3.5 1.5-6 1.5z"/><path d="M15 6l3-3 3 3-3 3"/>',
   pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
@@ -64,6 +65,12 @@ const TOOLS = [
     label: "Quick select",
     key: "Q",
     hint: "Brush over what you want and it grows out to the edges. Shift adds, Alt takes away.",
+  },
+  {
+    name: "subject",
+    label: "Select subject",
+    key: "W",
+    hint: "Drag a box around the subject and the model finds it in there. Shift adds, Alt takes away.",
   },
   {
     name: "refine",
@@ -115,6 +122,15 @@ const vctx = view.getContext("2d");
 const viewport = $("viewport");
 const offscreen = document.createElement("canvas");
 const octx = offscreen.getContext("2d");
+/**
+ * Half-size copies of the offscreen frame, built when the view is zoomed
+ * out and the frame has changed. Drawing a 6000-pixel-wide canvas at 15%
+ * samples every source pixel each frame; drawing the level nearest the
+ * zoom samples a fraction of them, and box-filters on the way down, so it
+ * is both quicker and less shimmery than bilinear straight from full size.
+ */
+const mips = [];
+let mipsDirty = true;
 const checker = makeChecker();
 
 let tool = "brush";
@@ -127,6 +143,15 @@ let layersDirty = true;
 // The marching-ants outline, and whether it needs tracing again.
 let ants = [];
 let antsDirty = true;
+/** The history panel alone needs redrawing: a selection gesture made a step
+ * but no layer changed, and the thumbnails are a pass over every layer. */
+let historyDirty = false;
+/** The status-bar line for the selection, recomputed with the ants: counting
+ * a mask's pixels is a pass over the document, not something for every frame. */
+let selectionStatus = "";
+/** The ants' path, rebuilt only when the view or the selection moves. */
+let antsPath = null;
+let antsPathKey = "";
 // Where the pointer is over the canvas, in CSS pixels, for the brush ring.
 let cursor = null;
 // Set once the render loop has reported a failure, so it says so once.
@@ -208,6 +233,7 @@ function touch() {
   needsDraw = true;
   layersDirty = true;
   antsDirty = true;
+  pullGuides();
 }
 
 let messageTimer = null;
@@ -246,6 +272,7 @@ function step(now) {
     }
     const bytes = new Uint8ClampedArray(memory.buffer, np.frame_ptr(), np.frame_len());
     octx.putImageData(new ImageData(bytes, w, h), 0, 0);
+    mipsDirty = true;
     needsDraw = true;
     layersDirty = true;
     antsDirty = true;
@@ -256,6 +283,11 @@ function step(now) {
   // ants themselves crawl by moving the dash along a path that stays put.
   if (antsDirty) {
     ants = np.selection_contours();
+    antsPath = null;
+    const rect = np.selection_rect();
+    selectionStatus = rect.length
+      ? `Selection ${np.selection_area()} px in ${rect[2]} × ${rect[3]} at ${rect[0]}, ${rect[1]}`
+      : "";
     antsDirty = false;
   }
   const transforming = np.is_transforming();
@@ -277,6 +309,11 @@ function step(now) {
     syncCropBar();
     syncSwatches();
     layersDirty = false;
+    historyDirty = false;
+  } else if (historyDirty && !np.is_gesturing()) {
+    renderHistory();
+    syncCropBar();
+    historyDirty = false;
   }
 }
 
@@ -301,9 +338,9 @@ function draw(now, ants, transforming) {
   vctx.restore();
 
   // Nearest-neighbour when zoomed in so pixels are pixels; smoothed when
-  // zoomed out so the downsample is not a moiré.
+  // zoomed out so the downsample is not a moiré, from a level near the zoom.
   vctx.imageSmoothingEnabled = zoom < 1;
-  vctx.drawImage(offscreen, px, py, w, h);
+  vctx.drawImage(sourceFor(zoom), px, py, w, h);
 
   vctx.strokeStyle = "rgba(0,0,0,0.6)";
   vctx.lineWidth = 1;
@@ -312,6 +349,7 @@ function draw(now, ants, transforming) {
   if (showGrid) drawGrid(px, py, zoom, w, h);
   if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
   if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
+  if (tool === "subject") drawSubjectBox(px, py, zoom);
   if (ants.length) drawAnts(now, ants, px, py, zoom);
   drawGuides(px, py, zoom);
 
@@ -326,10 +364,35 @@ function draw(now, ants, transforming) {
   $("btn-zoom-level").textContent = `${Math.round(zoom * 100)}%`;
   $("status-size").textContent = `${np.width()} × ${np.height()} px`;
   $("status-brush").textContent = showsBrushRing() ? `Brush ${np.size()} px` : "";
-  const rect = transforming ? [] : np.selection_rect();
-  $("status-selection").textContent = rect.length
-    ? `Selection ${np.selection_area()} px in ${rect[2]} × ${rect[3]} at ${rect[0]}, ${rect[1]}`
-    : "";
+  $("status-selection").textContent = transforming ? "" : selectionStatus;
+}
+
+/**
+ * The canvas to draw the document from at `zoom`: the offscreen frame
+ * itself, or the half-size level that is still at least as large as what is
+ * on screen. Levels are rebuilt from the frame only when it has changed, and
+ * only as far down as the zoom needs.
+ */
+function sourceFor(zoom) {
+  let level = 0;
+  while (level < 4 && zoom <= 0.5 / 2 ** level) level++;
+  if (level === 0) return offscreen;
+  if (mipsDirty) {
+    mips.length = 0;
+    mipsDirty = false;
+  }
+  for (let i = mips.length; i < level; i++) {
+    const src = i === 0 ? offscreen : mips[i - 1];
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.floor(src.width / 2));
+    c.height = Math.max(1, Math.floor(src.height / 2));
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    mips.push(c);
+  }
+  return mips[level - 1];
 }
 
 /**
@@ -341,17 +404,22 @@ function draw(now, ants, transforming) {
  * crawl that reads against any picture.
  */
 function drawAnts(now, ants, px, py, zoom) {
-  const path = new Path2D();
-  for (let i = 0; i < ants.length; ) {
-    const count = ants[i++];
-    for (let n = 0; n < count; n++) {
-      const x = Math.round(px + ants[i++] * zoom) + 0.5;
-      const y = Math.round(py + ants[i++] * zoom) + 0.5;
-      if (n === 0) path.moveTo(x, y);
-      else path.lineTo(x, y);
+  const key = `${px},${py},${zoom}`;
+  if (!antsPath || antsPathKey !== key) {
+    antsPath = new Path2D();
+    for (let i = 0; i < ants.length; ) {
+      const count = ants[i++];
+      for (let n = 0; n < count; n++) {
+        const x = Math.round(px + ants[i++] * zoom) + 0.5;
+        const y = Math.round(py + ants[i++] * zoom) + 0.5;
+        if (n === 0) antsPath.moveTo(x, y);
+        else antsPath.lineTo(x, y);
+      }
+      antsPath.closePath();
     }
-    path.closePath();
+    antsPathKey = key;
   }
+  const path = antsPath;
   const crawl = (now / 60) % 9;
   vctx.save();
   vctx.lineWidth = 1;
@@ -419,6 +487,13 @@ function drawPixelGrid(px, py, zoom, w, h) {
   vctx.strokeStyle = "rgba(128,128,128,0.35)";
   vctx.stroke();
   vctx.restore();
+}
+
+/** The subject tool's box, while it is drawn out and while the model runs. */
+function drawSubjectBox(px, py, zoom) {
+  const r = np.subject_box();
+  if (!r.length) return;
+  drawZoomMarquee([px + r[0] * zoom, py + r[1] * zoom, r[2] * zoom, r[3] * zoom]);
 }
 
 /** With the crop tool, everything outside the box is dimmed. */
@@ -792,9 +867,16 @@ function startThrobbing() {
 
 // ---- Toolbox and options ------------------------------------------------------
 
+/**
+ * The tools whose gestures change the selection. The engine does not
+ * recomposite for them (nothing in the picture changed), so the page has
+ * to know to retrace the ants itself.
+ */
+const SELECTION_TOOLS = new Set(["select", "ellipse-select", "crop", "wand", "quickselect", "refine"]);
+
 /** Which block of the toolbox each tool belongs in, in order. */
 const TOOL_GROUPS = [
-  ["select", "ellipse-select", "crop", "wand", "quickselect", "refine"],
+  ["select", "ellipse-select", "crop", "wand", "quickselect", "subject", "refine"],
   ["move"],
   ["brush", "pencil", "eraser", "bucket", "eyedropper"],
   ["line", "rectangle", "ellipse"],
@@ -850,9 +932,11 @@ function syncOptions() {
   const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket";
   const hasHardness = tool === "brush" || tool === "eraser";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
+  const subject = tool === "subject";
   const marquee = tool === "select" || tool === "ellipse-select" || tool === "crop";
   const viewTool =
     marquee ||
+    subject ||
     tool === "hand" ||
     tool === "zoom" ||
     tool === "move" ||
@@ -871,8 +955,8 @@ function syncOptions() {
   $("opt-sample-wrap").hidden = !(tool === "wand" || tool === "bucket");
   $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket");
   $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select");
-  $("opt-subject").hidden = !auto;
-  $("opt-quality-wrap").hidden = !auto;
+  $("opt-subject").hidden = !(auto || subject);
+  $("opt-quality-wrap").hidden = !(auto || subject);
   $("opt-tolerance").value = np.tolerance();
   $("opt-tolerance-out").value = np.tolerance();
   $("opt-all-layers").checked = np.sample_all_layers();
@@ -1367,15 +1451,51 @@ function toggleGrid() {
   needsDraw = true;
 }
 
+/**
+ * A "fake PNG" — a picture with the transparency checkerboard painted into
+ * it — becomes a real one. The engine finds the board along the edges.
+ */
+function removeCheckerboard() {
+  act(() => {
+    if (np.remove_checkerboard()) {
+      message("Checkerboard background made transparent. Any left inside enclosed areas can be taken out with the magic wand.");
+    } else {
+      message(np.edit_refusal() ? "This layer's pixels cannot be edited." : "No checkerboard found along the edges of this layer.");
+    }
+  });
+}
+
 function clearGuides() {
   guides = { h: [], v: [] };
-  syncGuides();
+  commitGuides("Clear Guides");
 }
 
 /** The engine keeps a copy of the guides to snap to. */
 function syncGuides() {
   np.set_guides(Float64Array.from(guides.h), Float64Array.from(guides.v));
   needsDraw = true;
+}
+
+/** Hands the guides to the engine as an undo step under `label`. */
+function commitGuides(label) {
+  np.edit_guides(Float64Array.from(guides.h), Float64Array.from(guides.v), label);
+  touch();
+}
+
+/**
+ * Takes the guides back from the engine: undo and redo move them there. Not
+ * while one is being dragged, when the page's copy is deliberately short
+ * of it.
+ */
+function pullGuides() {
+  if (guideDrag) return;
+  const h = Array.from(np.guides_h());
+  const v = Array.from(np.guides_v());
+  const same = (a, b) => a.length === b.length && a.every((g, i) => g === b[i]);
+  if (!same(h, guides.h) || !same(v, guides.v)) {
+    guides = { h, v };
+    needsDraw = true;
+  }
 }
 
 /** The view furniture is remembered between visits. */
@@ -1495,14 +1615,17 @@ function doneWorking() {
 /** Lets the panel paint before something slow takes the thread. */
 const painted = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-/** The engine's own subject finder: no download, and never fails to answer. */
-async function selectSubjectBuiltIn(why) {
+/**
+ * The engine's own subject finder: no download, and never fails to answer.
+ * With a `box`, only that part of the picture is searched.
+ */
+async function selectSubjectBuiltIn(why, box, mods) {
   working(why ?? "Looking for the subject…", null);
   await painted();
-  const found = np.select_subject();
+  const found = box ? np.select_subject_builtin_in_box(...box, mods.shift, mods.alt) : np.select_subject();
   touch();
   doneWorking();
-  message(found ? "Selected the subject." : "Could not find a subject in this image.");
+  message(found ? "Selected the subject." : box ? "Could not find a subject in the box." : "Could not find a subject in this image.");
 }
 
 /**
@@ -1513,8 +1636,8 @@ async function selectSubjectBuiltIn(why) {
  * just freezes the page while it runs. The pixels are copied rather than
  * handed over precisely so that fallback is still possible.
  */
-function matteInBackground(model, rgba, onProgress) {
-  const onThisThread = () => model.matte(rgba, np.width(), np.height(), subjectQuality, onProgress);
+function matteInBackground(model, rgba, width, height, onProgress) {
+  const onThisThread = () => model.matte(rgba, width, height, subjectQuality, onProgress);
   let worker;
   try {
     worker = new Worker(new URL("./subject-worker.js", import.meta.url), { type: "module" });
@@ -1536,26 +1659,25 @@ function matteInBackground(model, rgba, onProgress) {
       else finish(() => reject(new Error(data.message)));
     };
     worker.onerror = () => finish(() => resolve(onThisThread()));
-    worker.postMessage({ rgba, width: np.width(), height: np.height(), id: subjectQuality });
+    worker.postMessage({ rgba, width, height, id: subjectQuality });
   });
 }
 
-async function selectSubject() {
-  let model = null;
+/**
+ * The model module, once it is deployed and (asked once) downloaded, with
+ * whether it was already cached. Null means use the built-in finder.
+ */
+async function subjectModel() {
+  let model;
   try {
     model = await import("./subject-model.js");
   } catch {
     // The module is not deployed alongside the page.
-    await selectSubjectBuiltIn();
-    return;
+    return null;
   }
-
   const cached = await model.isCached(subjectQuality);
   if (!cached) {
-    if (modelDeclined) {
-      await selectSubjectBuiltIn();
-      return;
-    }
+    if (modelDeclined) return null;
     const ok = window.confirm(
       `Select Subject works best with a machine-learning model: about ${model.downloadMb(subjectQuality)} MB, ` +
         `downloaded once from this site and then kept in your browser for good. It runs on your ` +
@@ -1564,11 +1686,25 @@ async function selectSubject() {
     );
     if (!ok) {
       modelDeclined = true;
-      await selectSubjectBuiltIn();
-      return;
+      return null;
     }
   }
+  return { model, cached };
+}
 
+/**
+ * Finds the subject with the model and selects it. With a `box` (`[x, y, w,
+ * h]` in document pixels) only the pixels inside it go to the model, so a
+ * small thing in a big picture gets the model's whole resolution, and
+ * `mods` says how the result combines with the selection.
+ */
+async function selectSubjectWithModel(box, mods) {
+  const got = await subjectModel();
+  if (!got) {
+    await selectSubjectBuiltIn(undefined, box, mods);
+    return;
+  }
+  const { model, cached } = got;
   const thinking = model.isSlow(subjectQuality)
     ? "Finding the subject… (this one takes a few seconds)"
     : "Finding the subject…";
@@ -1576,25 +1712,61 @@ async function selectSubject() {
   working(cached ? thinking : getting, cached ? null : 0);
   await painted();
   try {
-    np.render();
-    const rgba = np.frame_copy();
+    let rgba, width, height;
+    if (box) {
+      rgba = np.frame_crop(...box);
+      [, , width, height] = box;
+    } else {
+      np.render();
+      rgba = np.frame_copy();
+      width = np.width();
+      height = np.height();
+    }
     const started = performance.now();
-    const { matte, width, height } = await matteInBackground(model, rgba, (fraction) =>
+    const out = await matteInBackground(model, rgba, width, height, (fraction) =>
       // Progress is the download; once it is in, the model is running.
       working(fraction >= 1 ? thinking : getting, fraction >= 1 ? null : fraction)
     );
-    const found = np.select_subject_from_matte(matte, width, height);
+    const found = box
+      ? np.select_subject_in_box(...box, out.matte, out.width, out.height, mods.shift, mods.alt)
+      : np.select_subject_from_matte(out.matte, out.width, out.height);
     touch();
     doneWorking();
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
-    message(found ? `Selected the subject (${seconds}s).` : "The model did not find a subject in this image.");
+    message(
+      found
+        ? `Selected the subject (${seconds}s).`
+        : box
+          ? "The model did not find a subject in the box."
+          : "The model did not find a subject in this image."
+    );
   } catch (e) {
     doneWorking();
     // Anything at all — no network, no cache storage, a browser that will not
     // run it — still ends in a selection.
-    await selectSubjectBuiltIn("The model could not run; looking for the subject…");
+    await selectSubjectBuiltIn("The model could not run; looking for the subject…", box, mods);
     message(`The model could not run (${e.message ?? e}), so the built-in search was used.`);
   }
+}
+
+async function selectSubject() {
+  await selectSubjectWithModel(null, null);
+}
+
+/** The modifiers held when the subject box was started: they pick the mode. */
+let subjectMods = { shift: false, alt: false };
+
+/** The subject tool's drag has ended: run the model over what it boxed. */
+async function finishSubjectBox() {
+  const box = np.subject_box();
+  if (!box.length) return;
+  if (box[2] < 4 || box[3] < 4) {
+    np.clear_subject_box();
+    needsDraw = true;
+    message("Drag a box around the subject.");
+    return;
+  }
+  await selectSubjectWithModel(box, subjectMods);
 }
 
 function buildMenus() {
@@ -1618,6 +1790,7 @@ function buildMenus() {
         { label: "Adjustments", submenu: adjustmentItems() },
         { label: "Auto Levels", shortcut: "Ctrl+Shift+L", action: () => act(() => np.auto_levels(true)) },
         { label: "Auto Contrast", shortcut: "Ctrl+Alt+Shift+L", action: () => act(() => np.auto_levels(false)) },
+        { label: "Remove Checkerboard Background", action: removeCheckerboard },
         { sep: true },
         { label: "Image Size…", shortcut: "Ctrl+Alt+I", action: showImageSizeDialog },
         { label: "Canvas Size…", shortcut: "Ctrl+Alt+C", action: showCanvasDialog },
@@ -2640,7 +2813,7 @@ function bindPointer() {
     } else if (grabbed) {
       guideDrag = { axis: grabbed.axis, at: guides[grabbed.axis][grabbed.index], index: grabbed.index };
       guides[grabbed.axis].splice(grabbed.index, 1);
-      syncGuides();
+      needsDraw = true;
     } else if (edge && e.button === 0) {
       // Dragging a canvas edge resizes the canvas, and only starts from
       // outside it, so it never gets in the way of painting.
@@ -2652,6 +2825,7 @@ function bindPointer() {
     } else if (e.button === 0) {
       // With the zoom tool, the options-bar "zoom out" acts like Alt.
       const alt = e.altKey || (tool === "zoom" && zoomOutMode);
+      if (tool === "subject") subjectMods = { shift: e.shiftKey, alt: e.altKey };
       if (!np.pointer_down(x, y, e.shiftKey, alt)) {
         // A smart object's pixels, an adjustment layer's, or a locked
         // layer: the engine says which, and what to do instead.
@@ -2660,6 +2834,8 @@ function bindPointer() {
         return;
       }
       if (tool === "eyedropper" || alt) syncSwatches();
+      if (SELECTION_TOOLS.has(tool)) antsDirty = true;
+      needsDraw = true;
     } else {
       return;
     }
@@ -2699,8 +2875,9 @@ function bindPointer() {
       if (e.buttons & 1) np.pointer_move(x, y, e.shiftKey, e.altKey);
       else setHitCursor(np.transform_hit(x, y));
     } else if (np.is_gesturing()) {
-      np.pointer_move(x, y, e.shiftKey, e.altKey);
+      const changed = np.pointer_move(x, y, e.shiftKey, e.altKey);
       if (tool === "eyedropper") syncSwatches();
+      if (changed && SELECTION_TOOLS.has(tool)) antsDirty = true;
       needsDraw = true;
     }
   });
@@ -2710,9 +2887,10 @@ function bindPointer() {
     if (guideDrag) {
       const at = guidePosition(x, y);
       if (at !== null) guides[guideDrag.axis].push(at);
+      const wasThere = guideDrag.index !== null;
       guideDrag = null;
       view.style.cursor = "";
-      syncGuides();
+      commitGuides(wasThere ? (at !== null ? "Move Guide" : "Remove Guide") : "Add Guide");
       return;
     }
     if (resizing) {
@@ -2735,6 +2913,11 @@ function bindPointer() {
     } else if (np.is_gesturing()) {
       np.pointer_up(x, y, e.shiftKey, e.altKey);
       needsDraw = true;
+      if (SELECTION_TOOLS.has(tool)) {
+        antsDirty = true;
+        historyDirty = true;
+      }
+      if (tool === "subject") finishSubjectBox();
     }
   };
   view.addEventListener("pointerup", end);
@@ -2860,6 +3043,8 @@ function bindKeyboard() {
         picker.close();
         if (endSizing(false)) return;
         np.cancel_gesture();
+        np.clear_subject_box();
+        needsDraw = true;
         if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
         return;
       case "Delete":

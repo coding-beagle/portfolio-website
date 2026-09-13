@@ -15,6 +15,7 @@ mod movetool;
 mod select;
 mod shape;
 mod stroke;
+mod subjectbox;
 mod view;
 mod wand;
 
@@ -24,13 +25,14 @@ pub use movetool::MoveTool;
 pub use select::{MarqueeShape, MarqueeTool};
 pub use shape::{Shape, ShapeTool};
 pub use stroke::{StrokeMode, StrokeTool};
+pub use subjectbox::SubjectBoxTool;
 pub use view::{HandTool, ZoomTool};
 pub use wand::{MagicWandTool, QuickSelectTool, RefineTool};
 
 use crate::autoselect::SampleMode;
 use crate::color::Rgba;
 use crate::document::Document;
-use crate::geometry::Point;
+use crate::geometry::{Point, Rect};
 use crate::selection::Selection;
 use crate::snap::Guides;
 use crate::viewport::Viewport;
@@ -44,6 +46,7 @@ pub enum ToolKind {
     Crop,
     Wand,
     QuickSelect,
+    SubjectBox,
     Refine,
     Move,
     Brush,
@@ -65,6 +68,7 @@ impl ToolKind {
         ToolKind::Crop,
         ToolKind::Wand,
         ToolKind::QuickSelect,
+        ToolKind::SubjectBox,
         ToolKind::Refine,
         ToolKind::Move,
         ToolKind::Brush,
@@ -86,6 +90,7 @@ impl ToolKind {
             ToolKind::Crop => "crop",
             ToolKind::Wand => "wand",
             ToolKind::QuickSelect => "quickselect",
+            ToolKind::SubjectBox => "subject",
             ToolKind::Refine => "refine",
             ToolKind::Move => "move",
             ToolKind::Brush => "brush",
@@ -107,6 +112,7 @@ impl ToolKind {
             ToolKind::Select | ToolKind::EllipseSelect | ToolKind::Crop => "Select",
             ToolKind::Wand => "Magic Wand",
             ToolKind::QuickSelect => "Quick Select",
+            ToolKind::SubjectBox => "Select Subject",
             ToolKind::Refine => "Refine Selection",
             ToolKind::Move => "Move",
             ToolKind::Brush => "Brush",
@@ -132,6 +138,7 @@ impl ToolKind {
                 | ToolKind::Crop
                 | ToolKind::Wand
                 | ToolKind::QuickSelect
+                | ToolKind::SubjectBox
                 | ToolKind::Refine
                 | ToolKind::Eyedropper
                 | ToolKind::Zoom
@@ -163,6 +170,7 @@ impl ToolKind {
             ToolKind::Crop => Box::new(MarqueeTool::new(MarqueeShape::Rectangle, true)),
             ToolKind::Wand => Box::new(MagicWandTool),
             ToolKind::QuickSelect => Box::new(QuickSelectTool::default()),
+            ToolKind::SubjectBox => Box::new(SubjectBoxTool::default()),
             ToolKind::Refine => Box::new(RefineTool::default()),
             ToolKind::Move => Box::new(MoveTool::default()),
             ToolKind::Zoom => Box::new(ZoomTool::default()),
@@ -210,6 +218,9 @@ pub struct ToolSettings {
     pub antialias: bool,
     /// The guides the move tool and transforms snap to, and whether they do.
     pub guides: Guides,
+    /// The box the subject tool has drawn out, in document pixels, waiting
+    /// for the page to run the model over it.
+    pub subject_box: Option<Rect>,
 }
 
 impl Default for ToolSettings {
@@ -227,6 +238,7 @@ impl Default for ToolSettings {
             sample_all_layers: false,
             antialias: true,
             guides: Guides::default(),
+            subject_box: None,
         }
     }
 }

@@ -243,6 +243,9 @@ export class NPaint {
         const ret = wasm.npaint_clear_selection(this.__wbg_ptr);
         return ret !== 0;
     }
+    clear_subject_box() {
+        wasm.npaint_clear_subject_box(this.__wbg_ptr);
+    }
     /**
      * The clipboard's pixels as straight-alpha RGBA, for the page to hand
      * to the system clipboard.
@@ -335,6 +338,24 @@ export class NPaint {
         return ret[0] >>> 0;
     }
     /**
+     * Replaces the guides as an undo step labelled `label` — the page's
+     * "Add Guide", "Move Guide", "Remove Guide" or "Clear Guides".
+     * @param {Float64Array} h
+     * @param {Float64Array} v
+     * @param {string} label
+     * @returns {boolean}
+     */
+    edit_guides(h, v, label) {
+        const ptr0 = passArrayF64ToWasm0(h, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(v, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(label, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_edit_guides(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        return ret !== 0;
+    }
+    /**
      * Why the current tool cannot paint on the active layer, or an empty
      * string when it can — the message the page shows when a click on the
      * canvas is declined.
@@ -409,6 +430,21 @@ export class NPaint {
      */
     frame_copy() {
         const ret = wasm.npaint_frame_copy(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * The flattened picture inside a rectangle, as RGBA bytes, for the
+     * subject model.
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @returns {Uint8Array}
+     */
+    frame_crop(x, y, w, h) {
+        const ret = wasm.npaint_frame_crop(this.__wbg_ptr, x, y, w, h);
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
@@ -1050,6 +1086,15 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * Makes a checkerboard baked into the active layer transparent. False
+     * when its edges show no board.
+     * @returns {boolean}
+     */
+    remove_checkerboard() {
+        const ret = wasm.npaint_remove_checkerboard(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @param {number} index
      */
     remove_layer(index) {
@@ -1288,6 +1333,20 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * The built-in finder over the box, for when the model is not there.
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @param {boolean} shift
+     * @param {boolean} alt
+     * @returns {boolean}
+     */
+    select_subject_builtin_in_box(x, y, w, h, shift, alt) {
+        const ret = wasm.npaint_select_subject_builtin_in_box(this.__wbg_ptr, x, y, w, h, shift, alt);
+        return ret !== 0;
+    }
+    /**
      * Selects the subject from a matte the page worked out with the model:
      * `matte_w` x `matte_h` bytes of coverage, one per pixel, at whatever
      * resolution the model runs at.
@@ -1300,6 +1359,27 @@ export class NPaint {
         const ptr0 = passArray8ToWasm0(matte, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.npaint_select_subject_from_matte(this.__wbg_ptr, ptr0, len0, matte_w, matte_h);
+        return ret !== 0;
+    }
+    /**
+     * Selects the subject the model found in the box: `matte` is the
+     * model's coverage of the box alone. Shift adds to the selection and
+     * Alt takes away, as with the other selection tools.
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @param {Uint8Array} matte
+     * @param {number} matte_w
+     * @param {number} matte_h
+     * @param {boolean} shift
+     * @param {boolean} alt
+     * @returns {boolean}
+     */
+    select_subject_in_box(x, y, w, h, matte, matte_w, matte_h, shift, alt) {
+        const ptr0 = passArray8ToWasm0(matte, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_select_subject_in_box(this.__wbg_ptr, x, y, w, h, ptr0, len0, matte_w, matte_h, shift, alt);
         return ret !== 0;
     }
     /**
@@ -1571,6 +1651,16 @@ export class NPaint {
     stroke_selection(width) {
         const ret = wasm.npaint_stroke_selection(this.__wbg_ptr, width);
         return ret !== 0;
+    }
+    /**
+     * The subject tool's box as `[x, y, w, h]`, or empty when there is none.
+     * @returns {Int32Array}
+     */
+    subject_box() {
+        const ret = wasm.npaint_subject_box(this.__wbg_ptr);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     swap_colors() {
         wasm.npaint_swap_colors(this.__wbg_ptr);

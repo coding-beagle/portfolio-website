@@ -18,6 +18,9 @@ npaint/
     lib.rs         crate root and module map
     adjust.rs      image adjustments (brightness/contrast, hue/sat, levels,
                    curves, colour balance, ...) and the automatic levels
+    checker.rs     finds a transparency checkerboard painted into a picture
+                   (two colours, cell, phase, from the edges) and unmixes it
+                   to real alpha — Image > Remove Checkerboard Background
     blend.rs       the blend modes: the W3C formulas, one function per mode
     autoselect/    the automatic selections: pure functions of the pixels
       mod.rs       colour distance, the Sobel edge map, the Select Similar set
@@ -37,8 +40,11 @@ npaint/
     selection.rs   what painting may touch: nothing, a rect, or a Mask
     viewport.rs    zoom and pan, screen <-> document mapping
     history.rs     undo/redo as labelled before-snapshots: one surface of a
-                   layer (pixels or mask), a whole layer, or the whole stack;
-                   the list the history panel shows, and the saved-state id
+                   layer (pixels or mask), a whole layer, the whole stack, or
+                   nothing; every step also carries an `Aside` (the selection
+                   and guides before it), so selection and guide edits are
+                   steps too; the list the history panel shows, and the
+                   saved-state id
     tools/
       mod.rs       Tool trait, ToolKind, ToolSettings, PointerEvent
       select.rs    the marquees (rectangle, ellipse) and the crop tool, with
@@ -161,7 +167,26 @@ copy of the guides (`set_guides`) whenever they change, and `src/snap.rs`
 pulls the move tool's pixels and the free-transform box (edges and centre
 on a move, the handle on a scale) onto guides, canvas edges and the canvas centre
 lines within `SNAP_PX` on screen; a guide being dragged snaps to the centre.
-Guides are saved in the `.npaint` file, as a trailer after the layers. View > Snap to Guides turns it off.
+Guides are saved in the `.npaint` file, as a trailer after the layers.
+
+**What "dirty" means.** `Editor::dirty` says the *composite* changed, and
+`NPaint::render` recomposites and re-uploads the whole frame when it is set —
+at 6000x4500 that is a 108 MB pass, so only gestures that edit pixels set it.
+Selection and view gestures do not: the page redraws from the frame it has,
+and retraces the ants itself for the tools in `SELECTION_TOOLS`. The page
+also keeps half-size copies of the frame (`sourceFor`) for zoomed-out
+drawing, rebuilt lazily when the frame changes, and caches the selection's
+status line and the ants' path between frames.
+
+**The subject box.** The subject tool (`tools/subjectbox.rs`) only draws a
+rectangle into `ToolSettings::subject_box`; the selection is untouched. When
+the drag ends the page reads the box, takes `frame_crop` of it, runs the
+model on those pixels alone (so a small subject gets the model's whole
+resolution), and hands the matte to `select_subject_in_box`, which places it
+at the box and combines it with the selection under the Shift/Alt mode from
+when the drag began. Without the model, `select_subject_builtin_in_box` runs
+the engine's finder over the crop. Both clear the box; so do Escape and a
+tool change. View > Snap to Guides turns it off.
 
 **Locks.** `Layer::locked` refuses every edit through `edit_refusal`, and
 the page shows the reason. `Layer::lock_alpha` is enforced the same way a
@@ -288,7 +313,8 @@ cursor.
 history label, and an arm in `ToolKind::instantiate`. In `app.js`, add an
 entry to `TOOLS` (name, label, shortcut key, icon path, hint); tools that
 share a key cycle when it is pressed. Say in `begin` whether the gesture
-`EditsActiveLayer` — that is all the undo system needs from you. Clip every
+`EditsActiveLayer` — that is all the undo system needs from you; a `Passive`
+gesture that changes the selection becomes a step on its own. Clip every
 pixel write with `ctx.clip()` and the selection will just work. A tool that
 needs to *set* something — the eyedropper sets the colours — has
 `ctx.settings` mutably.

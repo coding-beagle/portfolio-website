@@ -16,7 +16,7 @@ use crate::autoselect::SampleMode;
 use crate::blend::BlendMode;
 use crate::color::Rgba;
 use crate::editor::Editor;
-use crate::geometry::Point;
+use crate::geometry::{Point, Rect};
 use crate::layer::{mask_cover, Target};
 use crate::mask::SelectMode;
 use crate::transform::{Handle, Hit};
@@ -232,6 +232,12 @@ impl NPaint {
 
     pub fn guides_v(&self) -> Vec<f64> {
         self.editor.settings().guides.v.clone()
+    }
+
+    /// Replaces the guides as an undo step labelled `label` — the page's
+    /// "Add Guide", "Move Guide", "Remove Guide" or "Clear Guides".
+    pub fn edit_guides(&mut self, h: &[f64], v: &[f64], label: &str) -> bool {
+        self.editor.edit_guides(h.to_vec(), v.to_vec(), label)
     }
 
     pub fn set_snap(&mut self, on: bool) {
@@ -662,6 +668,12 @@ impl NPaint {
         self.editor.auto_levels(per_channel)
     }
 
+    /// Makes a checkerboard baked into the active layer transparent. False
+    /// when its edges show no board.
+    pub fn remove_checkerboard(&mut self) -> bool {
+        self.editor.remove_checkerboard()
+    }
+
     /// Moves the selected pixels (or the whole layer) by whole pixels; a run
     /// of nudges is one undo step.
     pub fn nudge_layer(&mut self, dx: i32, dy: i32) -> bool {
@@ -952,6 +964,37 @@ impl NPaint {
     /// resolution the model runs at.
     pub fn select_subject_from_matte(&mut self, matte: &[u8], matte_w: u32, matte_h: u32) -> bool {
         self.editor.select_subject_from_matte(matte, matte_w, matte_h, SelectMode::Replace)
+    }
+
+    /// The subject tool's box as `[x, y, w, h]`, or empty when there is none.
+    pub fn subject_box(&self) -> Vec<i32> {
+        match self.editor.subject_box() {
+            Some(r) => vec![r.x, r.y, r.w, r.h],
+            None => Vec::new(),
+        }
+    }
+
+    pub fn clear_subject_box(&mut self) {
+        self.editor.clear_subject_box();
+    }
+
+    /// The flattened picture inside a rectangle, as RGBA bytes, for the
+    /// subject model.
+    pub fn frame_crop(&self, x: i32, y: i32, w: i32, h: i32) -> Vec<u8> {
+        self.editor.composite_crop(Rect::new(x, y, w, h)).to_rgba_bytes()
+    }
+
+    /// Selects the subject the model found in the box: `matte` is the
+    /// model's coverage of the box alone. Shift adds to the selection and
+    /// Alt takes away, as with the other selection tools.
+    #[allow(clippy::too_many_arguments)]
+    pub fn select_subject_in_box(&mut self, x: i32, y: i32, w: i32, h: i32, matte: &[u8], matte_w: u32, matte_h: u32, shift: bool, alt: bool) -> bool {
+        self.editor.select_subject_in_box(Rect::new(x, y, w, h), matte, matte_w, matte_h, SelectMode::from_modifiers(shift, alt))
+    }
+
+    /// The built-in finder over the box, for when the model is not there.
+    pub fn select_subject_builtin_in_box(&mut self, x: i32, y: i32, w: i32, h: i32, shift: bool, alt: bool) -> bool {
+        self.editor.select_subject_builtin_in_box(Rect::new(x, y, w, h), SelectMode::from_modifiers(shift, alt))
     }
 
     /// `[x, y, w, h]` in document pixels, or an empty array when nothing is

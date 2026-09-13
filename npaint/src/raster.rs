@@ -22,6 +22,11 @@ impl Raster {
         Raster::filled(width, height, Rgba::TRANSPARENT)
     }
 
+    /// Makes every pixel transparent, keeping the allocation.
+    pub fn clear(&mut self) {
+        self.pixels.fill(Rgba::TRANSPARENT);
+    }
+
     pub fn filled(width: u32, height: u32, color: Rgba) -> Raster {
         Raster {
             width,
@@ -107,6 +112,18 @@ impl Raster {
         for (dst, px) in chunks.iter_mut().zip(&self.pixels) {
             *dst = [px.r, px.g, px.b, px.a];
         }
+    }
+
+    /// The pixels inside `rect`, clipped to the buffer, as a new raster.
+    pub fn crop(&self, rect: &Rect) -> Raster {
+        let r = rect.intersect(&self.bounds());
+        let mut out = Raster::new(r.w.max(0) as u32, r.h.max(0) as u32);
+        for y in 0..r.h {
+            for x in 0..r.w {
+                out.set(x, y, self.get(r.x + x, r.y + y));
+            }
+        }
+        out
     }
 
     pub fn to_rgba_bytes(&self) -> Vec<u8> {
