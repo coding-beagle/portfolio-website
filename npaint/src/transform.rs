@@ -299,6 +299,16 @@ impl TransformSession {
         })
     }
 
+    /// A session over pixels that have already been split out — what a
+    /// non-rectangular selection hands over, since only it knows which
+    /// pixels it holds.
+    pub fn from_parts(moving: Raster, stationary: Raster, bounds: Rect, selection: Option<Rect>) -> Option<TransformSession> {
+        if bounds.is_empty() {
+            return None;
+        }
+        Some(TransformSession { moving, stationary, bounds, matrix: Affine::IDENTITY, drag: None, selection })
+    }
+
     pub fn matrix(&self) -> Affine {
         self.matrix
     }

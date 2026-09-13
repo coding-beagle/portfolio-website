@@ -15,12 +15,14 @@
 //! about zoom.
 
 pub mod adjust;
+pub mod autoselect;
 pub mod color;
 pub mod document;
 pub mod editor;
 pub mod geometry;
 pub mod history;
 pub mod layer;
+pub mod mask;
 pub mod raster;
 pub mod selection;
 pub mod tools;

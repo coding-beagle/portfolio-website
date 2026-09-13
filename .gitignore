@@ -25,3 +25,11 @@ __pycache__/
 # NPaint: cargo's build directory. npaint/build (the deployable page) IS
 # committed, like the other build folders — it is what cPanel pulls.
 npaint/target/
+
+# NPaint's Select Subject model and its ONNX Runtime: ~230 MB of binaries that
+# would sit in the history for good. `make fetch_npaint_model` pulls them, and
+# `make deploy_npaint` does that first, so the deploy has them without the
+# repository carrying them. The page works without them — Select Subject falls
+# back to the built-in search.
+npaint/build/models/
+npaint/build/vendor/

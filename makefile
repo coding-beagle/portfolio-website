@@ -105,6 +105,27 @@ build_npaint:
 	cp -r www/. build/; \
 	cd -; \
 
+# fetch Select Subject's models and their runtime into npaint/build. They are
+# NOT committed (see .gitignore): this target pulls them, skipping whatever is
+# already there, and `deploy_npaint` runs it first so the deploy has them.
+# MODELS=core leaves out the 179 MB "Best" one.
+ORT_VERSION := 1.20.1
+ORT_CDN := https://cdn.jsdelivr.net/npm/onnxruntime-web@$(ORT_VERSION)/dist
+# The U-2-Net family, Apache-2.0, as published by the rembg project.
+MODEL_CDN := https://github.com/danielgatis/rembg/releases/download/v0.0.0
+MODELS := all
+NPAINT_MODELS := u2netp silueta $(if $(filter all,$(MODELS)),isnet-general-use,)
+
+fetch_npaint_model:
+	mkdir -p npaint/build/vendor/ort npaint/build/models
+	for f in ort.wasm.min.mjs ort-wasm-simd-threaded.mjs ort-wasm-simd-threaded.wasm; do \
+		test -s npaint/build/vendor/ort/$$f || curl -sSL -o npaint/build/vendor/ort/$$f $(ORT_CDN)/$$f || exit 1; \
+	done
+	for m in $(NPAINT_MODELS); do \
+		test -s npaint/build/models/$$m.onnx || curl -sSL -o npaint/build/models/$$m.onnx $(MODEL_CDN)/$$m.onnx || exit 1; \
+	done
+	@echo "NPaint has onnxruntime-web $(ORT_VERSION) and: $(NPAINT_MODELS)"
+
 # run the NPaint engine's unit tests, natively (no browser, no wasm)
 test_npaint:
 	cd ./npaint; \
@@ -225,7 +246,11 @@ deploy_registry:
 # prod only, sends the built NPaint page to its subdomain's document root
 NPAINT_DEPLOYPATH ?= /home/nteagvxe/public_npaint_html
 deploy_npaint:
-	test -d $(NPAINT_DEPLOYPATH) || { echo "No such directory: $(NPAINT_DEPLOYPATH)"; exit 1; }; \
+	test -d $(NPAINT_DEPLOYPATH) || { echo "No such directory: $(NPAINT_DEPLOYPATH)"; exit 1; }
+	# The models are not in the repository, so fetch whatever is missing first.
+	# A failure here is not fatal: Select Subject falls back to the built-in
+	# search, and the rest of the editor does not care.
+	-$(MAKE) fetch_npaint_model
 	rm -rf $(NPAINT_DEPLOYPATH)/*; \
 	cp -r npaint/build/. $(NPAINT_DEPLOYPATH)/; \
 	echo "Deployed NPaint to $(NPAINT_DEPLOYPATH)"; \

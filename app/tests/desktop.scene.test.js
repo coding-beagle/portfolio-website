@@ -802,7 +802,7 @@ describe("desktop scene", () => {
     const logo = screen
       .getByLabelText("Start")
       .querySelector("[data-site-logo]");
-    expect(logo).toHaveAttribute("src", "/logo192.png");
+    expect(logo).toHaveAttribute("src", "/lissajous.svg");
   });
 
   it("opens apps from the start menu on one click", () => {

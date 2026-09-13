@@ -12,10 +12,12 @@
 use wasm_bindgen::prelude::*;
 
 use crate::adjust::Adjustment;
+use crate::autoselect::SampleMode;
 use crate::color::Rgba;
 use crate::editor::Editor;
 use crate::transform::{Handle, Hit};
 use crate::geometry::Point;
+use crate::mask::SelectMode;
 use crate::raster::Raster;
 use crate::tools::ToolKind;
 
@@ -159,6 +161,49 @@ impl NPaint {
 
     pub fn opacity(&self) -> f32 {
         self.editor.settings().opacity
+    }
+
+    pub fn set_tolerance(&mut self, tolerance: u8) {
+        self.editor.settings_mut().tolerance = tolerance;
+    }
+
+    pub fn tolerance(&self) -> u8 {
+        self.editor.settings().tolerance
+    }
+
+    /// "contiguous" or "global": whether the wand may reach across the image.
+    pub fn set_sample_mode(&mut self, name: &str) -> Result<(), String> {
+        let mode = SampleMode::from_name(name).ok_or_else(|| format!("no sample mode called \"{name}\""))?;
+        self.editor.settings_mut().sample_mode = mode;
+        Ok(())
+    }
+
+    pub fn sample_mode(&self) -> String {
+        self.editor.settings().sample_mode.name().to_owned()
+    }
+
+    pub fn set_sample_all_layers(&mut self, all: bool) {
+        self.editor.settings_mut().sample_all_layers = all;
+    }
+
+    pub fn sample_all_layers(&self) -> bool {
+        self.editor.settings().sample_all_layers
+    }
+
+    pub fn set_antialias(&mut self, on: bool) {
+        self.editor.settings_mut().antialias = on;
+    }
+
+    pub fn antialias(&self) -> bool {
+        self.editor.settings().antialias
+    }
+
+    pub fn set_scrubby_zoom(&mut self, scrubby: bool) {
+        self.editor.settings_mut().scrubby_zoom = scrubby;
+    }
+
+    pub fn scrubby_zoom(&self) -> bool {
+        self.editor.settings().scrubby_zoom
     }
 
     pub fn set_fill(&mut self, fill: bool) {
@@ -347,6 +392,26 @@ impl NPaint {
         self.resize_frame();
     }
 
+    /// The biggest canvas the engine will make, for the page to clamp a drag
+    /// with rather than asking for something that cannot be allocated.
+    pub fn max_side(&self) -> u32 {
+        crate::editor::MAX_SIDE
+    }
+
+    pub fn max_pixels(&self) -> f64 {
+        crate::editor::MAX_PIXELS as f64
+    }
+
+    /// Resizes the canvas, keeping the current pixels at `(dx, dy)`.
+    pub fn resize_canvas(&mut self, width: u32, height: u32, dx: i32, dy: i32) -> bool {
+        let done = self.editor.resize_canvas(width, height, dx, dy);
+        // The frame the page reads is the size of the document; leaving it
+        // behind hands the page a byte count that does not match the
+        // dimensions it asks for, and `ImageData` refuses it.
+        self.resize_frame();
+        done
+    }
+
     pub fn flip_canvas_horizontal(&mut self) {
         self.editor.flip_canvas_horizontal();
     }
@@ -478,6 +543,83 @@ impl NPaint {
         self.editor.deselect();
     }
 
+    /// `[x, y, w, h]` in screen pixels for the rubber band the current
+    /// gesture wants drawn, or empty when there is none.
+    pub fn tool_overlay(&self) -> Vec<f64> {
+        match self.editor.tool_overlay() {
+            Some(r) => r.to_vec(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The marching ants as closed loops in document coordinates, flattened:
+    /// each loop is its point count followed by that many x, y pairs.
+    pub fn selection_contours(&self) -> Vec<f64> {
+        let mut out = Vec::new();
+        for loop_ in self.editor.selection_contours() {
+            out.push(loop_.len() as f64);
+            for point in loop_ {
+                out.push(point.x);
+                out.push(point.y);
+            }
+        }
+        out
+    }
+
+    /// How many pixels are selected.
+    pub fn selection_area(&self) -> usize {
+        self.editor.selection_area()
+    }
+
+    pub fn select_invert(&mut self) -> bool {
+        self.editor.invert_selection()
+    }
+
+    pub fn select_expand(&mut self, pixels: u32) -> bool {
+        self.editor.expand_selection(pixels)
+    }
+
+    pub fn select_contract(&mut self, pixels: u32) -> bool {
+        self.editor.contract_selection(pixels)
+    }
+
+    pub fn select_feather(&mut self, pixels: u32) -> bool {
+        self.editor.feather_selection(pixels)
+    }
+
+    pub fn select_smooth(&mut self, pixels: u32) -> bool {
+        self.editor.smooth_selection(pixels)
+    }
+
+    /// Selects the pixels the layer actually draws.
+    pub fn select_opaque(&mut self) -> bool {
+        self.editor.select_opaque(SelectMode::Replace)
+    }
+
+    /// Selects everything one particular layer draws — Ctrl-clicking its
+    /// thumbnail — without making it the active layer.
+    pub fn select_layer_opaque(&mut self, index: usize) -> Result<bool, String> {
+        self.editor.select_layer_opaque(index, SelectMode::Replace).map_err(err)
+    }
+
+    /// Extends the selection to matching pixels anywhere in the image.
+    pub fn select_similar(&mut self) -> bool {
+        self.editor.select_similar()
+    }
+
+    /// Finds and selects the subject. False when there is nothing that stands
+    /// out enough to call one.
+    pub fn select_subject(&mut self) -> bool {
+        self.editor.select_subject(SelectMode::Replace)
+    }
+
+    /// Selects the subject from a matte the page worked out with the model:
+    /// `matte_w` x `matte_h` bytes of coverage, one per pixel, at whatever
+    /// resolution the model runs at.
+    pub fn select_subject_from_matte(&mut self, matte: &[u8], matte_w: u32, matte_h: u32) -> bool {
+        self.editor.select_subject_from_matte(matte, matte_w, matte_h, SelectMode::Replace)
+    }
+
     /// `[x, y, w, h]` in document pixels, or an empty array when nothing is
     /// selected.
     pub fn selection_rect(&self) -> Vec<i32> {
@@ -519,6 +661,10 @@ impl NPaint {
 
     pub fn zoom_out_about(&mut self, x: f64, y: f64) {
         self.editor.zoom_out_about(Point::new(x, y));
+    }
+
+    pub fn set_view_size(&mut self, view_w: f64, view_h: f64) {
+        self.editor.set_view_size(view_w, view_h);
     }
 
     pub fn fit_to_view(&mut self, view_w: f64, view_h: f64) {
@@ -630,6 +776,141 @@ mod tests {
         assert_eq!(np.frame_copy()[..3], [0, 0, 0]);
         assert!(np.apply_adjustment("invert").unwrap());
         assert_eq!(np.frame_copy()[..3], [255, 255, 255]);
+    }
+
+    #[test]
+    fn the_zoom_marquee_crosses_the_boundary_as_a_flat_array() {
+        let mut np = NPaint::new(40, 40, "#ffffff").unwrap();
+        np.set_view_size(400.0, 400.0);
+        np.set_tool("zoom").unwrap();
+        np.set_scrubby_zoom(false); // the marquee is the option now
+        assert!(np.tool_overlay().is_empty());
+        np.pointer_down(10.0, 10.0, false, false);
+        np.pointer_move(50.0, 30.0, false, false);
+        assert_eq!(np.tool_overlay(), vec![10.0, 10.0, 40.0, 20.0]);
+        np.pointer_up(50.0, 30.0, false, false);
+        assert!(np.tool_overlay().is_empty());
+        assert!(np.zoom() > 1.0, "the drag zoomed in on the box");
+    }
+
+    #[test]
+    fn scrubby_zoom_is_on_unless_turned_off() {
+        let mut np = NPaint::new(4, 4, "").unwrap();
+        assert!(np.scrubby_zoom());
+        np.set_scrubby_zoom(false);
+        assert!(!np.scrubby_zoom());
+    }
+
+    #[test]
+    fn the_wand_and_the_selection_commands_cross_the_boundary() {
+        let mut np = NPaint::new(20, 20, "#ffffff").unwrap();
+        np.set_tool("wand").unwrap();
+        assert_eq!(np.tolerance(), 32);
+        np.set_tolerance(0);
+        np.pointer_down(5.0, 5.0, false, false);
+        np.pointer_up(5.0, 5.0, false, false);
+        // A blank sheet is all one colour, so the wand takes the lot — which
+        // is the same as nothing being selected.
+        assert!(np.selection_rect().is_empty());
+
+        np.select_all();
+        assert_eq!(np.selection_area(), 400);
+        assert!(np.select_contract(4));
+        assert_eq!(np.selection_rect(), vec![4, 4, 12, 12]);
+        assert!(np.select_expand(2));
+        // The edge moves out by two in every direction, so the corners come
+        // back rounded — the bounding box grows by two, the area by less.
+        assert_eq!(np.selection_rect(), vec![2, 2, 16, 16]);
+        let inside = np.selection_area();
+        assert!(inside > 12 * 12 && inside < 16 * 16);
+        assert!(np.select_invert());
+        assert_eq!(np.selection_area(), 400 - inside);
+        assert!(!np.selection_contours().is_empty(), "there are ants to draw");
+        assert!(np.select_feather(2));
+        assert!(np.select_smooth(1));
+    }
+
+    #[test]
+    fn sample_settings_round_trip_and_reject_nonsense() {
+        let mut np = NPaint::new(4, 4, "#ffffff").unwrap();
+        assert_eq!(np.sample_mode(), "contiguous");
+        np.set_sample_mode("global").unwrap();
+        assert_eq!(np.sample_mode(), "global");
+        assert!(np.set_sample_mode("psychic").is_err());
+        assert!(np.antialias());
+        np.set_antialias(false);
+        assert!(!np.antialias());
+        assert!(!np.sample_all_layers());
+        np.set_sample_all_layers(true);
+        assert!(np.sample_all_layers());
+    }
+
+    #[test]
+    fn selecting_the_subject_reports_whether_it_found_one() {
+        let mut np = NPaint::new(80, 80, "#f0f0ee").unwrap();
+        assert!(!np.select_subject(), "a blank sheet has no subject");
+        let mut red = vec![0u8; 80 * 80 * 4];
+        for y in 25..55 {
+            for x in 25..55 {
+                let i = (y * 80 + x) * 4;
+                red[i] = 200;
+                red[i + 1] = 60;
+                red[i + 2] = 50;
+                red[i + 3] = 255;
+            }
+        }
+        np.add_layer_from_rgba("blob", 80, 80, &red).unwrap();
+        np.set_sample_all_layers(true);
+        assert!(np.select_subject());
+        assert!(!np.selection_rect().is_empty());
+    }
+
+    /// Every operation that changes the document's size must leave the frame
+    /// matching it: the page builds an `ImageData` of `width x height` from
+    /// exactly these bytes, and a mismatch is a dead render loop.
+    #[test]
+    fn the_frame_always_matches_the_document_size() {
+        let mut np = NPaint::new(20, 10, "#ffffff").unwrap();
+        let matches = |np: &NPaint| np.frame_len() == (np.width() as usize) * (np.height() as usize) * 4;
+        np.render();
+        assert!(matches(&np));
+
+        assert!(np.resize_canvas(40, 30, 5, 5));
+        np.render();
+        assert!(matches(&np), "after resizing the canvas");
+
+        assert!(np.undo());
+        np.render();
+        assert!(matches(&np), "and after undoing it");
+
+        np.rotate_canvas(1);
+        np.render();
+        assert!(matches(&np), "after rotating");
+
+        np.new_document(7, 13, "#000000").unwrap();
+        np.render();
+        assert!(matches(&np), "after a new document");
+    }
+
+    #[test]
+    fn the_size_limits_reach_the_page() {
+        let np = NPaint::new(4, 4, "#ffffff").unwrap();
+        assert_eq!(np.max_side(), crate::editor::MAX_SIDE);
+        assert!(np.max_pixels() > 1e6);
+    }
+
+    #[test]
+    fn a_matte_crosses_the_boundary_as_bytes() {
+        let mut np = NPaint::new(32, 32, "#ffffff").unwrap();
+        let mut matte = vec![0u8; 8 * 8];
+        for y in 2..6 {
+            for x in 2..6 {
+                matte[y * 8 + x] = 255;
+            }
+        }
+        assert!(np.select_subject_from_matte(&matte, 8, 8));
+        assert!(!np.selection_rect().is_empty());
+        assert!(!np.select_subject_from_matte(&[7u8; 4], 8, 8), "a matte that is not the size it claims");
     }
 
     #[test]

@@ -400,6 +400,20 @@ impl Raster {
         out
     }
 
+    /// The buffer in a canvas of a new size, with the old content placed at
+    /// `(dx, dy)`. Padding is transparent; anything outside is lost. This is
+    /// what resizing the canvas by dragging an edge needs — `recentred` only
+    /// knows how to grow about the middle.
+    pub fn resized(&self, width: u32, height: u32, dx: i32, dy: i32) -> Raster {
+        let mut out = Raster::new(width, height);
+        for y in 0..self.height as i32 {
+            for x in 0..self.width as i32 {
+                out.set(x + dx, y + dy, self.get(x, y));
+            }
+        }
+        out
+    }
+
     /// Composites `other` over `self` at full opacity, in place.
     pub fn merge_over(&mut self, other: &Raster) {
         self.composite_over(other, 1.0);
@@ -668,6 +682,18 @@ mod tests {
         assert_eq!(big.get(0, 0), Rgba::TRANSPARENT);
         let small = big.recentred(2, 2);
         assert_eq!(small, r);
+    }
+
+    #[test]
+    fn resizing_places_the_old_content_where_it_is_told() {
+        let r = Raster::filled(2, 2, RED);
+        let wider = r.resized(4, 2, 2, 0);
+        assert_eq!(wider.get(2, 0), RED);
+        assert_eq!(wider.get(0, 0), Rgba::TRANSPARENT);
+        assert_eq!(count(&wider, RED), 4);
+        // Cropping keeps only what still fits.
+        let cropped = r.resized(1, 2, 0, 0);
+        assert_eq!(count(&cropped, RED), 2);
     }
 
     #[test]

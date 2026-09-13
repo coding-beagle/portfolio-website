@@ -7,10 +7,12 @@
 //! history itself; the page never sees a snapshot.
 
 use crate::adjust::{Adjustment, AdjustmentError};
+use crate::autoselect::{mask_from_matte, select_subject, ColorSet};
 use crate::color::Rgba;
 use crate::document::{Document, DocumentError};
 use crate::geometry::{Point, Rect};
 use crate::history::{History, Snapshot};
+use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::tools::{Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
@@ -53,6 +55,21 @@ impl std::error::Error for SessionError {}
 
 pub const HISTORY_LIMIT: usize = 40;
 
+/// The largest canvas the editor will make. A layer is four bytes a pixel and
+/// every layer is document-sized, so a careless drag of the canvas edge could
+/// otherwise ask for tens of gigabytes and take the whole tab down with it.
+pub const MAX_SIDE: u32 = 16_384;
+pub const MAX_PIXELS: u64 = 40_000_000;
+
+/// Whether a canvas of this size is one the editor will make.
+pub fn canvas_fits(width: u32, height: u32) -> bool {
+    width > 0
+        && height > 0
+        && width <= MAX_SIDE
+        && height <= MAX_SIDE
+        && u64::from(width) * u64::from(height) <= MAX_PIXELS
+}
+
 pub struct Editor {
     document: Document,
     selection: Selection,
@@ -66,6 +83,10 @@ pub struct Editor {
     /// The active layer before a transform began, restored on cancel and
     /// used as the undo snapshot on commit.
     transform_base: Option<Raster>,
+    /// The active layer as it was when the current gesture began, kept only
+    /// when the selection is a mask: painting clips to a rectangle, so what
+    /// holds a ragged selection is putting these pixels back afterwards.
+    gesture_base: Option<Raster>,
     /// Whether the composite the page last rendered is stale.
     dirty: bool,
 }
@@ -82,6 +103,7 @@ impl Editor {
             gesture: None,
             session: None,
             transform_base: None,
+            gesture_base: None,
             dirty: true,
         }
     }
@@ -132,6 +154,12 @@ impl Editor {
 
     pub fn tool(&self) -> ToolKind {
         self.tool.kind()
+    }
+
+    /// The rubber band the current gesture wants drawn over the canvas, as
+    /// `[x, y, w, h]` in screen pixels. Only the zoom marquee has one.
+    pub fn tool_overlay(&self) -> Option<[f64; 4]> {
+        self.tool.overlay()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -197,6 +225,8 @@ impl Editor {
             return false;
         }
         let snapshot = Snapshot::of_active_layer(&self.document);
+        self.gesture_base = (self.selection.needs_base() && self.tool.kind().confined_to_selection())
+            .then(|| self.document.active_layer().raster.clone());
         let mut ctx = ToolContext {
             document: &mut self.document,
             selection: &mut self.selection,
@@ -232,6 +262,9 @@ impl Editor {
             settings: &self.settings,
         };
         let changed = self.tool.update(&mut ctx, ev);
+        if changed {
+            self.enforce_selection();
+        }
         self.dirty |= changed;
         changed
     }
@@ -252,9 +285,22 @@ impl Editor {
             settings: &self.settings,
         };
         let changed = self.tool.finish(&mut ctx, ev);
+        if changed {
+            self.enforce_selection();
+        }
+        self.gesture_base = None;
         self.gesture = None;
         self.dirty |= changed;
         changed
+    }
+
+    /// Puts back the pixels the gesture was not allowed to touch. Does
+    /// nothing unless the selection is a mask and a base was kept.
+    fn enforce_selection(&mut self) {
+        if let Some(base) = self.gesture_base.as_ref() {
+            let raster = &mut self.document.active_layer_mut().raster;
+            self.selection.apply(raster, base);
+        }
     }
 
     /// Abandons the gesture in progress and the undo step it opened.
@@ -271,6 +317,7 @@ impl Editor {
             settings: &self.settings,
         };
         self.tool.cancel(&mut ctx);
+        self.gesture_base = None;
         if gesture == Gesture::EditsActiveLayer {
             // The tool has put the pixels back, so the step recorded for this
             // gesture would be an undo that does nothing. Drop it.
@@ -384,7 +431,12 @@ impl Editor {
             return false;
         }
         self.history.push(Snapshot::of_active_layer(&self.document));
+        let base = self.selection.needs_base().then(|| self.document.active_layer().raster.clone());
         op(&mut self.document.active_layer_mut().raster, clip);
+        if let Some(base) = base {
+            let raster = &mut self.document.active_layer_mut().raster;
+            self.selection.apply(raster, &base);
+        }
         self.dirty = true;
         true
     }
@@ -461,7 +513,28 @@ impl Editor {
             Ok(())
         })
         .expect("rotating cannot fail");
+        // The canvas changed shape, so a selection in the old coordinates is
+        // meaningless.
         self.selection = Selection::None;
+    }
+
+    /// Resizes the canvas as one undoable step, keeping the pixels at
+    /// `(dx, dy)` in the new canvas — what dragging an edge does. The
+    /// selection is dropped: it was in the old coordinates.
+    pub fn resize_canvas(&mut self, width: u32, height: u32, dx: i32, dy: i32) -> bool {
+        if !canvas_fits(width, height) {
+            return false;
+        }
+        if width == self.document.width() && height == self.document.height() {
+            return false;
+        }
+        self.structural(|d| {
+            d.resize_canvas(width, height, dx, dy);
+            Ok(())
+        })
+        .expect("resizing cannot fail");
+        self.selection = Selection::None;
+        true
     }
 
     pub fn flip_canvas_horizontal(&mut self) {
@@ -491,7 +564,16 @@ impl Editor {
     /// Copies the selected pixels of the active layer to a new layer above it.
     pub fn layer_via_copy(&mut self) -> usize {
         let clip = self.selection.clip(self.document.bounds());
-        self.structural(|d| Ok(d.layer_via_copy(clip))).expect("copying cannot fail")
+        let index = self.structural(|d| Ok(d.layer_via_copy(clip))).expect("copying cannot fail");
+        // The copy took the whole bounding box; a mask keeps only its own
+        // pixels of it.
+        if self.selection.needs_base() {
+            let blank = Raster::new(self.document.width(), self.document.height());
+            if let Some(layer) = self.document.layer_mut(index) {
+                self.selection.apply(&mut layer.raster, &blank);
+            }
+        }
+        index
     }
 
     // ---- Adjustment session (dialog with live preview) ---------------------------
@@ -536,6 +618,7 @@ impl Editor {
         };
         let mut out = base.clone();
         adjustment.apply(&mut out, clip);
+        self.selection.apply(&mut out, base);
         self.document.active_layer_mut().raster = out;
         self.dirty = true;
         Ok(())
@@ -588,7 +671,16 @@ impl Editor {
     pub fn begin_transform(&mut self) -> Result<(), SessionError> {
         self.open_session()?;
         let layer = &self.document.active_layer().raster;
-        let session = TransformSession::new(layer, self.selection.rect()).ok_or(SessionError::Empty)?;
+        let session = match self.selection.rect() {
+            // A selection hands over its own pixels: only it knows which ones
+            // it holds, and a mask holds less than its bounding box.
+            Some(rect) => {
+                let (moving, stationary) = self.selection.split(layer);
+                TransformSession::from_parts(moving, stationary, rect.intersect(&layer.bounds()), Some(rect))
+            }
+            None => TransformSession::new(layer, None),
+        }
+        .ok_or(SessionError::Empty)?;
         self.transform_base = Some(layer.clone());
         self.session = Some(Session::Transform(session));
         Ok(())
@@ -659,6 +751,150 @@ impl Editor {
         self.selection.rect()
     }
 
+    /// The marching ants: closed loops in document coordinates, one per
+    /// island and one per hole.
+    pub fn selection_contours(&self) -> Vec<Vec<Point>> {
+        self.selection.contours(self.document.bounds())
+    }
+
+    /// How many pixels are selected, for the status bar.
+    pub fn selection_area(&self) -> usize {
+        match self.selection() {
+            Selection::None => 0,
+            Selection::Rect(r) => r.area().max(0) as usize,
+            Selection::Mask(m) => m.count(),
+        }
+    }
+
+    /// The pixels the automatic selections read: the active layer, or the
+    /// flattened image when the options bar asks for it.
+    fn sample(&self) -> Raster {
+        if self.settings.sample_all_layers {
+            self.document.composite()
+        } else {
+            self.document.active_layer().raster.clone()
+        }
+    }
+
+    /// Swaps what is selected for what is not.
+    pub fn invert_selection(&mut self) -> bool {
+        let bounds = self.document.bounds();
+        self.selection.invert(bounds);
+        self.dirty = true;
+        true
+    }
+
+    /// Moves the edge of the selection out or in by `pixels`.
+    pub fn expand_selection(&mut self, pixels: u32) -> bool {
+        let bounds = self.document.bounds();
+        self.dirty = true;
+        self.selection.modify(bounds, |m| m.grow(pixels))
+    }
+
+    pub fn contract_selection(&mut self, pixels: u32) -> bool {
+        let bounds = self.document.bounds();
+        self.dirty = true;
+        self.selection.modify(bounds, |m| m.contract(pixels))
+    }
+
+    /// Fades the edge over `pixels`, so what is done inside fades out rather
+    /// than stopping dead.
+    pub fn feather_selection(&mut self, pixels: u32) -> bool {
+        let bounds = self.document.bounds();
+        self.dirty = true;
+        self.selection.modify(bounds, |m| m.feather(pixels))
+    }
+
+    /// Rounds off the edge, taking out spurs and nicks.
+    pub fn smooth_selection(&mut self, pixels: u32) -> bool {
+        let bounds = self.document.bounds();
+        self.dirty = true;
+        self.selection.modify(bounds, |m| m.smooth(pixels))
+    }
+
+    /// Selects everything a particular layer draws, whatever is active —
+    /// what Ctrl-clicking its thumbnail asks for.
+    pub fn select_layer_opaque(&mut self, index: usize, mode: SelectMode) -> Result<bool, DocumentError> {
+        let raster = self.document.layer(index).ok_or(DocumentError::NoSuchLayer)?.raster.clone();
+        Ok(self.select_opaque_of(&raster, mode))
+    }
+
+    /// Selects everything the active layer actually draws — its opaque
+    /// pixels — which is the exact selection for anything already cut out.
+    pub fn select_opaque(&mut self, mode: SelectMode) -> bool {
+        let source = self.sample();
+        self.select_opaque_of(&source, mode)
+    }
+
+    fn select_opaque_of(&mut self, source: &Raster, mode: SelectMode) -> bool {
+        let mask = Mask::from_fn(source.width(), source.height(), |x, y| {
+            // Partly transparent pixels are partly selected: the edge of a
+            // cut-out is already antialiased, and this keeps it that way.
+            source.get(x, y).a
+        });
+        if mask.is_empty() {
+            return false;
+        }
+        let bounds = self.document.bounds();
+        self.selection.combine(&mask, mode, bounds);
+        self.dirty = true;
+        true
+    }
+
+    /// Extends the selection to every pixel in the image that looks like one
+    /// already in it, wherever it is — Photoshop's Select Similar.
+    pub fn select_similar(&mut self) -> bool {
+        let Some(area) = self.selection.rect() else { return false };
+        let source = self.sample();
+        let tolerance = self.settings.tolerance;
+        let mut wanted = ColorSet::new();
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                if self.selection.contains(x, y) {
+                    wanted.add(source.get(x, y));
+                }
+            }
+        }
+        let mask = Mask::from_fn(source.width(), source.height(), |x, y| {
+            u8::from(wanted.holds(source.get(x, y), tolerance)) * 255
+        });
+        let bounds = self.document.bounds();
+        self.selection.combine(&mask, SelectMode::Add, bounds);
+        self.dirty = true;
+        true
+    }
+
+    /// Selects the subject from a matte worked out elsewhere — the model the
+    /// page can download and run. The matte is single-channel coverage at
+    /// whatever resolution the model works in; everything after that (where
+    /// the subject stops, dropping stray blobs, the soft edge) is the same
+    /// for every matte, and lives in `autoselect::matte`.
+    pub fn select_subject_from_matte(&mut self, matte: &[u8], matte_w: u32, matte_h: u32, mode: SelectMode) -> bool {
+        let (w, h) = (self.document.width(), self.document.height());
+        let mask = mask_from_matte(w, h, matte, matte_w, matte_h);
+        if mask.is_empty() || mask.is_everything() {
+            return false;
+        }
+        let bounds = self.document.bounds();
+        self.selection.combine(&mask, mode, bounds);
+        self.dirty = true;
+        true
+    }
+
+    /// Finds the subject of the picture and selects it. False when there is
+    /// nothing that stands out to select.
+    pub fn select_subject(&mut self, mode: SelectMode) -> bool {
+        let source = self.sample();
+        let mask = select_subject(&source);
+        if mask.is_empty() || mask.is_everything() {
+            return false;
+        }
+        let bounds = self.document.bounds();
+        self.selection.combine(&mask, mode, bounds);
+        self.dirty = true;
+        true
+    }
+
     // ---- Viewport ------------------------------------------------------------
 
     pub fn zoom(&self) -> f64 {
@@ -691,6 +927,13 @@ impl Editor {
         self.viewport.set_zoom_about(next, anchor);
     }
 
+    /// Tells the engine how big the window the document is drawn into is, in
+    /// CSS pixels. The page reports it on resize; a zoom that has to fill the
+    /// window — the zoom tool's marquee — needs it.
+    pub fn set_view_size(&mut self, view_w: f64, view_h: f64) {
+        self.viewport.set_view(view_w, view_h);
+    }
+
     pub fn fit_to_view(&mut self, view_w: f64, view_h: f64) {
         self.viewport.fit(self.document.width(), self.document.height(), view_w, view_h);
     }
@@ -717,6 +960,11 @@ mod tests {
         e.settings_mut().size = 1;
         e.set_tool(ToolKind::Pencil);
         e
+    }
+
+    /// Paints the starting picture for a test straight onto the layer.
+    fn paint(e: &mut Editor, mut f: impl FnMut(&mut Raster)) {
+        f(&mut e.document.active_layer_mut().raster);
     }
 
     fn px(e: &Editor, x: i32, y: i32) -> Rgba {
@@ -805,6 +1053,196 @@ mod tests {
         e.deselect();
         click(&mut e, 10.0, 10.0);
         assert_eq!(px(&e, 10, 10), RED);
+    }
+
+    /// A cross of opaque pixels on a transparent layer, which `select_opaque`
+    /// turns into a mask that is not a rectangle.
+    fn crossed() -> Editor {
+        let mut e = Editor::new(20, 20, Rgba::TRANSPARENT);
+        paint(&mut e, |raster| {
+            for i in 0..20 {
+                raster.set(i, 10, Rgba::BLACK);
+                raster.set(10, i, Rgba::BLACK);
+            }
+        });
+        e
+    }
+
+    #[test]
+    fn a_mask_selection_holds_the_brush_to_its_shape() {
+        let mut e = crossed();
+        assert!(e.select_opaque(SelectMode::Replace));
+        assert!(e.selection().mask().is_some(), "a cross is not a rectangle");
+
+        e.settings_mut().color = RED;
+        e.set_tool(ToolKind::Pencil);
+        e.settings_mut().size = 9;
+        click(&mut e, 10.0, 5.0);
+        assert_eq!(px(&e, 10, 5), RED, "on the arm of the cross: painted");
+        assert_eq!(px(&e, 7, 5), Rgba::TRANSPARENT, "beside it: untouched");
+    }
+
+    #[test]
+    fn a_mask_selection_holds_a_fill_to_its_shape() {
+        let mut e = crossed();
+        e.select_opaque(SelectMode::Replace);
+        e.settings_mut().color = RED;
+        assert!(e.fill_selection());
+        assert_eq!(px(&e, 3, 10), RED);
+        assert_eq!(px(&e, 3, 11), Rgba::TRANSPARENT);
+        assert!(e.undo());
+        assert_eq!(px(&e, 3, 10), Rgba::BLACK, "one undo step, all of it");
+    }
+
+    #[test]
+    fn a_feathered_selection_fades_what_is_done_inside_it() {
+        let mut e = Editor::new(40, 40, Rgba::WHITE);
+        e.select_all();
+        e.contract_selection(12);
+        assert!(e.feather_selection(6));
+        e.settings_mut().color = RED;
+        assert!(e.fill_selection());
+        assert_eq!(px(&e, 20, 20), RED, "the middle is filled outright");
+        let edge = px(&e, 20, 13);
+        assert!(edge != RED && edge != Rgba::WHITE, "and the edge is part way: {edge:?}");
+    }
+
+    #[test]
+    fn the_selection_can_be_inverted_expanded_and_contracted() {
+        let mut e = editor();
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(4.0, 4.0), false, false);
+        e.pointer_up(Point::new(8.0, 8.0), false, false);
+        assert!(e.expand_selection(2));
+        assert_eq!(e.selection_rect(), Some(Rect::new(2, 2, 8, 8)));
+        assert!(e.contract_selection(2));
+        assert_eq!(e.selection_rect(), Some(Rect::new(4, 4, 4, 4)));
+        assert!(e.invert_selection());
+        assert!(!e.selection().contains(5, 5));
+        assert!(e.selection().contains(0, 0));
+    }
+
+    #[test]
+    fn a_mask_selection_moves_only_the_pixels_it_holds() {
+        let mut e = crossed();
+        e.select_opaque(SelectMode::Replace);
+        e.set_tool(ToolKind::Move);
+        e.pointer_down(Point::new(10.0, 10.0), false, false);
+        e.pointer_up(Point::new(10.0, 13.0), false, false);
+        assert_eq!(px(&e, 3, 13), Rgba::BLACK, "the arm came down with it");
+        assert_eq!(px(&e, 3, 10), Rgba::TRANSPARENT, "and left nothing behind");
+    }
+
+    #[test]
+    fn transforming_a_mask_selection_takes_only_its_pixels() {
+        let mut e = crossed();
+        e.select_opaque(SelectMode::Replace);
+        e.begin_transform().unwrap();
+        e.transform_nudge(0.0, 4.0);
+        assert!(e.commit_session());
+        assert_eq!(px(&e, 3, 14), Rgba::BLACK);
+        assert_eq!(px(&e, 3, 10), Rgba::TRANSPARENT);
+        assert!(e.selection_rect().is_some(), "and the marquee went with it");
+    }
+
+    #[test]
+    fn select_similar_reaches_the_matching_pixels_elsewhere() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        paint(&mut e, |raster| {
+            for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3), (15, 15), (16, 15)] {
+                raster.set(x, y, RED);
+            }
+        });
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(2.0, 2.0), false, false);
+        e.pointer_up(Point::new(4.0, 4.0), false, false);
+        assert!(e.select_similar());
+        assert!(e.selection().contains(15, 15), "the far red pixels joined in");
+        assert!(!e.selection().contains(10, 10), "the white ones did not");
+    }
+
+    #[test]
+    fn selecting_the_subject_finds_it_and_says_when_it_cannot() {
+        let mut e = Editor::new(100, 100, Rgba::opaque(240, 240, 238));
+        paint(&mut e, |raster| {
+            for y in 30..70 {
+                for x in 30..70 {
+                    raster.set(x, y, Rgba::opaque(40, 90, 180));
+                }
+            }
+        });
+        assert!(e.select_subject(SelectMode::Replace));
+        assert!(e.selection().contains(50, 50));
+        assert!(!e.selection().contains(5, 5));
+
+        let mut flat = Editor::new(60, 60, Rgba::WHITE);
+        assert!(!flat.select_subject(SelectMode::Replace), "nothing to find in a blank sheet");
+        assert!(flat.selection().is_none());
+    }
+
+    #[test]
+    fn a_matte_from_outside_becomes_a_selection() {
+        let mut e = Editor::new(64, 64, Rgba::WHITE);
+        let mut matte = vec![0u8; 16 * 16];
+        for y in 4..12 {
+            for x in 4..12 {
+                matte[y * 16 + x] = 255;
+            }
+        }
+        assert!(e.select_subject_from_matte(&matte, 16, 16, SelectMode::Replace));
+        assert!(e.selection().contains(32, 32));
+        assert!(!e.selection().contains(2, 2));
+        assert!(!e.select_subject_from_matte(&[0u8; 256], 16, 16, SelectMode::Replace), "an empty matte selects nothing");
+    }
+
+    #[test]
+    fn a_canvas_too_big_to_hold_is_refused_rather_than_attempted() {
+        let mut e = editor();
+        assert!(!e.resize_canvas(200_000, 200_000, 0, 0), "40 gigabytes of pixels");
+        assert!(!e.resize_canvas(MAX_SIDE + 1, 10, 0, 0), "too wide");
+        assert!(!e.resize_canvas(20_000, 20_000, 0, 0), "each side fits, the area does not");
+        assert!(!e.resize_canvas(0, 10, 0, 0));
+        assert_eq!((e.document().width(), e.document().height()), (20, 20), "and nothing happened");
+        assert!(e.resize_canvas(6000, 4000, 0, 0), "a 24 megapixel photo is fine");
+    }
+
+    #[test]
+    fn the_canvas_can_be_resized_from_any_edge_and_undone() {
+        let mut e = editor();
+        paint(&mut e, |r| r.set(1, 1, RED));
+        e.select_all();
+        assert!(e.resize_canvas(30, 20, 10, 0), "dragging the left edge out");
+        assert_eq!((e.document().width(), e.document().height()), (30, 20));
+        assert_eq!(px(&e, 11, 1), RED, "the picture moved with the edge");
+        assert!(e.selection_rect().is_none(), "the old selection is meaningless now");
+        assert!(e.undo());
+        assert_eq!((e.document().width(), e.document().height()), (20, 20));
+        assert_eq!(px(&e, 1, 1), RED);
+        assert!(!e.resize_canvas(20, 20, 0, 0), "the same size is not a change");
+    }
+
+    #[test]
+    fn a_layer_can_be_selected_without_making_it_active() {
+        let mut e = Editor::new(20, 20, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(2, 2, RED));
+        let top = e.add_layer();
+        paint(&mut e, |r| r.set(15, 15, Rgba::BLACK));
+        assert_eq!(e.document().active_index(), top);
+
+        assert!(e.select_layer_opaque(0, SelectMode::Replace).unwrap(), "the layer below");
+        assert!(e.selection().contains(2, 2));
+        assert!(!e.selection().contains(15, 15));
+        assert_eq!(e.document().active_index(), top, "and it stayed active");
+        assert!(e.select_layer_opaque(9, SelectMode::Replace).is_err());
+    }
+
+    #[test]
+    fn the_ants_follow_the_shape_of_the_selection() {
+        let mut e = crossed();
+        assert!(e.selection_contours().is_empty(), "nothing selected, nothing to draw");
+        e.select_opaque(SelectMode::Replace);
+        assert!(!e.selection_contours().is_empty());
+        assert!(e.selection_area() > 0);
     }
 
     #[test]

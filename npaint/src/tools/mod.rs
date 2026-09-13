@@ -14,13 +14,16 @@ mod select;
 mod shape;
 mod stroke;
 mod view;
+mod wand;
 
 pub use movetool::MoveTool;
 pub use select::MarqueeTool;
 pub use shape::{Shape, ShapeTool};
 pub use stroke::{StrokeMode, StrokeTool};
 pub use view::{HandTool, ZoomTool};
+pub use wand::{MagicWandTool, QuickSelectTool, RefineTool};
 
+use crate::autoselect::SampleMode;
 use crate::color::Rgba;
 use crate::document::Document;
 use crate::geometry::Point;
@@ -32,6 +35,9 @@ use crate::viewport::Viewport;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToolKind {
     Select,
+    Wand,
+    QuickSelect,
+    Refine,
     Move,
     Brush,
     Pencil,
@@ -46,6 +52,9 @@ pub enum ToolKind {
 impl ToolKind {
     pub const ALL: &'static [ToolKind] = &[
         ToolKind::Select,
+        ToolKind::Wand,
+        ToolKind::QuickSelect,
+        ToolKind::Refine,
         ToolKind::Move,
         ToolKind::Brush,
         ToolKind::Pencil,
@@ -60,6 +69,9 @@ impl ToolKind {
     pub fn name(self) -> &'static str {
         match self {
             ToolKind::Select => "select",
+            ToolKind::Wand => "wand",
+            ToolKind::QuickSelect => "quickselect",
+            ToolKind::Refine => "refine",
             ToolKind::Move => "move",
             ToolKind::Brush => "brush",
             ToolKind::Pencil => "pencil",
@@ -75,7 +87,22 @@ impl ToolKind {
     /// Whether the tool changes the document at all. The others only move
     /// the view or the selection, and may be used on a hidden layer.
     pub fn edits_pixels(self) -> bool {
-        !matches!(self, ToolKind::Select | ToolKind::Zoom | ToolKind::Hand)
+        !matches!(
+            self,
+            ToolKind::Select
+                | ToolKind::Wand
+                | ToolKind::QuickSelect
+                | ToolKind::Refine
+                | ToolKind::Zoom
+                | ToolKind::Hand
+        )
+    }
+
+    /// Whether the tool's edits must stay inside the selection. The move
+    /// tool is the exception: moving pixels *out* of the selection is what it
+    /// is for, and it carries the selection along with them.
+    pub fn confined_to_selection(self) -> bool {
+        self.edits_pixels() && self != ToolKind::Move
     }
 
     pub fn from_name(name: &str) -> Option<ToolKind> {
@@ -85,6 +112,9 @@ impl ToolKind {
     pub fn instantiate(self) -> Box<dyn Tool> {
         match self {
             ToolKind::Select => Box::new(MarqueeTool::default()),
+            ToolKind::Wand => Box::new(MagicWandTool),
+            ToolKind::QuickSelect => Box::new(QuickSelectTool::default()),
+            ToolKind::Refine => Box::new(RefineTool::default()),
             ToolKind::Move => Box::new(MoveTool::default()),
             ToolKind::Zoom => Box::new(ZoomTool::default()),
             ToolKind::Hand => Box::new(HandTool::default()),
@@ -111,11 +141,35 @@ pub struct ToolSettings {
     pub opacity: f32,
     /// Whether the shape tools fill their shape or stroke its outline.
     pub fill: bool,
+    /// Whether dragging with the zoom tool scrubs the zoom continuously
+    /// rather than marking out the rectangle to zoom into.
+    pub scrubby_zoom: bool,
+    /// How far a colour may be from the one sampled and still be selected,
+    /// `0..=255`. The automatic selection tools share it.
+    pub tolerance: u8,
+    /// Whether the wand takes only the patch it was clicked on.
+    pub sample_mode: SampleMode,
+    /// Whether the automatic tools read the flattened image rather than the
+    /// active layer alone.
+    pub sample_all_layers: bool,
+    /// Whether an automatic selection gets a soft one-pixel edge.
+    pub antialias: bool,
 }
 
 impl Default for ToolSettings {
     fn default() -> ToolSettings {
-        ToolSettings { color: Rgba::BLACK, background: Rgba::WHITE, size: 8, opacity: 1.0, fill: true }
+        ToolSettings {
+            color: Rgba::BLACK,
+            background: Rgba::WHITE,
+            size: 8,
+            opacity: 1.0,
+            fill: true,
+            scrubby_zoom: true,
+            tolerance: 32,
+            sample_mode: SampleMode::Contiguous,
+            sample_all_layers: false,
+            antialias: true,
+        }
     }
 }
 
@@ -148,6 +202,16 @@ pub struct ToolContext<'a> {
 }
 
 impl ToolContext<'_> {
+    /// The pixels the automatic selection tools should read: the active
+    /// layer, or the flattened image when the options bar asks for it.
+    pub fn sample(&self) -> crate::raster::Raster {
+        if self.settings.sample_all_layers {
+            self.document.composite()
+        } else {
+            self.document.active_layer().raster.clone()
+        }
+    }
+
     /// The rectangle painting may touch: the active layer's bounds cut down
     /// by the selection.
     pub fn clip(&self) -> crate::geometry::Rect {
@@ -181,6 +245,14 @@ pub trait Tool {
     /// The gesture was abandoned (Escape, or the pointer left the window).
     /// The tool should put the document back the way it was.
     fn cancel(&mut self, ctx: &mut ToolContext);
+
+    /// A rubber band the page should draw over the canvas while the gesture
+    /// runs, as `[x, y, w, h]` in screen pixels. Only for gestures that show
+    /// nothing in the document itself — the zoom marquee; tools that draw
+    /// what they are doing say nothing here.
+    fn overlay(&self) -> Option<[f64; 4]> {
+        None
+    }
 }
 
 /// Snaps `end` so the vector from `start` is a square (equal magnitudes on

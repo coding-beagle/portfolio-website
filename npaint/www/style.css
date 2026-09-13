@@ -161,6 +161,17 @@ input[type="color"] {
 .opt[hidden] {
   display: none;
 }
+button.opt {
+  padding: 2px 10px;
+}
+.opt.check {
+  cursor: default;
+  user-select: none;
+}
+.opt.check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
 .seg {
   gap: 0;
 }
@@ -200,6 +211,13 @@ input[type="color"] {
   background: var(--panel);
   border-right: 1px solid var(--border);
   align-items: center;
+}
+/* A gap and a rule between blocks of like tools. */
+.tool-sep {
+  width: 22px;
+  height: 1px;
+  margin: 5px 0;
+  background: var(--border-soft);
 }
 .tool {
   position: relative;
@@ -252,6 +270,78 @@ input[type="color"] {
 }
 .viewport.panning.dragging canvas {
   cursor: grabbing;
+}
+
+/* The throbber: a 3:2 Lissajous figure with a bright arc running round it.
+   The whole curve is always there, so it reads as the site's mark rather than
+   a stock spinner. Two things move: the arc runs along the path, and the
+   phase between the figure's two axes creeps round, so the curve itself
+   changes shape as it turns. */
+.throb {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+.throb .track {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 7;
+  opacity: 0.4;
+}
+.throb .lead {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 7;
+  stroke-linecap: round;
+  /* The dash and the path itself are set frame by frame in app.js: the curve
+     changes shape as its phase moves, so its length — and the arc that is a
+     fraction of it — changes with it, which no CSS animation can follow. */
+}
+.loading .throb {
+  width: 40px;
+  height: 40px;
+}
+
+/* The panel that says what is happening while something slow happens: the
+   one-off model download, and the search that follows it. */
+.working {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+.working[hidden] {
+  display: none;
+}
+.working-label {
+  white-space: nowrap;
+}
+.working-bar {
+  width: 180px;
+  height: 8px;
+  accent-color: var(--accent);
+}
+.working-pct {
+  min-width: 3.2em;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dialog-form .field-note {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text-dim);
 }
 
 /* ---- Layers panel ---- */
@@ -382,6 +472,8 @@ input[type="color"] {
   inset: 0;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 12px;
   color: var(--text-dim);
 }
 .loading[hidden] {

@@ -2,8 +2,9 @@
 //! pixels. A transform session with only translation, committed on release.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
-use crate::geometry::{Point, Rect};
+use crate::geometry::Point;
 use crate::raster::Raster;
+use crate::selection::Selection;
 
 #[derive(Debug, Default)]
 pub struct MoveTool {
@@ -15,7 +16,9 @@ struct Moving {
     start: Point,
     moving: Raster,
     stationary: Raster,
-    selection: Option<Rect>,
+    /// The selection as it was when the drag began; it travels with the
+    /// pixels, whatever shape it is.
+    selection: Selection,
     /// The offset applied so far, so a move that ends where it began is a
     /// no-op and updates only happen on whole-pixel changes.
     offset: (i32, i32),
@@ -33,10 +36,8 @@ impl MoveTool {
         let mut out = g.stationary.clone();
         out.merge_over(&g.moving.translated(dx, dy));
         ctx.document.active_layer_mut().raster = out;
-        if let Some(rect) = g.selection {
-            let bounds = ctx.document.bounds();
-            ctx.selection.set_rect(Rect::new(rect.x + dx, rect.y + dy, rect.w, rect.h), bounds);
-        }
+        let bounds = ctx.document.bounds();
+        *ctx.selection = g.selection.translated(dx, dy, bounds);
         true
     }
 }
@@ -48,11 +49,8 @@ impl Tool for MoveTool {
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
         let layer = &ctx.document.active_layer().raster;
-        let selection = ctx.selection.rect();
-        let (moving, stationary) = match selection {
-            Some(rect) => layer.split(&rect),
-            None => (layer.clone(), Raster::new(layer.width(), layer.height())),
-        };
+        let (moving, stationary) = ctx.selection.split(layer);
+        let selection = ctx.selection.clone();
         self.gesture = Some(Moving { start: ev.pos, moving, stationary, selection, offset: (0, 0) });
         Gesture::EditsActiveLayer
     }
@@ -72,10 +70,7 @@ impl Tool for MoveTool {
             let mut back = g.stationary;
             back.merge_over(&g.moving);
             ctx.document.active_layer_mut().raster = back;
-            if let Some(rect) = g.selection {
-                let bounds = ctx.document.bounds();
-                ctx.selection.set_rect(rect, bounds);
-            }
+            *ctx.selection = g.selection;
         }
     }
 }
@@ -85,6 +80,8 @@ mod tests {
     use super::*;
     use crate::color::Rgba;
     use crate::document::Document;
+    use crate::geometry::Rect;
+    use crate::mask::Mask;
     use crate::selection::Selection;
     use crate::tools::ToolSettings;
     use crate::viewport::Viewport;
@@ -129,6 +126,27 @@ mod tests {
         assert_eq!(d.active_layer().raster.get(4, 2), RED);
         assert_eq!(d.active_layer().raster.get(7, 7), Rgba::BLACK, "outside the selection stays");
         assert_eq!(sel, Selection::Rect(Rect::new(2, 0, 5, 5)));
+    }
+
+    #[test]
+    fn moves_the_pixels_a_mask_holds_and_nothing_else() {
+        let mut d = doc();
+        let mut sel = Selection::None;
+        // A square with a bite out of one corner, so it stays a mask rather
+        // than collapsing back into a rectangle.
+        sel.set_mask(Mask::from_fn(10, 10, |x, y| u8::from(x < 4 && y < 4 && !(x == 3 && y == 3)) * 255));
+        let mut vp = Viewport::default();
+        let settings = ToolSettings::default();
+        let mut tool = MoveTool::default();
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &settings };
+        tool.begin(&mut ctx, PointerEvent::at(1.0, 1.0));
+        tool.finish(&mut ctx, PointerEvent::at(4.0, 1.0));
+        let r = &d.active_layer().raster;
+        assert_eq!(r.get(5, 2), RED, "the pixel inside the L came along");
+        assert_eq!(r.get(2, 2), Rgba::TRANSPARENT);
+        assert_eq!(r.get(7, 7), Rgba::BLACK, "and nothing outside moved");
+        assert!(sel.contains(5, 1), "the mask moved with it");
+        assert!(!sel.contains(2, 1));
     }
 
     #[test]

@@ -246,6 +246,17 @@ impl Document {
         }
     }
 
+    /// Resizes the canvas, keeping the existing pixels at `(dx, dy)` in the
+    /// new one. Every layer is document-sized, so they all move together.
+    pub fn resize_canvas(&mut self, width: u32, height: u32, dx: i32, dy: i32) {
+        let (width, height) = (width.max(1), height.max(1));
+        for layer in &mut self.layers {
+            layer.raster = layer.raster.resized(width, height, dx, dy);
+        }
+        self.width = width;
+        self.height = height;
+    }
+
     pub fn flip_canvas_horizontal(&mut self) {
         for layer in &mut self.layers {
             layer.raster = layer.raster.flipped_horizontal();
@@ -362,6 +373,19 @@ mod tests {
         assert_eq!(doc.active_layer().name, "Layer 2");
         assert_eq!(doc.active_index(), 0);
         assert_eq!(doc.move_layer(0, 9), Err(DocumentError::NoSuchLayer));
+    }
+
+    #[test]
+    fn resizing_the_canvas_moves_every_layer_together() {
+        let mut d = Document::new(4, 4, Rgba::WHITE);
+        d.add_layer();
+        d.active_layer_mut().raster.set(0, 0, Rgba::BLACK);
+        d.resize_canvas(6, 4, 2, 0);
+        assert_eq!(d.width(), 6);
+        assert_eq!(d.height(), 4);
+        assert_eq!(d.layer(0).unwrap().raster.get(2, 0), Rgba::WHITE, "the background moved");
+        assert_eq!(d.layer(1).unwrap().raster.get(2, 0), Rgba::BLACK, "and so did the layer above");
+        assert_eq!(d.layer(0).unwrap().raster.get(0, 0), Rgba::TRANSPARENT, "new space is empty");
     }
 
     #[test]

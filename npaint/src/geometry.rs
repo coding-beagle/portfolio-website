@@ -23,6 +23,25 @@ impl Point {
     }
 }
 
+/// A size in screen (CSS) pixels. Fractional, like [`Point`], because a
+/// window is not measured in document pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Size {
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Size {
+    pub const fn new(w: f64, h: f64) -> Size {
+        Size { w, h }
+    }
+
+    /// Whether the size is too small to map anything into.
+    pub fn is_empty(self) -> bool {
+        self.w <= 0.0 || self.h <= 0.0
+    }
+}
+
 /// An axis-aligned rectangle of whole pixels. `w` and `h` are never negative;
 /// an empty rect has an area of zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]

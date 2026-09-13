@@ -53,6 +53,13 @@ export class NPaint {
         return v1;
     }
     /**
+     * @returns {boolean}
+     */
+    antialias() {
+        const ret = wasm.npaint_antialias(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Applies a parameterless adjustment (invert, desaturate) in one step.
      * @param {string} name
      * @returns {boolean}
@@ -363,6 +370,22 @@ export class NPaint {
         return ret[0] !== 0;
     }
     /**
+     * @returns {number}
+     */
+    max_pixels() {
+        const ret = wasm.npaint_max_pixels(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * The biggest canvas the engine will make, for the page to clamp a drag
+     * with rather than asking for something that cannot be allocated.
+     * @returns {number}
+     */
+    max_side() {
+        const ret = wasm.npaint_max_side(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} index
      */
     merge_down(index) {
@@ -548,6 +571,18 @@ export class NPaint {
         wasm.npaint_reset_colors(this.__wbg_ptr);
     }
     /**
+     * Resizes the canvas, keeping the current pixels at `(dx, dy)`.
+     * @param {number} width
+     * @param {number} height
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {boolean}
+     */
+    resize_canvas(width, height, dx, dy) {
+        const ret = wasm.npaint_resize_canvas(this.__wbg_ptr, width, height, dx, dy);
+        return ret !== 0;
+    }
+    /**
      * @param {number} turns
      */
     rotate_canvas(turns) {
@@ -563,6 +598,28 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * @returns {boolean}
+     */
+    sample_all_layers() {
+        const ret = wasm.npaint_sample_all_layers(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string}
+     */
+    sample_mode() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_sample_mode(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * `[x, y]` document coordinates for a screen position, for the status
      * bar's cursor readout.
      * @param {number} x
@@ -575,8 +632,126 @@ export class NPaint {
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
     }
+    /**
+     * @returns {boolean}
+     */
+    scrubby_zoom() {
+        const ret = wasm.npaint_scrubby_zoom(this.__wbg_ptr);
+        return ret !== 0;
+    }
     select_all() {
         wasm.npaint_select_all(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} pixels
+     * @returns {boolean}
+     */
+    select_contract(pixels) {
+        const ret = wasm.npaint_select_contract(this.__wbg_ptr, pixels);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} pixels
+     * @returns {boolean}
+     */
+    select_expand(pixels) {
+        const ret = wasm.npaint_select_expand(this.__wbg_ptr, pixels);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} pixels
+     * @returns {boolean}
+     */
+    select_feather(pixels) {
+        const ret = wasm.npaint_select_feather(this.__wbg_ptr, pixels);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    select_invert() {
+        const ret = wasm.npaint_select_invert(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Selects everything one particular layer draws — Ctrl-clicking its
+     * thumbnail — without making it the active layer.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    select_layer_opaque(index) {
+        const ret = wasm.npaint_select_layer_opaque(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
+     * Selects the pixels the layer actually draws.
+     * @returns {boolean}
+     */
+    select_opaque() {
+        const ret = wasm.npaint_select_opaque(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Extends the selection to matching pixels anywhere in the image.
+     * @returns {boolean}
+     */
+    select_similar() {
+        const ret = wasm.npaint_select_similar(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @param {number} pixels
+     * @returns {boolean}
+     */
+    select_smooth(pixels) {
+        const ret = wasm.npaint_select_smooth(this.__wbg_ptr, pixels);
+        return ret !== 0;
+    }
+    /**
+     * Finds and selects the subject. False when there is nothing that stands
+     * out enough to call one.
+     * @returns {boolean}
+     */
+    select_subject() {
+        const ret = wasm.npaint_select_subject(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Selects the subject from a matte the page worked out with the model:
+     * `matte_w` x `matte_h` bytes of coverage, one per pixel, at whatever
+     * resolution the model runs at.
+     * @param {Uint8Array} matte
+     * @param {number} matte_w
+     * @param {number} matte_h
+     * @returns {boolean}
+     */
+    select_subject_from_matte(matte, matte_w, matte_h) {
+        const ptr0 = passArray8ToWasm0(matte, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_select_subject_from_matte(this.__wbg_ptr, ptr0, len0, matte_w, matte_h);
+        return ret !== 0;
+    }
+    /**
+     * How many pixels are selected.
+     * @returns {number}
+     */
+    selection_area() {
+        const ret = wasm.npaint_selection_area(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The marching ants as closed loops in document coordinates, flattened:
+     * each loop is its point count followed by that many x, y pairs.
+     * @returns {Float64Array}
+     */
+    selection_contours() {
+        const ret = wasm.npaint_selection_contours(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * `[x, y, w, h]` in document pixels, or an empty array when nothing is
@@ -597,6 +772,12 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {boolean} on
+     */
+    set_antialias(on) {
+        wasm.npaint_set_antialias(this.__wbg_ptr, on);
     }
     /**
      * @param {string} hex
@@ -653,10 +834,40 @@ export class NPaint {
         wasm.npaint_set_opacity(this.__wbg_ptr, opacity);
     }
     /**
+     * @param {boolean} all
+     */
+    set_sample_all_layers(all) {
+        wasm.npaint_set_sample_all_layers(this.__wbg_ptr, all);
+    }
+    /**
+     * "contiguous" or "global": whether the wand may reach across the image.
+     * @param {string} name
+     */
+    set_sample_mode(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_sample_mode(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {boolean} scrubby
+     */
+    set_scrubby_zoom(scrubby) {
+        wasm.npaint_set_scrubby_zoom(this.__wbg_ptr, scrubby);
+    }
+    /**
      * @param {number} size
      */
     set_size(size) {
         wasm.npaint_set_size(this.__wbg_ptr, size);
+    }
+    /**
+     * @param {number} tolerance
+     */
+    set_tolerance(tolerance) {
+        wasm.npaint_set_tolerance(this.__wbg_ptr, tolerance);
     }
     /**
      * @param {string} name
@@ -668,6 +879,13 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {number} view_w
+     * @param {number} view_h
+     */
+    set_view_size(view_w, view_h) {
+        wasm.npaint_set_view_size(this.__wbg_ptr, view_w, view_h);
     }
     /**
      * @param {number} zoom
@@ -686,6 +904,13 @@ export class NPaint {
     }
     swap_colors() {
         wasm.npaint_swap_colors(this.__wbg_ptr);
+    }
+    /**
+     * @returns {number}
+     */
+    tolerance() {
+        const ret = wasm.npaint_tolerance(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {string}
@@ -709,6 +934,17 @@ export class NPaint {
         const ret = wasm.npaint_tool_names();
         var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * `[x, y, w, h]` in screen pixels for the rubber band the current
+     * gesture wants drawn, or empty when there is none.
+     * @returns {Float64Array}
+     */
+    tool_overlay() {
+        const ret = wasm.npaint_tool_overlay(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
     }
     /**

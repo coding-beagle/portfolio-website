@@ -60,6 +60,28 @@ impl Rgba {
         self.with_alpha(a)
     }
 
+    /// Mixes towards `other` by `t` in `0.0..=1.0`, as straight alpha over
+    /// premultiplied channels — mixing straight colours would drag the hue of
+    /// a transparent pixel into a solid one and leave a halo.
+    pub fn lerp(self, other: Rgba, t: f32) -> Rgba {
+        let t = t.clamp(0.0, 1.0);
+        let (sa, oa) = (f32::from(self.a) / 255.0, f32::from(other.a) / 255.0);
+        let a = sa + (oa - sa) * t;
+        if a <= 0.0 {
+            return Rgba::TRANSPARENT;
+        }
+        let channel = |s: u8, o: u8| {
+            let v = (f32::from(s) * sa + (f32::from(o) * oa - f32::from(s) * sa) * t) / a;
+            v.round().clamp(0.0, 255.0) as u8
+        };
+        Rgba::new(
+            channel(self.r, other.r),
+            channel(self.g, other.g),
+            channel(self.b, other.b),
+            (a * 255.0).round() as u8,
+        )
+    }
+
     /// Composites `self` over `dst` with the standard "source over" operator.
     ///
     /// Both colours are straight alpha, which is what the canvas `ImageData`

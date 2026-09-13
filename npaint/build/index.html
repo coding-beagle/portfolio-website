@@ -35,6 +35,28 @@
           <input id="opt-opacity" type="range" min="1" max="100" value="100" />
           <output id="opt-opacity-out">100%</output>
         </label>
+        <label class="opt" id="opt-tolerance-wrap" title="How far a colour may be from the one sampled and still be selected">
+          <span>Tolerance</span>
+          <input id="opt-tolerance" type="range" min="0" max="255" value="32" />
+          <output id="opt-tolerance-out">32</output>
+        </label>
+        <div class="opt seg" id="opt-sample-wrap" role="radiogroup" aria-label="Wand reach">
+          <button id="opt-contiguous" class="seg-on" aria-pressed="true" title="Only the patch under the click">Contiguous</button>
+          <button id="opt-global" aria-pressed="false" title="Every matching pixel in the image">Global</button>
+        </div>
+        <label class="opt check" id="opt-all-layers-wrap" title="Read the flattened image rather than the active layer alone">
+          <input type="checkbox" id="opt-all-layers" />
+          All layers
+        </label>
+        <label class="opt check" id="opt-antialias-wrap" title="Give the selection a soft one-pixel edge">
+          <input type="checkbox" id="opt-antialias" checked />
+          Anti-alias
+        </label>
+        <button class="opt" id="opt-subject" title="Find the subject of the picture and select it">Select subject</button>
+        <label class="opt" id="opt-quality-wrap" title="Which model Select Subject uses. Bigger is better and downloads once.">
+          <span>Quality</span>
+          <select id="opt-quality"></select>
+        </label>
         <div class="opt seg" id="opt-fill-wrap" role="radiogroup" aria-label="Shape style">
           <button id="opt-fill" class="seg-on" aria-pressed="true">Fill</button>
           <button id="opt-stroke" aria-pressed="false">Outline</button>
@@ -43,6 +65,10 @@
           <button id="opt-zoom-in" class="seg-on" aria-pressed="true" title="Click zooms in (hold Alt to zoom out)">Zoom in</button>
           <button id="opt-zoom-out" aria-pressed="false" title="Click zooms out">Zoom out</button>
         </div>
+        <label class="opt check" id="opt-scrubby-wrap" title="Drag left and right to zoom continuously, instead of dragging out the area to zoom into">
+          <input type="checkbox" id="opt-scrubby" />
+          Scrubby zoom
+        </label>
         <div class="opt transform-bar" id="transform-bar" hidden>
           <span class="tb-label">Transform</span>
           <span id="tb-info" class="tb-info"></span>
@@ -69,6 +95,12 @@
 
         <div class="viewport" id="viewport">
           <canvas id="view"></canvas>
+          <div class="working" id="working" hidden role="status" aria-live="polite">
+            <span class="throb-slot"></span>
+            <span class="working-label" id="working-label"></span>
+            <progress class="working-bar" id="working-bar" max="1"></progress>
+            <span class="working-pct" id="working-pct"></span>
+          </div>
         </div>
 
         <aside class="panel layers-panel">
@@ -94,13 +126,14 @@
         <span id="status-cursor">—</span>
         <span id="status-size"></span>
         <span id="status-selection"></span>
+        <span id="status-brush"></span>
         <span id="status-message" class="status-message"></span>
         <span class="status-spacer"></span>
         <span class="status-keys">Space+drag or middle mouse to pan · Ctrl+wheel to zoom · Right-click for options</span>
       </footer>
     </div>
 
-    <div id="loading" class="loading">Loading NPaint…</div>
+    <div id="loading" class="loading"><span class="throb-slot"></span>Loading NPaint…</div>
     <div id="unsupported" class="loading" hidden>
       NPaint needs WebAssembly, which this browser does not offer.
     </div>
@@ -137,8 +170,57 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-canvas">
+      <form id="canvas-form" class="dialog-form">
+        <h2>Canvas size</h2>
+        <label>Width <input id="canvas-width" type="number" min="1" max="16384" /> px</label>
+        <label>Height <input id="canvas-height" type="number" min="1" max="16384" /> px</label>
+        <label>Anchor
+          <select id="canvas-anchor">
+            <option value="cc">Centre</option>
+            <option value="tl">Top left</option>
+            <option value="tc">Top</option>
+            <option value="tr">Top right</option>
+            <option value="cl">Left</option>
+            <option value="cr">Right</option>
+            <option value="bl">Bottom left</option>
+            <option value="bc">Bottom</option>
+            <option value="br">Bottom right</option>
+          </select>
+        </label>
+        <p class="field-note" id="canvas-note"></p>
+        <div class="dialog-buttons">
+          <button type="button" id="canvas-cancel">Cancel</button>
+          <button type="submit" class="primary">Resize</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="dlg-export">
+      <form id="export-form" class="dialog-form">
+        <h2>Export image</h2>
+        <label>Name <input id="export-name" type="text" value="npaint" spellcheck="false" /></label>
+        <label>Format
+          <select id="export-format">
+            <option value="image/png">PNG (lossless, transparent)</option>
+            <option value="image/jpeg">JPEG (smaller, opaque)</option>
+            <option value="image/webp">WebP (smaller, transparent)</option>
+          </select>
+        </label>
+        <label id="export-quality-wrap">Quality
+          <input id="export-quality" type="range" min="1" max="100" value="90" />
+          <output id="export-quality-out">90%</output>
+        </label>
+        <p class="field-note" id="export-note"></p>
+        <div class="dialog-buttons">
+          <button type="button" id="export-cancel">Cancel</button>
+          <button type="submit" class="primary">Export</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="color-popover" class="color-popover" hidden></div>
-    <div id="menu-layer" class="popup-menu" hidden></div>
+    <div id="menu-layer" hidden></div>
 
     <input id="file-input" type="file" accept="image/*" hidden />
 
