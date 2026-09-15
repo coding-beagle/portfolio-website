@@ -11,6 +11,8 @@
 
 mod bucket;
 mod eyedropper;
+mod gradient;
+mod lasso;
 mod movetool;
 mod select;
 mod shape;
@@ -22,6 +24,8 @@ mod wand;
 
 pub use bucket::BucketTool;
 pub use eyedropper::{sample_color, EyedropperTool};
+pub use gradient::GradientTool;
+pub use lasso::LassoTool;
 pub use movetool::MoveTool;
 pub use select::{MarqueeShape, MarqueeTool};
 pub use shape::{Shape, ShapeTool};
@@ -46,6 +50,7 @@ use crate::viewport::Viewport;
 pub enum ToolKind {
     Select,
     EllipseSelect,
+    Lasso,
     Crop,
     Wand,
     QuickSelect,
@@ -56,6 +61,7 @@ pub enum ToolKind {
     Pencil,
     Eraser,
     Bucket,
+    Gradient,
     Eyedropper,
     Line,
     Rectangle,
@@ -69,6 +75,7 @@ impl ToolKind {
     pub const ALL: &'static [ToolKind] = &[
         ToolKind::Select,
         ToolKind::EllipseSelect,
+        ToolKind::Lasso,
         ToolKind::Crop,
         ToolKind::Wand,
         ToolKind::QuickSelect,
@@ -79,6 +86,7 @@ impl ToolKind {
         ToolKind::Pencil,
         ToolKind::Eraser,
         ToolKind::Bucket,
+        ToolKind::Gradient,
         ToolKind::Eyedropper,
         ToolKind::Line,
         ToolKind::Rectangle,
@@ -92,6 +100,7 @@ impl ToolKind {
         match self {
             ToolKind::Select => "select",
             ToolKind::EllipseSelect => "ellipse-select",
+            ToolKind::Lasso => "lasso",
             ToolKind::Crop => "crop",
             ToolKind::Wand => "wand",
             ToolKind::QuickSelect => "quickselect",
@@ -102,6 +111,7 @@ impl ToolKind {
             ToolKind::Pencil => "pencil",
             ToolKind::Eraser => "eraser",
             ToolKind::Bucket => "bucket",
+            ToolKind::Gradient => "gradient",
             ToolKind::Eyedropper => "eyedropper",
             ToolKind::Line => "line",
             ToolKind::Rectangle => "rectangle",
@@ -115,7 +125,7 @@ impl ToolKind {
     /// What the history panel calls a gesture made with the tool.
     pub fn label(self) -> &'static str {
         match self {
-            ToolKind::Select | ToolKind::EllipseSelect | ToolKind::Crop => "Select",
+            ToolKind::Select | ToolKind::EllipseSelect | ToolKind::Lasso | ToolKind::Crop => "Select",
             ToolKind::Wand => "Magic Wand",
             ToolKind::QuickSelect => "Quick Select",
             ToolKind::SubjectBox => "Select Subject",
@@ -125,6 +135,7 @@ impl ToolKind {
             ToolKind::Pencil => "Pencil",
             ToolKind::Eraser => "Eraser",
             ToolKind::Bucket => "Paint Bucket",
+            ToolKind::Gradient => "Gradient",
             ToolKind::Eyedropper => "Eyedropper",
             ToolKind::Line => "Line",
             ToolKind::Rectangle => "Rectangle",
@@ -145,6 +156,7 @@ impl ToolKind {
             self,
             ToolKind::Select
                 | ToolKind::EllipseSelect
+                | ToolKind::Lasso
                 | ToolKind::Crop
                 | ToolKind::Wand
                 | ToolKind::QuickSelect
@@ -160,7 +172,7 @@ impl ToolKind {
     /// Whether Alt-clicking with the tool samples a colour instead —
     /// the eyedropper that lives under every painting tool.
     pub fn alt_picks_color(self) -> bool {
-        matches!(self, ToolKind::Brush | ToolKind::Pencil | ToolKind::Bucket)
+        matches!(self, ToolKind::Brush | ToolKind::Pencil | ToolKind::Bucket | ToolKind::Gradient)
     }
 
     /// Whether the tool's edits must stay inside the selection. The move
@@ -178,6 +190,7 @@ impl ToolKind {
         match self {
             ToolKind::Select => Box::new(MarqueeTool::new(MarqueeShape::Rectangle, false)),
             ToolKind::EllipseSelect => Box::new(MarqueeTool::new(MarqueeShape::Ellipse, false)),
+            ToolKind::Lasso => Box::new(LassoTool::default()),
             ToolKind::Crop => Box::new(MarqueeTool::new(MarqueeShape::Rectangle, true)),
             ToolKind::Wand => Box::new(MagicWandTool),
             ToolKind::QuickSelect => Box::new(QuickSelectTool::default()),
@@ -190,6 +203,7 @@ impl ToolKind {
             ToolKind::Pencil => Box::new(StrokeTool::new(StrokeMode::Pencil)),
             ToolKind::Eraser => Box::new(StrokeTool::new(StrokeMode::Eraser)),
             ToolKind::Bucket => Box::new(BucketTool::default()),
+            ToolKind::Gradient => Box::new(GradientTool::default()),
             ToolKind::Eyedropper => Box::new(EyedropperTool),
             ToolKind::Line => Box::new(ShapeTool::new(Shape::Line)),
             ToolKind::Rectangle => Box::new(ShapeTool::new(Shape::Rectangle)),
@@ -225,6 +239,11 @@ pub struct ToolSettings {
     pub hardness: f32,
     /// Whether the shape tools fill their shape or stroke its outline.
     pub fill: bool,
+    /// How the gradient tool lays its two colours out.
+    pub gradient_shape: crate::gradient::GradientShape,
+    /// Whether the gradient runs from the background colour to the
+    /// foreground rather than the other way about.
+    pub gradient_reverse: bool,
     /// Whether dragging with the zoom tool scrubs the zoom continuously
     /// rather than marking out the rectangle to zoom into.
     pub scrubby_zoom: bool,
@@ -261,6 +280,8 @@ impl Default for ToolSettings {
             opacity: 1.0,
             hardness: 1.0,
             fill: true,
+            gradient_shape: crate::gradient::GradientShape::default(),
+            gradient_reverse: false,
             scrubby_zoom: true,
             tolerance: 32,
             sample_mode: SampleMode::Contiguous,
@@ -466,7 +487,7 @@ mod tests {
             assert_eq!(ToolKind::from_name(kind.name()), Some(*kind));
             assert_eq!(kind.instantiate().kind(), *kind);
         }
-        assert_eq!(ToolKind::from_name("lasso"), None);
+        assert_eq!(ToolKind::from_name("nothing-of-the-sort"), None);
     }
 
     #[test]

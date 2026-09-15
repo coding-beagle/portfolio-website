@@ -78,6 +78,58 @@ impl Mask {
         mask
     }
 
+    /// The inside of a closed polygon, as a mask of `width` by `height`.
+    ///
+    /// The rule is non-zero winding, not even-odd: a lasso that crosses
+    /// itself comes out as one filled shape rather than one with a hole
+    /// punched where it crossed, which is what a hand drawing a loop means
+    /// by it. A pixel is inside when its *centre* is, so the edge is hard —
+    /// [`Mask::antialias`] softens it afterwards, as the ellipse marquee
+    /// does.
+    pub fn from_polygon(width: u32, height: u32, points: &[Point]) -> Mask {
+        let mut mask = Mask::new(width, height);
+        if points.len() < 3 || width == 0 || height == 0 {
+            return mask;
+        }
+        let (top, bottom) = points.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.y), hi.max(p.y)));
+        let y0 = (top - 0.5).ceil().max(0.0) as i32;
+        let y1 = ((bottom - 0.5).ceil() as i64).min(i64::from(height)) as i32;
+        let stride = width as usize;
+        // Every edge that crosses the scanline, with the direction it
+        // crossed in; the winding number is the running sum of those.
+        let mut crossings: Vec<(f64, i32)> = Vec::with_capacity(points.len());
+        for y in y0..y1 {
+            let sy = f64::from(y) + 0.5;
+            crossings.clear();
+            for (i, a) in points.iter().enumerate() {
+                let b = points[(i + 1) % points.len()];
+                // A half-open test on y, so a vertex exactly on the
+                // scanline counts once rather than twice or not at all.
+                if (a.y <= sy) == (b.y <= sy) {
+                    continue;
+                }
+                let t = (sy - a.y) / (b.y - a.y);
+                crossings.push((a.x + t * (b.x - a.x), if b.y > a.y { 1 } else { -1 }));
+            }
+            crossings.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let mut winding = 0;
+            for pair in crossings.windows(2) {
+                winding += pair[0].1;
+                if winding == 0 {
+                    continue;
+                }
+                let from = (pair[0].0 - 0.5).ceil().max(0.0) as i32;
+                let to = ((pair[1].0 - 0.5).ceil() as i64).min(i64::from(width)) as i32;
+                let row = (y as usize) * stride;
+                for x in from..to {
+                    mask.cover[row + x as usize] = 255;
+                }
+            }
+        }
+        mask.recompute_bounds();
+        mask
+    }
+
     /// Builds a mask from a per-pixel coverage function.
     pub fn from_fn(width: u32, height: u32, mut f: impl FnMut(i32, i32) -> u8) -> Mask {
         let mut mask = Mask::new(width, height);
@@ -561,6 +613,48 @@ fn simplify(points: Vec<(i32, i32)>) -> Vec<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_polygon_fills_its_inside() {
+        let square = [Point::new(2.0, 2.0), Point::new(8.0, 2.0), Point::new(8.0, 8.0), Point::new(2.0, 8.0)];
+        let mask = Mask::from_polygon(10, 10, &square);
+        assert_eq!(mask.bounds(), Rect::new(2, 2, 6, 6));
+        assert_eq!(mask.count(), 36);
+        assert_eq!(mask.cover(2, 2), 255);
+        assert_eq!(mask.cover(7, 7), 255);
+        assert_eq!(mask.cover(1, 2), 0);
+        assert_eq!(mask.cover(8, 8), 0);
+
+        let triangle = [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(0.0, 10.0)];
+        let mask = Mask::from_polygon(10, 10, &triangle);
+        assert_eq!(mask.cover(0, 0), 255);
+        assert_eq!(mask.cover(9, 9), 0, "the far corner is outside the hypotenuse");
+
+        assert!(Mask::from_polygon(10, 10, &square[..2]).is_empty(), "two points are not a polygon");
+    }
+
+    #[test]
+    fn a_polygon_that_crosses_itself_has_no_hole() {
+        // A bow tie: the two lobes meet at the middle. Under even-odd the
+        // overlap would drop out; under non-zero winding it stays.
+        let bow = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(0.0, 10.0),
+            Point::new(10.0, 10.0),
+        ];
+        let mask = Mask::from_polygon(10, 10, &bow);
+        assert!(mask.cover(5, 5) > 0 || mask.cover(4, 5) > 0, "the crossing is filled");
+        assert_eq!(mask.cover(0, 0), 255);
+        assert_eq!(mask.cover(8, 0), 255, "and so is the far end of the top lobe");
+    }
+
+    #[test]
+    fn a_polygon_is_clipped_to_the_mask() {
+        let big = [Point::new(-20.0, -20.0), Point::new(40.0, -20.0), Point::new(40.0, 40.0), Point::new(-20.0, 40.0)];
+        let mask = Mask::from_polygon(8, 8, &big);
+        assert!(mask.is_everything(), "a polygon round the whole canvas selects all of it");
+    }
     use crate::color::Rgba;
     use crate::raster::Raster;
 

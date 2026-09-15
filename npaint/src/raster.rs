@@ -8,6 +8,7 @@
 use crate::blend::BlendMode;
 use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
+use crate::gradient::Gradient;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Raster {
@@ -314,6 +315,15 @@ impl Raster {
                 self.pixels[i] = color.over(self.pixels[i]);
             }
         }
+    }
+
+    /// Paints `gradient` over the clip at `opacity`, `0.0..=1.0`.
+    ///
+    /// The colour is decided by the pixel's *document* position, never by
+    /// where the clip starts, so a gradient drawn through a selection lines
+    /// up with the same gradient drawn over the whole layer.
+    pub fn fill_gradient(&mut self, gradient: &Gradient, opacity: f32, clip: &Rect) {
+        self.map_at(clip, |dst, x, y| gradient.at(x, y).scaled_alpha(opacity).over(dst));
     }
 
     /// Draws the outline of `rect`, `thickness` pixels wide, growing inward.

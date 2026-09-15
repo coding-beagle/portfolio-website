@@ -126,6 +126,35 @@ export const ADJUSTMENTS = [
   { name: "posterize", label: "Posterize…", params: [channelParam(), { label: "Levels", min: 2, max: 32, value: 4 }] },
   { name: "threshold", label: "Threshold…", params: [{ label: "Level", min: 0, max: 255, value: 128 }] },
   { name: "invert", label: "Invert", shortcut: "Ctrl+I", params: [] },
+  // The filters. They are adjustments in every way that matters — the same
+  // dialog, the same preview, the same life as an adjustment layer — and
+  // are marked only so the menu bar can list them under Filter, where
+  // people look for them. See `filter.rs` for why they are not lookup
+  // tables like the rest.
+  {
+    name: "blur",
+    label: "Blur…",
+    group: "filter",
+    params: [{ label: "Radius", min: 0, max: 50, value: 2, unit: " px" }],
+  },
+  {
+    name: "sharpen",
+    label: "Sharpen…",
+    group: "filter",
+    params: [
+      { label: "Radius", min: 1, max: 50, value: 1, unit: " px" },
+      { label: "Amount", min: 0, max: 300, value: 100, unit: "%" },
+    ],
+  },
+  {
+    name: "noise",
+    label: "Add Noise…",
+    group: "filter",
+    params: [
+      { label: "Amount", min: 0, max: 100, value: 10, unit: "%" },
+      { kind: "toggle", label: "Monochromatic", value: 0 },
+    ],
+  },
   { name: "desaturate", label: "Desaturate", shortcut: "Ctrl+Shift+U", params: [] },
 ];
 

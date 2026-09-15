@@ -16,6 +16,7 @@
 
 use crate::color::Rgba;
 use crate::dither::{Dither, DitherMethod, MAX_LEVELS, MAX_SCALE, MIN_LEVELS};
+use crate::filter;
 use crate::geometry::Rect;
 use crate::raster::Raster;
 
@@ -99,6 +100,14 @@ pub enum Kind {
     /// pattern. `strength` and `scale` are the pattern's amount and cell
     /// size; `mono` greys the picture first. See [`crate::dither`].
     Dither { method: DitherMethod, levels: f32, strength: f32, scale: f32, mono: bool },
+    /// A Gaussian-ish blur of `radius` pixels. See [`crate::filter`].
+    Blur { radius: f32 },
+    /// Unsharp mask: `amount` percent of what a blur of `radius` threw away,
+    /// put back.
+    Sharpen { radius: f32, amount: f32 },
+    /// Grain: colours scattered by up to `amount` percent of the range,
+    /// keyed to where the pixel is. `mono` moves the channels together.
+    Noise { amount: f32, mono: bool },
 }
 
 
@@ -140,6 +149,9 @@ impl Adjustment {
         "posterize",
         "threshold",
         "dither",
+        "blur",
+        "sharpen",
+        "noise",
     ];
 
     /// Builds an adjustment from its name and parameters.
@@ -192,18 +204,18 @@ impl Adjustment {
         match self.pixel_map() {
             Some(f) => raster.map_in(clip, |p| f.map(p)),
             None => {
-                // A dither is decided by where the pixel is and by its
-                // neighbours, so it cannot be written as a function of one
-                // colour: it runs over a copy, and the targeted channel is
-                // taken back out of it.
-                let dither = self.kind.dither();
+                // A dither, a blur and the two filters built on it are
+                // decided by where the pixel is and by its neighbours, so
+                // none of them can be written as a function of one colour:
+                // each runs over a copy, and the targeted channel is taken
+                // back out of it.
                 if self.channel == Channel::All {
-                    dither.apply(raster, clip);
+                    self.kind.apply_spatial(raster, clip);
                 } else {
-                    let mut dithered = raster.clone();
-                    dither.apply(&mut dithered, clip);
+                    let mut worked = raster.clone();
+                    self.kind.apply_spatial(&mut worked, clip);
                     let channel = self.channel;
-                    raster.map_at(clip, |p, x, y| channel.pick(dithered.get(x, y), p));
+                    raster.map_at(clip, |p, x, y| channel.pick(worked.get(x, y), p));
                 }
             }
         }
@@ -222,7 +234,7 @@ impl Adjustment {
     /// handed: at 4K that is eight million tables. `None` for an adjustment
     /// that needs more than the colour to answer, which is the dither.
     pub fn pixel_map(&self) -> Option<PixelMap<'_>> {
-        if matches!(self.kind, Kind::Dither { .. }) {
+        if self.kind.is_spatial() {
             return None;
         }
         Some(PixelMap { kind: &self.kind, channel: self.channel, lut: self.kind.lut() })
@@ -292,6 +304,12 @@ impl Kind {
                 scale: p(3, 1.0).round().clamp(1.0, MAX_SCALE),
                 mono: p(4, 0.0) >= 0.5,
             },
+            "blur" => Kind::Blur { radius: p(0, 2.0).clamp(0.0, filter::MAX_BLUR_RADIUS) },
+            "sharpen" => Kind::Sharpen {
+                radius: p(0, 1.0).clamp(1.0, filter::MAX_BLUR_RADIUS),
+                amount: p(1, 100.0).clamp(0.0, 300.0),
+            },
+            "noise" => Kind::Noise { amount: p(0, 10.0).clamp(0.0, 100.0), mono: p(1, 0.0) >= 0.5 },
             other => return Err(AdjustmentError(format!("unknown adjustment: {other}"))),
         })
     }
@@ -308,6 +326,9 @@ impl Kind {
             Kind::Posterize { .. } => "posterize",
             Kind::Threshold { .. } => "threshold",
             Kind::Dither { .. } => "dither",
+            Kind::Blur { .. } => "blur",
+            Kind::Sharpen { .. } => "sharpen",
+            Kind::Noise { .. } => "noise",
         }
     }
 
@@ -324,6 +345,9 @@ impl Kind {
             Kind::Posterize { .. } => "Posterize",
             Kind::Threshold { .. } => "Threshold",
             Kind::Dither { .. } => "Dither",
+            Kind::Blur { .. } => "Blur",
+            Kind::Sharpen { .. } => "Sharpen",
+            Kind::Noise { .. } => "Noise",
         }
     }
 
@@ -343,6 +367,9 @@ impl Kind {
             Kind::Dither { method, levels, strength, scale, mono } => {
                 vec![method.index(), *levels, *strength, *scale, if *mono { 1.0 } else { 0.0 }]
             }
+            Kind::Blur { radius } => vec![*radius],
+            Kind::Sharpen { radius, amount } => vec![*radius, *amount],
+            Kind::Noise { amount, mono } => vec![*amount, if *mono { 1.0 } else { 0.0 }],
         }
     }
 
@@ -361,12 +388,38 @@ impl Kind {
         matches!(self, Kind::BrightnessContrast { .. } | Kind::Levels { .. } | Kind::Curves { .. } | Kind::Posterize { .. })
     }
 
-    /// The kind applied to one colour, every channel of it. A dither has no
-    /// neighbours and no position here, so it answers with the rounding it
-    /// would have dithered around; [`Adjustment::apply`] is the real thing.
+    /// Whether the adjustment needs more than the colour to answer: where
+    /// the pixel is, or what is around it. Those go through
+    /// [`Kind::apply_spatial`] rather than a lookup table, and
+    /// [`Adjustment::pixel_map`] has nothing to offer for them.
+    pub fn is_spatial(&self) -> bool {
+        matches!(self, Kind::Dither { .. } | Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. })
+    }
+
+    /// The adjustments that read more than one pixel, applied to the clip.
+    ///
+    /// Each of these must give a pixel the same answer whatever clip it was
+    /// asked for — a preview through a selection composites a rectangle at a
+    /// time. [`crate::filter`] says how they manage it.
+    fn apply_spatial(&self, raster: &mut Raster, clip: &Rect) {
+        match self {
+            Kind::Dither { .. } => self.dither().apply(raster, clip),
+            Kind::Blur { radius } => filter::blur(raster, clip, *radius),
+            Kind::Sharpen { radius, amount } => filter::sharpen(raster, clip, *radius, *amount),
+            Kind::Noise { amount, mono } => filter::noise(raster, clip, *amount, *mono),
+            _ => unreachable!("only a spatial adjustment asks for one"),
+        }
+    }
+
+    /// The kind applied to one colour, every channel of it. The spatial ones
+    /// have no neighbours and no position here: a dither answers with the
+    /// rounding it would have dithered around, and the three filters answer
+    /// with the colour untouched, since a blur of one pixel on its own is
+    /// that pixel. [`Adjustment::apply`] is the real thing.
     pub fn map(&self, p: Rgba) -> Rgba {
         match self {
             Kind::Dither { .. } => self.dither().quantize(p),
+            Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. } => p,
             Kind::HueSaturation { hue, saturation, lightness } => {
                 let (h, s, l) = rgb_to_hsl(p);
                 let h = (h + hue).rem_euclid(360.0);
@@ -702,6 +755,51 @@ mod tests {
             let adj = Adjustment::from_params(name, &[50.0, 50.0, 2.0]).unwrap();
             assert_eq!(adj.map(p).a, 77, "{name}");
         }
+    }
+
+    #[test]
+    fn the_filters_go_through_the_same_funnel() {
+        // They are adjustments like any other: named, built from numbers,
+        // and applied to a clip. What sets them apart is that they read
+        // their neighbours, so they have no pixel map.
+        for name in ["blur", "sharpen", "noise"] {
+            let adj = Adjustment::from_params(name, &[3.0, 50.0]).unwrap();
+            assert!(adj.kind.is_spatial(), "{name}");
+            assert!(adj.pixel_map().is_none(), "{name}");
+            assert!(!adj.kind.takes_channel(), "{name} reads the picture, not a channel");
+            assert!(adj.has_params(), "{name}");
+            assert_eq!(adj.map(RED), RED, "one colour on its own has no neighbours to be changed by");
+        }
+    }
+
+    #[test]
+    fn a_blur_adjustment_softens_and_a_sharpen_hardens() {
+        let mut edge = Raster::filled(16, 16, GREY);
+        let bounds = edge.bounds();
+        edge.fill_rect(Rect::new(8, 0, 8, 16), Rgba::opaque(200, 200, 200), &bounds);
+
+        let mut blurred = edge.clone();
+        Adjustment::from_params("blur", &[3.0]).unwrap().apply(&mut blurred, &bounds);
+        assert!(blurred.get(7, 8).r > 128, "the edge has bled across");
+        assert!(blurred.get(8, 8).r < 200);
+
+        let mut sharpened = edge.clone();
+        Adjustment::from_params("sharpen", &[2.0, 100.0]).unwrap().apply(&mut sharpened, &bounds);
+        assert!(sharpened.get(7, 8).r < 128, "and here it has been pulled apart");
+        assert!(sharpened.get(8, 8).r > 200);
+    }
+
+    #[test]
+    fn noise_grains_the_picture_and_stays_put() {
+        let flat = Raster::filled(12, 12, GREY);
+        let bounds = flat.bounds();
+        let adj = Adjustment::from_params("noise", &[50.0, 0.0]).unwrap();
+        let mut once = flat.clone();
+        adj.apply(&mut once, &bounds);
+        let mut twice = flat.clone();
+        adj.apply(&mut twice, &bounds);
+        assert_ne!(once, flat);
+        assert_eq!(once, twice, "an adjustment layer of noise must not boil");
     }
 
     #[test]

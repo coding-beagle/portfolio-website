@@ -173,6 +173,11 @@ pub struct Clip {
     pub raster: Raster,
     pub x: i32,
     pub y: i32,
+    /// The whole layer, when Copy took all of one that renders from a
+    /// source — a smart object, or the text layer that is one. Paste puts
+    /// that layer back rather than its rendering, so copying a smart object
+    /// and pasting it gives a smart object again.
+    pub layer: Option<Layer>,
 }
 
 pub struct Editor {
@@ -279,6 +284,27 @@ impl Editor {
         self.cancel_session();
         self.abort_gesture();
         self.history.mark_saved();
+        file::save(&self.document, &self.settings.guides)
+    }
+
+    /// Says the document has never been saved, whatever its history holds:
+    /// what the page calls after restoring a recovered document, so that
+    /// the close prompt still fires for work that is only in the browser's
+    /// store.
+    pub fn mark_unsaved(&mut self) {
+        self.history.mark_unsaved();
+    }
+
+    /// The same bytes, but the document goes on counting as unsaved.
+    ///
+    /// This is what the page's autosave writes to the browser's own store:
+    /// a recovery copy is not a save, and taking it must not clear the
+    /// "you have unsaved work" that the close prompt and the modified mark
+    /// depend on. It still settles any open session first, so what is
+    /// written is a document rather than a preview.
+    pub fn snapshot_document(&mut self) -> Vec<u8> {
+        self.cancel_session();
+        self.abort_gesture();
         file::save(&self.document, &self.settings.guides)
     }
 
@@ -1159,8 +1185,21 @@ impl Editor {
         }
         let (taken, _) = self.selection.split(&source);
         let raster = taken.resized(rect.w as u32, rect.h as u32, -rect.x, -rect.y);
-        self.clipboard = Some(Clip { raster, x: rect.x, y: rect.y });
+        let whole = !merged && self.selection_covers(source.bounds()) && self.document.active_layer().is_smart();
+        let layer = whole.then(|| self.document.active_layer().clone());
+        self.clipboard = Some(Clip { raster, x: rect.x, y: rect.y, layer });
         true
+    }
+
+    /// Whether the selection takes all of `bounds` — nothing selected, or a
+    /// rectangle around the lot. A mask never counts: it may have holes in
+    /// it wherever its bounds reach.
+    fn selection_covers(&self, bounds: Rect) -> bool {
+        match &self.selection {
+            Selection::None => true,
+            Selection::Rect(r) => r.intersect(&bounds) == bounds,
+            Selection::Mask(_) => false,
+        }
     }
 
     /// Copies the selected pixels and clears them.
@@ -1180,6 +1219,11 @@ impl Editor {
     /// index, or `None` when the clipboard is empty.
     pub fn paste(&mut self) -> Option<usize> {
         let clip = self.clipboard.clone()?;
+        if let Some(layer) = clip.layer {
+            let index = self.structural("Paste", |d| Ok(d.add_layer_copy(&layer))).expect("pasting cannot fail");
+            self.selection = Selection::None;
+            return Some(index);
+        }
         let fits = clip.x >= 0
             && clip.y >= 0
             && clip.x + clip.raster.width() as i32 <= self.document.width() as i32
@@ -3181,6 +3225,54 @@ mod tests {
     }
 
     // ---- Clipboard ---------------------------------------------------------------------
+
+    #[test]
+    fn copying_a_whole_smart_object_pastes_a_smart_object() {
+        let mut e = Editor::new(10, 10, Rgba::TRANSPARENT);
+        let i = e.place_smart_object("photo", Raster::filled(4, 4, RED));
+        assert!(e.document().layer(i).unwrap().is_smart());
+
+        // Nothing selected: Copy takes the layer, and Paste puts one back.
+        assert!(e.copy_selection(false));
+        let index = e.paste().unwrap();
+        let pasted = e.document().layer(index).unwrap();
+        assert!(pasted.is_smart(), "the paste is still a smart object");
+        assert_eq!(pasted.smart_object().unwrap().source.width(), 4, "at its own size");
+        assert_ne!(pasted.id(), e.document().layer(i).unwrap().id(), "a new layer, not the same one");
+        assert!(e.undo());
+
+        // Select All is the same thing said out loud.
+        e.select_all();
+        assert!(e.copy_selection(false));
+        let index = e.paste().unwrap();
+        assert!(e.document().layer(index).unwrap().is_smart());
+        assert!(e.undo());
+
+        // Part of it, or the composite, is pixels — there is no smart object
+        // that means "this corner of that picture".
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(1.0, 1.0), false, false);
+        e.pointer_up(Point::new(3.0, 3.0), false, false);
+        assert!(e.copy_selection(false));
+        let index = e.paste().unwrap();
+        assert!(!e.document().layer(index).unwrap().is_smart());
+        e.select_all();
+        assert!(e.copy_selection(true));
+        let index = e.paste().unwrap();
+        assert!(!e.document().layer(index).unwrap().is_smart());
+    }
+
+    #[test]
+    fn a_copied_smart_object_pastes_into_a_document_of_another_size() {
+        let mut e = Editor::new(10, 10, Rgba::TRANSPARENT);
+        e.place_smart_object("photo", Raster::filled(4, 4, RED));
+        assert!(e.copy_selection(false));
+        e.new_document(4, 4, Rgba::WHITE);
+        let index = e.paste().unwrap();
+        let pasted = e.document().layer(index).unwrap();
+        assert!(pasted.is_smart());
+        assert_eq!((pasted.raster.width(), pasted.raster.height()), (4, 4), "re-rendered for this canvas");
+    }
 
     #[test]
     fn copy_cut_and_paste_go_through_the_clipboard() {

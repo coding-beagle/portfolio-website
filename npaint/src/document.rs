@@ -217,6 +217,29 @@ impl Document {
         self.insert_layer_above_active(placed, Some(name))
     }
 
+    /// Adds a copy of `layer`, under a new id, above the active one — how a
+    /// layer that was copied whole is pasted back. A smart object re-renders
+    /// at this document's size rather than carrying its old rendering, so it
+    /// survives a paste into a document of another size; a mask, which is
+    /// document-sized, is fitted from its top-left corner.
+    pub fn add_layer_copy(&mut self, layer: &Layer) -> usize {
+        let id = self.take_id();
+        let mut copy = layer.with_id(id);
+        let (w, h) = (self.width, self.height);
+        if let Some(mask) = &copy.mask {
+            if (mask.width(), mask.height()) != (w, h) {
+                copy.mask = Some(mask.resized(w, h, 0, 0));
+            }
+        }
+        copy.raster = match &copy.kind {
+            LayerKind::Smart(object) => object.render(w, h),
+            // An adjustment layer has no pixels and keeps its empty raster.
+            LayerKind::Adjustment(_) => copy.raster,
+            LayerKind::Pixels => copy.raster.resized(w, h, 0, 0),
+        };
+        self.insert_above_active(copy)
+    }
+
     /// Scales the whole document, every layer, to a new size — Image Size.
     /// A smart object's placement is scaled rather than its rendering, so
     /// it keeps re-rendering from its source.

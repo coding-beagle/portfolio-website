@@ -543,6 +543,46 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
+     * @returns {boolean}
+     */
+    gradient_reverse() {
+        const ret = wasm.npaint_gradient_reverse(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string}
+     */
+    gradient_shape() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_gradient_shape(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string[]}
+     */
+    static gradient_shape_labels() {
+        const ret = wasm.npaint_gradient_shape_labels();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string[]}
+     */
+    static gradient_shape_names() {
+        const ret = wasm.npaint_gradient_shape_names();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * The guides as the engine has them: what an opened file brought in.
      * @returns {Float64Array}
      */
@@ -961,6 +1001,14 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] !== 0;
+    }
+    /**
+     * Marks the document as never saved — for a document restored from
+     * the page's crash-recovery store, which is unsaved work however new
+     * its history is.
+     */
+    mark_unsaved() {
+        wasm.npaint_mark_unsaved(this.__wbg_ptr);
     }
     /**
      * @returns {number}
@@ -1689,6 +1737,25 @@ export class NPaint {
         wasm.npaint_set_fill(this.__wbg_ptr, fill);
     }
     /**
+     * @param {boolean} on
+     */
+    set_gradient_reverse(on) {
+        wasm.npaint_set_gradient_reverse(this.__wbg_ptr, on);
+    }
+    /**
+     * How the gradient tool lays its colours out, by name: see
+     * [`GradientShape::name`].
+     * @param {string} name
+     */
+    set_gradient_shape(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_gradient_shape(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * The guides the page draws, in document pixels, for the move tool and
      * transforms to snap to. Call whenever they change.
      * @param {Float64Array} h
@@ -1967,6 +2034,17 @@ export class NPaint {
     snap() {
         const ret = wasm.npaint_snap(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * The document as an NPaint file, leaving it counting as unsaved:
+     * what the page's autosave keeps for crash recovery.
+     * @returns {Uint8Array}
+     */
+    snapshot_document() {
+        const ret = wasm.npaint_snapshot_document(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * Paints a line `width` wide along the selection's edge in the

@@ -274,6 +274,18 @@ impl History {
         self.saved = self.current();
     }
 
+    /// Notes that the document is *not* what is on disk, whatever its
+    /// history says.
+    ///
+    /// A document restored from the page's recovery store has a fresh
+    /// history — it was just opened — but the work in it has never been
+    /// saved anywhere the user can find again, and the close prompt and
+    /// the modified mark have to say so. State ids are a counter from zero,
+    /// so the last one there is stands for a state that cannot occur.
+    pub fn mark_unsaved(&mut self) {
+        self.saved = u64::MAX;
+    }
+
     /// Whether the document differs from the last saved (or opened) state.
     pub fn is_modified(&self) -> bool {
         self.saved != self.current()
@@ -521,6 +533,10 @@ mod tests {
         assert!(history.is_modified(), "a different branch at the same depth is not the saved state");
         history.clear();
         assert!(!history.is_modified(), "a new or opened document starts clean");
+        history.mark_unsaved();
+        assert!(history.is_modified(), "unless it was recovered rather than opened");
+        history.mark_saved();
+        assert!(!history.is_modified(), "and saving it settles that");
 
         // Dropping old steps past the limit does not lose track of it.
         let mut history = History::new(2);

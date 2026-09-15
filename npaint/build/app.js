@@ -11,14 +11,17 @@ import init, { NPaint } from "./pkg/npaint.js";
 import { createMenuBar, showContextMenu, closeMenus } from "./menu.js";
 import { createColorPicker } from "./colorpicker.js";
 import { ADJUSTMENTS, createAdjustDialog } from "./adjust.js";
+import { readRecovery, writeRecovery, clearRecovery, supported as recoverySupported } from "./recovery.js";
 
 // ---- Tools ------------------------------------------------------------------
 
 const ICON = {
   select: '<rect x="4" y="4" width="16" height="16" stroke-dasharray="3 2"/>',
   "ellipse-select": '<ellipse cx="12" cy="12" rx="8" ry="7" stroke-dasharray="3 2"/>',
+  lasso: '<path d="M6 17c-2-1-3-2.5-3-4.5C3 8 7.5 5 12 5s9 3 9 7.5c0 3-2.5 5-5.5 5.5" stroke-dasharray="3 2"/><path d="M6 17c-1.5 1-1.5 3 .5 3s2-2 .5-3z"/>',
   crop: '<path d="M7 2v15h15M2 7h15v15"/>',
   bucket: '<path d="M5 11l7-7 7 7-7 7z"/><path d="M12 4V2M19 13c0 2 1.5 3 1.5 4.5a1.5 1.5 0 01-3 0C17.5 16 19 15 19 13z"/>',
+  gradient: '<rect x="3" y="5" width="18" height="14"/><path d="M5 17h14M5 14.5h14M5 12h14M5 9.5h14M5 7h14" opacity=".55" stroke-dasharray="0.6 1.4"/><path d="M3 5h18v4H3z" fill="currentColor" stroke="none" opacity=".35"/>',
   eyedropper: '<path d="M4 20l1-4 9-9 3 3-9 9z"/><path d="M13 6l2-2a2 2 0 013 3l-2 2"/>',
   wand: '<path d="M4 20l9-9M6.5 4.5l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L3 8l2.5-1zM17 3l.8 2.2L20 6l-2.2.8L17 9l-.8-2.2L14 6l2.2-.8zM19 14l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/><path d="M12.5 11.5l2 2"/>',
   quickselect: '<path d="M3 12a9 9 0 0113.5-7.8" stroke-dasharray="3 2"/><path d="M21 12a9 9 0 01-9 9" stroke-dasharray="3 2"/><path d="M8 17c1.5-.3 2.2-1.3 2.6-2.6L17 8l2 2-6.4 6.4C11.3 16.8 10 17.5 8 17.5z"/>',
@@ -48,6 +51,12 @@ const TOOLS = [
     label: "Elliptical marquee",
     key: "M",
     hint: "Drag to select an ellipse. Shift adds, Alt takes away; Shift during the drag makes a circle.",
+  },
+  {
+    name: "lasso",
+    label: "Lasso",
+    key: "L",
+    hint: "Draw round what you want; letting go closes the loop. Shift adds, Alt takes away, Shift+Alt keeps the overlap.",
   },
   {
     name: "crop",
@@ -88,6 +97,12 @@ const TOOLS = [
     label: "Paint bucket",
     key: "G",
     hint: "Click to fill the patch of colour under the pointer with the foreground colour. Alt+click picks a colour.",
+  },
+  {
+    name: "gradient",
+    label: "Gradient",
+    key: "G",
+    hint: "Drag out the two ends and the layer fills from the foreground colour to the background. Shift snaps to 45°. Alt+click picks a colour.",
   },
   {
     name: "eyedropper",
@@ -226,6 +241,7 @@ async function boot() {
   syncOptions();
   buildQualityPicker();
   requestAnimationFrame(frame);
+  startRecovery();
 }
 
 function onResize() {
@@ -242,6 +258,7 @@ function touch() {
   needsDraw = true;
   layersDirty = true;
   antsDirty = true;
+  revision += 1;
   pullGuides();
 }
 
@@ -998,13 +1015,13 @@ function startThrobbing() {
  * recomposite for them (nothing in the picture changed), so the page has
  * to know to retrace the ants itself.
  */
-const SELECTION_TOOLS = new Set(["select", "ellipse-select", "crop", "wand", "quickselect", "refine"]);
+const SELECTION_TOOLS = new Set(["select", "ellipse-select", "lasso", "crop", "wand", "quickselect", "refine"]);
 
 /** Which block of the toolbox each tool belongs in, in order. */
 const TOOL_GROUPS = [
-  ["select", "ellipse-select", "crop", "wand", "quickselect", "subject", "refine"],
+  ["select", "ellipse-select", "lasso", "crop", "wand", "quickselect", "subject", "refine"],
   ["move"],
-  ["brush", "pencil", "eraser", "bucket", "eyedropper"],
+  ["brush", "pencil", "eraser", "bucket", "gradient", "eyedropper"],
   ["line", "rectangle", "ellipse"],
   ["text"],
   ["zoom", "hand"],
@@ -1057,7 +1074,7 @@ function zoomHint() {
 /** Shows the options that apply to the current tool. */
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
-  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket";
+  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket" || tool === "gradient";
   const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser";
   // The pencil is hard whatever the slider says, and chalk and spatter
   // have their grain and their dots in place of a soft rim.
@@ -1065,7 +1082,7 @@ function syncOptions() {
   const isText = tool === "text";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
   const subject = tool === "subject";
-  const marquee = tool === "select" || tool === "ellipse-select" || tool === "crop";
+  const marquee = tool === "select" || tool === "ellipse-select" || tool === "lasso" || tool === "crop";
   const viewTool =
     marquee ||
     subject ||
@@ -1076,7 +1093,8 @@ function syncOptions() {
     tool === "bucket" ||
     tool === "eyedropper" ||
     isText;
-  const usesSize = !viewTool && !(isShape && np.fill());
+  const isGradient = tool === "gradient";
+  const usesSize = !viewTool && !isGradient && !(isShape && np.fill());
   $("opt-opacity-wrap").hidden = !hasOpacity;
   $("opt-tip-wrap").hidden = !hasTip;
   $("opt-tip").value = np.brush_tip();
@@ -1107,12 +1125,16 @@ function syncOptions() {
   $("opt-hardness").value = Math.round(np.hardness() * 100);
   $("opt-hardness-out").value = `${Math.round(np.hardness() * 100)}%`;
   $("opt-fill-wrap").hidden = !isShape;
+  $("opt-gradient-wrap").hidden = !isGradient;
+  $("opt-gradient-reverse-wrap").hidden = !isGradient;
+  $("opt-gradient").value = np.gradient_shape();
+  $("opt-gradient-reverse").checked = np.gradient_reverse();
   // The tolerance is the wand's, quick select's and the bucket's; the refine
   // brush paints the selection by hand and has only a size.
   $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect" || tool === "bucket");
   $("opt-sample-wrap").hidden = !(tool === "wand" || tool === "bucket");
   $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket");
-  $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select");
+  $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select" || tool === "lasso");
   $("opt-subject").hidden = !(auto || subject);
   $("opt-quality-wrap").hidden = !(auto || subject);
   $("opt-tolerance").value = np.tolerance();
@@ -1222,6 +1244,17 @@ function bindOptions() {
     np.set_brush_tip(tip.value);
     syncOptions();
   });
+  const gradient = $("opt-gradient");
+  const gradientNames = NPaint.gradient_shape_names();
+  const gradientLabels = NPaint.gradient_shape_labels();
+  gradientNames.forEach((name, i) => {
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = gradientLabels[i];
+    gradient.appendChild(o);
+  });
+  gradient.addEventListener("change", () => np.set_gradient_shape(gradient.value));
+  $("opt-gradient-reverse").addEventListener("change", (e) => np.set_gradient_reverse(e.target.checked));
   $("opt-symmetry").addEventListener("change", (e) => {
     const [mx, my, n] = e.target.value.split(",").map(Number);
     np.set_symmetry(Boolean(mx), Boolean(my), n);
@@ -1501,25 +1534,41 @@ const hasSelection = () => np.selection_rect().length > 0;
 const layerCount = () => np.layer_count();
 const active = () => np.active_layer();
 
+/** The Image > Adjustments list: everything but the filters. */
 function adjustmentItems() {
-  return ADJUSTMENTS.map((a) => ({
+  return menuItemsFor((a) => a.group !== "filter");
+}
+
+/** The Filter menu: the ones that read more than the pixel they are at. */
+function filterItems() {
+  return menuItemsFor((a) => a.group === "filter");
+}
+
+function menuItemsFor(wanted) {
+  return ADJUSTMENTS.filter(wanted).map((a) => ({
     label: a.label,
     shortcut: a.shortcut,
     action: () => adjust.open(a.name),
   }));
 }
 
-/** The same list as new adjustment layers: the layer is made with neutral
- *  settings and its dialog opened straight away, if it has any. */
+/** The same list as new adjustment layers, filters and all: the layer is
+ *  made with neutral settings and its dialog opened straight away, if it has
+ *  any. The filters go last, behind a rule, as they do in the menu bar. */
 function adjustmentLayerItems() {
-  return ADJUSTMENTS.map((a) => ({
+  const asLayer = (a) => ({
     label: a.label,
     action: () =>
       act(() => {
         const index = np.add_adjustment_layer(a.name, new Float32Array());
         adjust.openLayer(index);
       }),
-  }));
+  });
+  return [
+    ...ADJUSTMENTS.filter((a) => a.group !== "filter").map(asLayer),
+    { sep: true },
+    ...ADJUSTMENTS.filter((a) => a.group === "filter").map(asLayer),
+  ];
 }
 
 const layerKind = (i) => np.layer_kind(i);
@@ -2139,6 +2188,7 @@ function buildMenus() {
       ],
     },
     { title: "Layer", items: layerItems() },
+    { title: "Filter", items: filterItems() },
     { title: "Select", items: selectItems() },
     { title: "View", items: viewItems() },
   ]);
@@ -2165,7 +2215,8 @@ function canvasContextItems() {
     { sep: true },
     ...editItems().slice(8),
     { sep: true },
-    { label: "Layer via Copy", shortcut: "", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
+    { label: "Duplicate Layer", shortcut: "Ctrl+J", action: () => act(() => np.duplicate_layer(active())) },
+    { label: "Layer via Copy", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
     { label: "Adjustments", submenu: adjustmentItems() },
     { sep: true },
     { label: "Fit on Screen", shortcut: "Ctrl+0", action: fit },
@@ -2860,7 +2911,117 @@ async function saveDocument() {
   const blob = await deflate(np.save_document());
   download(blob, `${base}.npaint`);
   touch();
+  // The work is on the user's disk now, so the safety net is no longer
+  // holding anything they cannot get back.
+  autosavedRevision = revision;
+  clearRecovery();
   message(`Saved ${base}.npaint (${Math.round(blob.size / 1024)} kB). Open it again with File > Open.`);
+}
+
+// ---- Autosave and recovery -----------------------------------------------------
+//
+// A copy of the document goes into the browser's own store every so often, so
+// that a crash, a closed tab or a reload is an inconvenience rather than a
+// lost afternoon. See `recovery.js` for the store itself.
+//
+// Three things decide when it runs.
+//
+// *Only when there is something to keep*: the document has to be modified,
+// and to have changed since the last copy was taken. `revision` counts the
+// times `touch()` said something may have moved.
+//
+// *Never in the middle of anything.* `snapshot_document` settles an open
+// session and an unfinished gesture before it writes, which mid-stroke or
+// mid-dialog would be the autosave throwing the user's work away to save it.
+// So a tick that lands during either does nothing and waits for the next one.
+//
+// *Never taking more than a sliver of the time.* A copy is the whole
+// document, and on a big one that is hundreds of megabytes through a gzip.
+// Rather than pick an interval that is wrong for one document or the other,
+// each round measures itself and asks for the next one twenty times further
+// off, so the cost stays near five per cent of the clock whatever is open.
+
+/** Counts the times anything may have changed; `touch()` bumps it. */
+let revision = 0;
+/** The revision the last copy was taken at. */
+let autosavedRevision = 0;
+/** The soonest and latest the next copy may be taken. */
+const AUTOSAVE_MIN_MS = 15000;
+const AUTOSAVE_MAX_MS = 300000;
+/** How much of the clock a copy may cost: one part in twenty. */
+const AUTOSAVE_DUTY = 20;
+/** Set once the store has refused us, so the page stops asking. */
+let autosaveOff = false;
+
+function startRecovery() {
+  if (!recoverySupported()) return;
+  offerRecovery().finally(() => scheduleAutosave(AUTOSAVE_MIN_MS));
+}
+
+/** Offers back whatever the last session left behind, if anything. */
+async function offerRecovery() {
+  const found = await readRecovery();
+  if (!found) return;
+  const when = new Date(found.savedAt).toLocaleString();
+  const keep = window.confirm(
+    `NPaint has unsaved work from a previous session — "${found.name}", kept at ${when}.
+
+` +
+      `OK recovers it. Cancel throws it away for good.`,
+  );
+  if (!keep) {
+    await clearRecovery();
+    return;
+  }
+  try {
+    np.open_document(await inflate(new Uint8Array(found.bytes)));
+    // Opening a file counts as a clean start, but this is not one: nothing
+    // here has ever reached the user's disk, and the close prompt has to go
+    // on saying so. The copy in the store stays until it is saved for real.
+    np.mark_unsaved();
+    docName = found.name;
+    guides = { h: Array.from(np.guides_h()), v: Array.from(np.guides_v()) };
+    syncGuides();
+    fit();
+    touch();
+    autosavedRevision = revision;
+    message(`Recovered "${found.name}". Save it with File > Save to keep it for good.`);
+  } catch (e) {
+    message(`That recovered document could not be opened: ${e}`);
+    await clearRecovery();
+  }
+}
+
+function scheduleAutosave(delay) {
+  if (autosaveOff) return;
+  setTimeout(autosaveTick, Math.min(AUTOSAVE_MAX_MS, Math.max(AUTOSAVE_MIN_MS, delay)));
+}
+
+async function autosaveTick() {
+  // Nothing worth keeping, or the middle of something: come back later.
+  if (!np.is_modified() || revision === autosavedRevision || np.has_session() || np.is_gesturing()) {
+    scheduleAutosave(AUTOSAVE_MIN_MS);
+    return;
+  }
+  const began = performance.now();
+  const at = revision;
+  let ok = false;
+  try {
+    const blob = await deflate(np.snapshot_document());
+    ok = await writeRecovery(new Uint8Array(await blob.arrayBuffer()), docName);
+  } catch {
+    ok = false;
+  }
+  const cost = performance.now() - began;
+  if (ok) {
+    autosavedRevision = at;
+    scheduleAutosave(cost * AUTOSAVE_DUTY);
+    return;
+  }
+  // A store that will not take it is not going to take it next time either
+  // — no quota, no permission — so say so once and stop.
+  autosaveOff = true;
+  message("Autosave is not available in this browser, so save your work with File > Save.");
 }
 
 // ---- Drag and drop -------------------------------------------------------------------

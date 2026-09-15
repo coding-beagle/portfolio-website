@@ -18,6 +18,7 @@ use crate::brush::BrushTip;
 use crate::color::Rgba;
 use crate::editor::Editor;
 use crate::geometry::{Point, Rect};
+use crate::gradient::GradientShape;
 use crate::layer::{mask_cover, Target};
 use crate::mask::SelectMode;
 use crate::transform::{Handle, Hit};
@@ -494,6 +495,34 @@ impl NPaint {
         self.editor.settings().fill
     }
 
+    /// How the gradient tool lays its colours out, by name: see
+    /// [`GradientShape::name`].
+    pub fn set_gradient_shape(&mut self, name: &str) -> Result<(), String> {
+        let shape = GradientShape::from_name(name).ok_or_else(|| format!("no gradient called \"{name}\""))?;
+        self.editor.settings_mut().gradient_shape = shape;
+        Ok(())
+    }
+
+    pub fn gradient_shape(&self) -> String {
+        self.editor.settings().gradient_shape.name().to_owned()
+    }
+
+    pub fn set_gradient_reverse(&mut self, on: bool) {
+        self.editor.settings_mut().gradient_reverse = on;
+    }
+
+    pub fn gradient_reverse(&self) -> bool {
+        self.editor.settings().gradient_reverse
+    }
+
+    pub fn gradient_shape_names() -> Vec<String> {
+        GradientShape::ALL.iter().map(|s| s.name().to_owned()).collect()
+    }
+
+    pub fn gradient_shape_labels() -> Vec<String> {
+        GradientShape::ALL.iter().map(|s| s.label().to_owned()).collect()
+    }
+
     // ---- Pointer -------------------------------------------------------------
     //
     // Screen coordinates, in CSS pixels relative to the canvas.
@@ -577,6 +606,19 @@ impl NPaint {
     /// The document as an NPaint file, and from now on it counts as saved.
     pub fn save_document(&mut self) -> Vec<u8> {
         self.editor.save_document()
+    }
+
+    /// Marks the document as never saved — for a document restored from
+    /// the page's crash-recovery store, which is unsaved work however new
+    /// its history is.
+    pub fn mark_unsaved(&mut self) {
+        self.editor.mark_unsaved();
+    }
+
+    /// The document as an NPaint file, leaving it counting as unsaved:
+    /// what the page's autosave keeps for crash recovery.
+    pub fn snapshot_document(&mut self) -> Vec<u8> {
+        self.editor.snapshot_document()
     }
 
     /// Replaces the document with an NPaint file's.
@@ -1380,7 +1422,7 @@ mod tests {
     #[test]
     fn unknown_tool_is_an_error() {
         let mut np = NPaint::new(1, 1, "").unwrap();
-        assert!(np.set_tool("lasso").is_err());
+        assert!(np.set_tool("nothing-of-the-sort").is_err());
         assert_eq!(np.tool(), "brush");
     }
 
@@ -1418,7 +1460,7 @@ mod tests {
     #[test]
     fn adjustment_surface() {
         let mut np = NPaint::new(1, 1, "#ffffff").unwrap();
-        assert_eq!(NPaint::adjustment_names().len(), 10);
+        assert_eq!(NPaint::adjustment_names().len(), Adjustment::NAMES.len());
         np.begin_adjustment().unwrap();
         np.preview_adjustment("invert", &[]).unwrap();
         assert!(np.preview_adjustment("nope", &[]).is_err());
@@ -1720,6 +1762,41 @@ mod tests {
         assert!(np.set_brush_tip("fan").is_err());
         assert_eq!(NPaint::brush_tip_names().len(), NPaint::brush_tip_labels().len());
         assert!(NPaint::brush_tip_names().contains(&"calligraphy".to_owned()));
+    }
+
+    #[test]
+    fn gradient_settings_cross_the_boundary() {
+        let mut np = NPaint::new(4, 4, "#ffffff").unwrap();
+        assert_eq!(np.gradient_shape(), "linear");
+        assert!(!np.gradient_reverse());
+        np.set_gradient_shape("radial").unwrap();
+        np.set_gradient_reverse(true);
+        assert_eq!(np.gradient_shape(), "radial");
+        assert!(np.gradient_reverse());
+        assert!(np.set_gradient_shape("spiral").is_err());
+        assert_eq!(NPaint::gradient_shape_names().len(), NPaint::gradient_shape_labels().len());
+        assert!(NPaint::gradient_shape_names().contains(&"reflected".to_owned()));
+    }
+
+    #[test]
+    fn a_snapshot_is_the_file_without_the_save() {
+        let mut np = NPaint::new(3, 3, "#ffffff").unwrap();
+        np.set_tool("pencil").unwrap();
+        np.pointer_down(1.0, 1.0, false, false, 1.0);
+        np.pointer_up(1.0, 1.0, false, false, 1.0);
+        assert!(np.is_modified());
+
+        let snapshot = np.snapshot_document();
+        assert!(np.is_modified(), "a recovery copy is not a save");
+
+        let saved = np.save_document();
+        assert!(!np.is_modified());
+        assert_eq!(snapshot, saved, "and it is the same file either way");
+
+        // And it opens.
+        let mut other = NPaint::new(1, 1, "#000000").unwrap();
+        other.open_document(&snapshot).unwrap();
+        assert_eq!(other.width(), 3);
     }
 
     #[test]

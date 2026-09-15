@@ -180,7 +180,11 @@ replaced.
 **The clipboard.** Copy lives in the engine (`Editor::copy_selection`): the
 selected pixels of the active surface, or of the composite for Copy Merged,
 with where they came from, so Paste puts them back in place (or centred, if
-they no longer fit). The page also hands a PNG to the system clipboard so
+they no longer fit). When Copy takes *all* of a smart object or text layer —
+nothing selected, or a rectangle around the lot — the clip carries the whole
+`Layer` as well, and Paste inserts a copy of it (re-rendered for whatever
+document it lands in) rather than its rendering: a copied smart object stays
+smart. Part of one, or Copy Merged, is pixels. The page also hands a PNG to the system clipboard so
 the pixels can go elsewhere. Paste comes in through the browser's `paste`
 event — the one route that needs no permission — and takes the engine's
 copy when the system holds the same picture, otherwise whatever image the
