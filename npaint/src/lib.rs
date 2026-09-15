@@ -30,6 +30,7 @@ pub mod gradient;
 pub mod history;
 pub mod layer;
 pub mod mask;
+pub mod psd;
 pub mod raster;
 pub mod selection;
 pub mod snap;

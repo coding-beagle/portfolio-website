@@ -9,6 +9,8 @@ few ES modules with no bundler.
 Deployed at `npaint.nteague.com`, and reachable as the NPaint shortcut on the
 portfolio's desktop scene (`app/src/subdomains.js`).
 
+Features in the works are located in TODO.md
+
 ## Layout
 
 ```
@@ -39,14 +41,25 @@ npaint/
                    kernels (Floyd-Steinberg, Jarvis, Stucki, Atkinson,
                    Sierra), with levels/strength/greyscale in front of both
     file.rs        NPaint's own file: the whole document as a binary stream
+    filter.rs      the filters that read more than one pixel — blur, and
+                   the unsharp mask and the grain built on it. They are
+                   `adjust::Kind`s that delegate here rather than lookup
+                   tables; see "Filters"
     geometry.rs    Point, Rect
+    gradient.rs    a colour worked out from where the pixel is: two
+                   colours, two points and a shape (linear, radial,
+                   reflected, angle)
     raster.rs      the pixel buffer and every drawing primitive
     layer.rs       Layer, LayerId, and what kind of layer it is: pixels, an
-                   adjustment layer, or a smart object; the layer mask and
-                   which of the two rasters the tools edit; the two locks
+                   adjustment layer, a smart object, or a group; the layer
+                   mask and which of the two rasters the tools edit; the two
+                   locks; which group the layer is in (`parent`)
     mask.rs        per-pixel selection coverage: combine, grow/contract,
-                   feather, smooth, antialias, contours (the marching ants)
-    document.rs    the layer stack; add/remove/move/merge/composite
+                   feather, smooth, antialias, contours (the marching ants),
+                   and `from_polygon`, which is what the lasso draws with
+    psd.rs         reading Photoshop's `.psd` — see "Photoshop files"
+    document.rs    the layer stack; add/remove/move/merge/composite, and
+                   the grouping the flat list carries — see "Layer groups"
     selection.rs   what painting may touch: nothing, a rect, or a Mask
     text.rs        what a text layer remembers: the text, its style (font,
                    size, bold, italic, alignment), colour, and where the
@@ -62,6 +75,10 @@ npaint/
       mod.rs       Tool trait, ToolKind, ToolSettings, PointerEvent
       select.rs    the marquees (rectangle, ellipse) and the crop tool, with
                    the add/subtract/intersect modifiers
+      lasso.rs     the lasso: a selection drawn freehand, closed when the
+                   pointer comes up
+      gradient.rs  the gradient tool: a drag's two ends, and the clip
+                   filled between them
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
       movetool.rs  move (translate the selection or the layer)
@@ -82,6 +99,8 @@ npaint/
     app.js         DOM, canvas, events, render loop, menu definitions
     menu.js        the menu-bar drop-downs and context menus (one component)
     colorpicker.js hue ring + saturation/value square, hex/RGB/HSV fields
+    recovery.js    the crash-recovery store: one copy of the document in
+                   IndexedDB. Nothing in it may throw — see "Autosave"
     subject-worker.js the worker Select Subject's model runs in
     subject-model.js  the model behind Select Subject: loads ONNX Runtime and
                    U-2-Net on demand with progress, caches them in the
@@ -115,6 +134,35 @@ re-read from the engine.
 one-line delegation with type conversion. If you find yourself writing an
 `if` in `wasm.rs`, move it into `editor.rs` and test it there.
 
+**Every feature has to survive a `.psd`.** A `.psd` is how artwork arrives
+from everywhere else, and a feature that the importer cannot fill in is a
+feature most users will never see on their own files. So whenever you add
+something a layer can *be* or *carry* — a kind of layer, a property, a
+relationship between layers — the same change has three more parts:
+
+1. **`src/psd.rs` reads it**, where Photoshop's file says it. If Photoshop
+   has no equivalent, say so in the module's "what is knowingly left out"
+   list and move on; if it has one and you skip it, that is a gap, not a
+   decision.
+2. **It says so when it cannot.** An approximation gets a sentence on
+   `Import::note`, which the page puts in the status bar. Never guess
+   silently.
+3. **`src/file.rs` carries it both ways**, with a bumped `VERSION` and a
+   line in the version history, so that a document opened from a `.psd` and
+   saved as NPaint's own file keeps what it arrived with.
+
+The regression cover that travels is `psd.rs`'s own tests, which build the
+files they read — `a_folder_comes_in_as_a_group_with_its_layers_inside_it`
+assembles a folder byte by byte the way Photoshop writes one. A real sample
+dropped in `test_psds/` gets read by `files_photoshop_actually_wrote` as
+well, which checks it opens, nests soundly and survives NPaint's own format;
+that folder is gitignored, so those stay on your machine and a clean
+checkout is green without them.
+
+Layer groups are the worked example: [`LayerKind::Group`] and
+[`Layer::parent`], `psd.rs` building them from the section dividers, and
+format 5 writing them.
+
 Coordinates: the engine's pointer entry points take **screen** coordinates
 (CSS pixels relative to the canvas) and map them through the viewport itself.
 The page never needs to know the zoom. It does report the *size* of the
@@ -134,6 +182,17 @@ make run_npaint       # serves build/ on :8790
 
 cargo run --release --example bench    # times the composite at 4K
 ```
+
+One test reads from outside the crate: `files_photoshop_actually_wrote` in
+`src/psd.rs` opens every `.psd` in `npaint/test_psds/` (or `NPAINT_PSD_DIR`)
+and checks that what comes out is a document the rest of the engine accepts —
+rasters the size the document says, a composite that holds up, and a round
+trip through `file::save`/`file::load` that comes back unchanged. That folder
+is gitignored, because real Photoshop files are tens of megabytes, so the
+test finds nothing on a clean checkout and says so rather than failing. Put a
+file in it and it is covered from then on; there is no expected output to
+keep up to date. It is also the one slow test in the crate, and
+`cargo test --release` makes it quick.
 
 `examples/bench.rs` is where the numbers quoted below come from. Time a pass
 there rather than in the browser: a headless Chromium's canvas is GPU-backed
@@ -166,7 +225,7 @@ number and adds a line to the version history at the top of `src/file.rs`,
 which is the one place that says what each version was. `src/file.rs` writes
 the document as a little-endian stream —
 magic, version, size, then every layer with its rasters, mask, kind, blend
-mode and locks — and reads it back into a `Document`. It is deliberately
+mode, locks and the group it is in — and reads it back into a `Document`. It is deliberately
 not JSON or a zip: the engine has no parser for either, and the pixels are
 the bulk of it. The page gzips the stream on the way to disk
 (`CompressionStream`) and inflates it on the way back; a stream that arrives
@@ -176,6 +235,54 @@ the right way. `History` keeps the id of the state that was last saved, so
 `is_modified` is true only when the document differs from it — undoing back
 to it is clean — and the page asks before the tab closes or the document is
 replaced.
+
+**Photoshop files.** `src/psd.rs` reads `.psd`: an 8-bit RGB or greyscale
+document, its layers with their names (the Unicode one, where there is one),
+positions, opacity, blend mode, visibility, layer masks and **groups**, raw
+or run-length encoded. Photoshop's bounds are half-open where
+`Rect::from_corners` takes both corners as pixels that are in, which is the
+one easy thing to get wrong in there.
+
+Groups come in as groups. Photoshop writes a folder as three things in a
+row, bottom-first: a `lsct` marker of kind 3 under the contents, the
+contents, and then the folder's own record (kind 1 open, 2 shut) carrying
+its name, opacity, blend mode and mask. That is exactly how the document
+stores a group — see "Layer groups" — so the reader keeps a stack of open
+folders, fills in each layer's `parent`, and hands the whole list to
+`Document::from_parts`, which checks the nesting came out sound. Nothing is
+rearranged. A file whose folders are not written whole says so on the note
+and leaves those layers loose rather than guessing what they belonged to.
+
+The important part is what it does when it cannot: **it falls back to the
+flattened copy**. Almost every `.psd` carries a composite of itself in its
+last section, so a zip-compressed channel or an arrangement the reader does
+not know ends in the picture opening as one layer with a note saying why,
+rather than an error. `Import::note` is that sentence and the page puts it in
+the status bar. What is refused outright — 16-bit, CMYK, Lab, `.psb` — is
+refused by name, because there is nothing honest to convert it into. There is
+no `.psd` *writer*, and adding one is a bigger job than the reader: a reader
+may ignore what it does not understand and a writer may not.
+
+**Autosave.** `www/recovery.js` keeps one copy of the document — the same
+gzipped stream `File > Save` writes — in IndexedDB, and the page offers it
+back on the next load. Three things decide when it runs, and all three matter:
+the document has to be modified *and* changed since the last copy, which
+`NPaint::document_state` answers exactly — most edits never pass through a
+function in `app.js` at all, so nothing the page counted for itself would be
+right; no session
+or gesture may be open, since `snapshot_document` settles both before it
+writes and doing that mid-stroke would be the autosave destroying the work it
+is saving; and each round measures itself and asks for the next one twenty
+times further off, so a copy stays near a twentieth of the clock whatever
+size of document is open.
+
+Two engine methods exist only for this. `Editor::snapshot_document` is
+`save_document` without the `mark_saved`, because a recovery copy is not a
+save and taking one must not clear the close prompt. `Editor::mark_unsaved`
+is the other way about: a recovered document has a fresh history but has
+never reached the user's disk, so it has to go on counting as modified. The
+copy in the store stays until the user saves for real or refuses it at the
+prompt — never merely because it was recovered once.
 
 **The clipboard.** Copy lives in the engine (`Editor::copy_selection`): the
 selected pixels of the active surface, or of the composite for Copy Merged,
@@ -541,6 +648,43 @@ with the grab radius given in document pixels as `8 / zoom` so it is a
 constant size on screen. The page asks `transform_hit` only to choose a
 cursor.
 
+## Filters
+
+Blur, Sharpen and Add Noise are `adjust::Kind`s like Levels or Curves, and
+they go through the same funnel — the same dialog built from the same data
+table, the same live preview, the same undo step, the same life as an
+adjustment layer with a mask. What sets them apart is that they are not
+functions of one colour, so `Kind::is_spatial` says so, `Adjustment::pixel_map`
+has nothing to offer for them and `Kind::apply_spatial` hands the clip to
+`src/filter.rs` instead. The dither was already the one adjustment shaped
+this way; the filters joined it rather than growing a second mechanism. They
+are listed under **Filter** in the menu bar rather than under Image >
+Adjustments, and the only thing that decides that is `group: "filter"` on
+their row in `www/adjust.js`.
+
+Two rules a filter has to keep, and both have a test:
+
+* **The answer may not depend on the clip.** A preview through a selection
+  composites a rectangle at a time and an adjustment layer recomposites over
+  whatever the dirty rectangle is, so a pixel must come out the same however
+  it was asked for. The blur therefore reads a working copy of everything
+  within three box-passes of the clip rather than the clip alone, and the
+  noise is keyed to the pixel's document position through `dither::hash`
+  rather than drawn from a running generator. Noise that was drawn afresh
+  would also *boil*: an adjustment layer of it recomposites on every dab
+  underneath it.
+* **Alpha.** Every other adjustment leaves it exactly as it found it. The
+  blur cannot — softening an edge against transparency is most of what it is
+  for, and blurring the colours while pinning the alpha drags whatever is
+  stored under the transparent pixels out as a halo — so it works on
+  premultiplied colour, alpha and all. Sharpen and noise keep alpha.
+
+The blur is three box passes standing in for a Gaussian, the same
+approximation `Mask::feather` uses, each a running average so the cost is the
+area rather than the area times the radius. Its prefix sums are `f64`: in
+`f32` they drift far enough over a few thousand pixels that one clip and
+another disagree by a level, which looks exactly like a real clip dependency.
+
 ## Adding things
 
 **A tool.** Add a file under `src/tools/`, implement `Tool` (`begin`,
@@ -574,6 +718,18 @@ it is a command).
 
 **A blend mode.** A `BlendMode` variant and an arm in
 `Document::blend_layer`. Nothing else refers to the mode.
+
+**A gradient shape.** A `GradientShape` variant in `gradient.rs` with a name,
+a label and an arm in `fraction` — the rule from a position to how far along
+the two colours it is. The options bar lists them from
+`gradient_shape_names`, so nothing changes in the page.
+
+**A filter.** A `Kind` variant in `adjust.rs` as for any adjustment, plus an
+arm in `Kind::is_spatial` and one in `Kind::apply_spatial` pointing at a
+function in `filter.rs`; `Kind::map`, which has only a colour, answers with
+that colour untouched. Give its row in `www/adjust.js` `group: "filter"` so
+it lists under Filter. Read "Filters" first: the clip-independence rule is
+the one that is easy to break and hard to see broken.
 
 **An adjustment.** A variant in `adjust.rs` with an arm in `from_params`,
 `name` and either `lut` (per-channel) or `map` (whole colour), plus a row in
@@ -625,7 +781,102 @@ changes in the page.
 (pure, tested), wrap it in `Editor` through `structural(label, ..)` so it is
 an undo step with a name in the history panel, expose it in `wasm.rs`, bind
 a button in `app.js`. A new layer property also wants a line in `file.rs`,
-on both sides, and a field in its round-trip test.
+on both sides, and a field in its round-trip test — and a reading in
+`psd.rs`, or a line in its "knowingly left out" list saying why not. See
+"Every feature has to survive a `.psd`".
+
+**A kind of layer.** A `LayerKind` variant, an arm in `LayerKind::name`, and
+then the compiler will walk you round the rest: `Layer::edit_refusal`,
+`apply_mask`, `map_rasters`, `Document::blend_layer` and `add_layer_copy`,
+a kind byte in `file.rs` on both sides, and a row in `KIND_BADGE` in
+`app.js`. Decide early whether it draws pixels of its own
+(`Layer::has_pixels`); the ones that do not — an adjustment layer, a group —
+are the ones the rest of the engine has to be told about.
+
+## Layer groups
+
+The stack stays **one flat `Vec<Layer>`**. A group is a layer whose kind is
+[`LayerKind::Group`]; its children are the contiguous run of layers *below*
+its own row that carry its id in [`Layer::parent`]:
+
+```text
+  index 4   Sky            parent None
+  index 3   Group "Tree"   parent None      <- the group's own row
+  index 2     Leaves       parent Tree
+  index 1     Trunk        parent Tree
+  index 0   Background     parent None
+```
+
+This is the arrangement a `.psd` stores, which is why one imports without
+anything being rearranged, and it is why the whole engine kept working: an
+index still names one layer, and the order of the list is still the order
+things composite in. Nothing outside `document.rs` had to learn about trees.
+
+What *did* change is that an operation on a group means the whole subtree.
+The vocabulary, all on `Document`:
+
+- `subtree(i)` — what the layer takes with it: `i..i+1` for an ordinary
+  layer, the children and the group's row for a group. **Delete, duplicate
+  and drag all work on this, never on one index.**
+- `children_of(i)`, `depth(i)`, `parent_index(i)`, `roots(parent)`.
+- `split_point(i)` — the bottom of the top-level item containing `i`. The
+  composite can only be cut between top-level items (half a group is not a
+  picture), so a session's preview cache holds from here rather than from
+  just below the layer it is changing.
+- `roots_among(&[..])` — a panel selection reduced to what it really means:
+  a group and something inside it is the group, once.
+- `move_layer_to(from, to, Drop)` / `move_layers_to` — a drag. `Drop` is
+  `Above`, `Below` or `Inside`, which are the three places the panel can
+  show a drop at, and the engine works the indices out.
+  `move_layers_would_change` says whether a drop would do anything at all —
+  false for a refusal as well as for a drop back in place — so the panel
+  draws a line only where letting go really moves something, and no undo
+  step is left behind when it would not. `Editor::dragged_layers` decides
+  what a drag carries (the whole panel selection, or one row) and *both*
+  the line and the move go through it, so they cannot disagree.
+
+**Do not hand-reason about which drops are no-ops.** Three sweeps in
+`document.rs` do it for you, over four shapes of stack — flat, one group,
+a group in a group, a group at the bottom — and they are what caught the
+line promising moves the engine then refused:
+`move_would_change_agrees_with_what_moving_actually_does`,
+`dragging_several_layers_at_once_agrees_with_itself_too` and
+`every_move_leaves_a_stack_that_is_still_a_document`. Add a shape to
+`stacks()` rather than a one-off test.
+- `nesting_is_sound` — the invariant, checked in `from_parts`, which is the
+  only way a stack can arrive from outside.
+
+**Compositing.** `composite_range` walks the items at one level; when it
+reaches a group it hands the run below it to `composite_group`.
+
+A **pass-through** group — Photoshop's default, and what an imported one
+usually is — at full opacity with no mask is not a separate picture at all:
+its children draw straight onto the backdrop, so an adjustment layer or a
+Multiply inside one reaches the rest of the document exactly as it would
+outside. That case allocates nothing. Held back by opacity or a mask, it is
+that same drawing mixed back into the backdrop by how much of the group
+shows.
+
+**Any other blend mode isolates**: the children go onto a document-sized
+buffer of their own and that is composited in, so the group's mode has
+something to blend. That buffer is what a group costs, and only these two
+cases pay it — worth remembering before nesting groups ten deep on a 4K
+canvas.
+
+**The panel's selection.** Shift- and Ctrl-clicking build up a set of rows
+that Group, Delete, Duplicate and a drag then act on together. It lives on
+`Editor` as `selected: Vec<LayerId>`, *not* on the document: which rows are
+picked out is no more part of the picture than the marching ants are, and
+an undo has no business putting it back. Ids that are no longer in the
+document are dropped when the set is read, so nothing has to prune it as
+layers come and go. Clicking past the rows picks out *nothing*: `nothing_selected`, which is
+the difference between "the set is empty, so it means the active layer" —
+the ordinary state, one row picked out — and "the user picked out nothing
+at all". While it holds, no row is highlighted and Group, Delete and
+Duplicate are refused because they have no subject. The document still has
+an active layer, because the tools have to have something to paint on, so
+painting goes on working; that is the one place this differs from
+Photoshop, where a brush with no layer selected refuses.
 
 ## Masks, adjustment layers and smart objects
 
@@ -684,6 +935,11 @@ on the mark or on the name.
 - Layers are stored **bottom-first** (index 0 is the bottom); the panel
   reverses them for display. Layer *ids* are stable across reorders — key UI
   rows and history snapshots on ids, not indices.
+- The stack is **flat even with groups in it**: a group's children are the
+  run of layers below its own row that name it as their `parent`. An
+  operation that takes a layer somewhere — delete, duplicate, drag — takes
+  its whole `Document::subtree`, and one that splits the stack may only do
+  so at a `Document::split_point`. See "Layer groups".
 - Colours are straight (non-premultiplied) 8-bit RGBA throughout, matching
   `ImageData`.
 - No anti-aliasing in the drawing primitives. Everything is hard-edged
@@ -713,24 +969,38 @@ on the mark or on the name.
 
 ## Known gaps
 
-No lasso or polygon drawn by hand, though the mask machinery is there for
-one; no gradients or blur-type filters; text has one style per layer (no
-mixed runs), no wrapping to a box, no kerning or baseline shift, and is set
-in whatever the browser has for the font's name unless the file is loaded;
-a loaded font file is not kept in the document; the brush tips have no
-angle or spacing controls, and no tip of the user's own; the dither's error-diffusion
-patterns are a serial pass over every pixel, so as a live adjustment *layer*
-on a very large canvas they cost noticeably more per composite than the
-ordered ones; no layer
-groups; pixel layers are always document-sized (a transform resamples into
-the canvas, and what leaves it is lost — a smart object keeps what leaves,
-since it re-renders from its source); a mask is not linked to its layer
-(moving or transforming the pixels leaves the mask where it was; the canvas
-operations and the layer flips do carry it along); a smart object's
-contents cannot be opened for editing, only replaced; adjustment layers have
-no clipping to the layer below; an adjustment layer's preview is composited at
-full resolution however far out the canvas is zoomed, where a 4K document
-fitted to a window needs a sixteenth of those pixels (1.3 ms rather than
-23 ms — `examples/adjbench.rs` has the measurements); an adjustment is aimed
-at one channel at a time, where Photoshop's Levels and Curves keep a separate set of numbers
-per channel behind one dialog — two adjustment layers is the answer here.
+No polygonal lasso — the freehand one is there, and a polygon wants clicks
+that accumulate across gestures, which the `begin`/`update`/`finish` model
+has no place for yet; no `.psd` *writer*, and the reader's own limits are in
+"Photoshop files"; a group's knockout and "blend interior" settings are not
+read, and a group is either pass-through or isolated with nothing in
+between; a layer can be in only one group and there is no way to move a
+group's contents without moving the group;
+no clipping of an adjustment layer to the layer below;
+text has one style per layer (no mixed runs), no wrapping to a box, no
+kerning or baseline shift, and is set in whatever the browser has for the
+font's name unless the file is loaded; a loaded font file is not kept in the
+document; the brush tips have no angle or spacing controls, and no tip of the
+user's own; the dither's error-diffusion patterns are a serial pass over
+every pixel, so as a live adjustment *layer* on a very large canvas they cost
+noticeably more per composite than the ordered ones; pixel layers are always
+document-sized (a transform resamples into the canvas, and what leaves it is
+lost — a smart object keeps what leaves, since it re-renders from its
+source), which with four bytes a pixel is also what `MAX_PIXELS` is really
+about; a mask is not linked to its layer (moving or transforming the pixels
+leaves the mask where it was; the canvas operations and the layer flips do
+carry it along); a smart object's contents cannot be opened for editing, only
+replaced; an adjustment layer's preview is composited at full resolution
+however far out the canvas is zoomed, where a 4K document fitted to a window
+needs a sixteenth of those pixels (1.3 ms rather than 23 ms —
+`examples/adjbench.rs` has the measurements); an adjustment is aimed at one
+channel at a time, where Photoshop's Levels and Curves keep a separate set of
+numbers per channel behind one dialog — two adjustment layers is the answer
+here.
+
+Bigger than any of those, and worth saying plainly: everything is 8-bit
+straight sRGB. There is no 16-bit, no colour management, no profile handling
+and no CMYK, which is what puts photographic retouching and anything bound
+for print out of reach. Lifting it would touch `Rgba`, `Raster`, `blend`,
+the filters and the file format at once, so it is a decision rather than a
+backlog item.

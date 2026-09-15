@@ -142,7 +142,13 @@ impl History {
     }
 
     /// The id of the document state as it stands.
-    fn current(&self) -> u64 {
+    ///
+    /// Every step gives the state it leads to a number of its own, so this
+    /// changes whenever the document does and comes back to what it was on
+    /// an undo. `is_modified` is this against the state that was saved, and
+    /// the page's autosave uses it the same way: to tell whether there is
+    /// anything new to keep.
+    pub fn state_id(&self) -> u64 {
         self.undo.last().map_or(self.base, |s| s.after)
     }
 
@@ -271,7 +277,7 @@ impl History {
 
     /// Notes that the document as it stands now is what is on disk.
     pub fn mark_saved(&mut self) {
-        self.saved = self.current();
+        self.saved = self.state_id();
     }
 
     /// Notes that the document is *not* what is on disk, whatever its
@@ -288,7 +294,7 @@ impl History {
 
     /// Whether the document differs from the last saved (or opened) state.
     pub fn is_modified(&self) -> bool {
-        self.saved != self.current()
+        self.saved != self.state_id()
     }
 }
 
@@ -372,7 +378,7 @@ mod tests {
         doc.add_layer(); // index 1
         history.push(Snapshot::of_active_layer(&doc), Aside::default(), "paint");
         doc.active_layer_mut().raster.set(0, 0, RED);
-        doc.move_layer(1, 0).unwrap(); // the painted layer is now index 0
+        doc.move_layer_to(1, 0, crate::document::Drop::Below).unwrap(); // the painted layer is now index 0
         history.undo(&mut doc, &mut Aside::default());
         assert_eq!(doc.layer(0).unwrap().raster.get(0, 0), Rgba::TRANSPARENT, "the painted layer was restored");
         assert_eq!(doc.layer(1).unwrap().raster.get(0, 0), Rgba::WHITE, "the background was left alone");

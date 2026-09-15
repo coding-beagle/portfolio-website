@@ -37,6 +37,12 @@
 //!   tracking, leading, horizontal and vertical scale, caps, underline,
 //!   strikethrough, outline width and colour, and shadow. A format-3 text
 //!   layer has none of these and comes back with the defaults.
+//! * **5** — layer groups. Each layer record carries, after its target
+//!   flag, the id of the group it is in (0 for none) and whether that
+//!   group is collapsed in the panel; and a fifth layer kind, `4`, the
+//!   group itself, which has no pixels and writes nothing after the kind
+//!   byte. A format-4 file has no groups, so every layer reads back at the
+//!   top level, which is exactly what it was.
 
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
@@ -49,7 +55,7 @@ use crate::transform::Affine;
 
 const MAGIC: &[u8; 6] = b"NPAINT";
 /// The format this build writes. See the module's version history.
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileError {
@@ -172,6 +178,12 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
         w.u8(u8::from(layer.lock_alpha));
         w.u8(u8::from(layer.mask_enabled));
         w.u8(u8::from(layer.target == Target::Mask));
+        if version >= 5 {
+            // 0 is not a layer id — they are handed out from 1 — so it is
+            // free to mean "not in a group".
+            w.u32(layer.parent.map_or(0, |id| id.0));
+            w.u8(u8::from(layer.collapsed));
+        }
         match &layer.kind {
             LayerKind::Pixels => {
                 w.u8(0);
@@ -185,6 +197,14 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
                 for p in params {
                     w.f32(p);
                 }
+            }
+            // A group is its own row and its children's `parent`; there is
+            // nothing else to write. A format before groups has no kind for
+            // one, so it goes down as the empty layer it draws as.
+            LayerKind::Group if version >= 5 => w.u8(4),
+            LayerKind::Group => {
+                w.u8(0);
+                w.raster(&Raster::new(doc.width(), doc.height()));
             }
             LayerKind::Smart(object) => {
                 w.u8(if object.text.is_some() { 3 } else { 2 });
@@ -329,6 +349,12 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
         let lock_alpha = r.u8()? != 0;
         let mask_enabled = r.u8()? != 0;
         let on_mask = r.u8()? != 0;
+        let (parent, collapsed) = if version >= 5 {
+            let parent = r.u32()?;
+            (if parent == 0 { None } else { Some(LayerId(parent)) }, r.u8()? != 0)
+        } else {
+            (None, false)
+        };
         let (kind, raster) = match r.u8()? {
             0 => {
                 let raster = r.raster()?;
@@ -354,6 +380,7 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
                 let raster = object.render(width, height);
                 (LayerKind::Smart(object), raster)
             }
+            4 => (LayerKind::Group, Raster::new(0, 0)),
             _ => return Err(FileError::Corrupt("layer kind")),
         };
         if matches!(kind, LayerKind::Pixels) && (raster.width(), raster.height()) != (width, height) {
@@ -381,9 +408,13 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
         layer.mask = mask;
         layer.mask_enabled = mask_enabled;
         layer.set_target(if on_mask { Target::Mask } else { Target::Pixels });
+        layer.parent = parent;
+        layer.collapsed = collapsed;
         layers.push(layer);
     }
-    let doc = Document::from_parts(width, height, layers, active).ok_or(FileError::Corrupt("layer ids"))?;
+    // `from_parts` also checks that the groups nest the way the stack
+    // expects: a file whose parents point anywhere else is damaged.
+    let doc = Document::from_parts(width, height, layers, active).ok_or(FileError::Corrupt("layer ids or grouping"))?;
     let mut guides = Guides::default();
     if r.at < bytes.len() {
         for axis in [&mut guides.h, &mut guides.v] {
@@ -453,6 +484,11 @@ mod tests {
             origin: crate::geometry::Point::new(2.0, 3.0),
         };
         doc.add_text_layer(text, Raster::filled(3, 2, RED), crate::geometry::Point::new(1.0, 1.0));
+        // A group over the top two layers, folded shut, so the round trip
+        // covers the nesting as well as the layers.
+        let group = doc.group_layer(4, Some("Folder")).unwrap();
+        doc.set_collapsed(group, true).unwrap();
+        doc.layer_mut(group).unwrap().set_opacity(0.4);
         doc.set_active(1).unwrap();
         doc
     }
@@ -507,14 +543,18 @@ mod tests {
         // older one that says nothing about a channel comes back on RGB
         // (see `adjust`); 3 added a layer kind; 4 added the Character
         // panel's settings after a text layer, which come back as the
-        // defaults from a format-3 file.
+        // defaults from a format-3 file; 5 added groups, and an older file
+        // has none, so every layer comes back at the top level.
         for older in 1..VERSION {
             let bytes = save_as(&document(), &Guides::default(), older);
             let (doc, _) = load(&bytes).expect("an older file still opens");
             assert_eq!(doc.layers().len(), document().layers().len(), "format {older}");
             let text = doc.layers()[4].text().expect("the text layer");
             assert_eq!(text.text, "Hi\nthere ✓", "format {older}");
-            assert_eq!(text.style.leading, 1.2, "format {older}: the default, not the 1.5 a newer file keeps");
+            if older < 4 {
+                assert_eq!(text.style.leading, 1.2, "format {older}: the default, not the 1.5 a newer file keeps");
+            }
+            assert!(doc.layers().iter().all(|l| l.parent.is_none()), "format {older} has no groups in it");
         }
         let (doc, _) = load(&bytes).unwrap();
         assert_eq!(doc.layers()[4].text().unwrap().style.leading, 1.5);

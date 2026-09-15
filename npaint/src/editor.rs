@@ -11,7 +11,7 @@ use crate::autoselect::{mask_from_matte, select_subject, ColorSet};
 use crate::blend::BlendMode;
 use crate::checker;
 use crate::color::Rgba;
-use crate::document::{Document, DocumentError};
+use crate::document::{Document, DocumentError, Drop};
 use crate::file::{self, FileError};
 use crate::geometry::{Point, Rect};
 use crate::history::{Aside, History, Snapshot};
@@ -34,9 +34,16 @@ const MAX_PREVIEW_STEP: u32 = 16;
 /// The composite of everything below the layer a session is changing, kept
 /// for as long as the session lasts. See [`Editor::preview_base`].
 struct PreviewBase {
-    /// The layer the composite stops below. Layers from here up are still
-    /// composited on every preview.
+    /// Where the composite stops. Layers from here up are still composited
+    /// on every preview.
+    ///
+    /// This is a [`Document::split_point`], not the edited layer: the stack
+    /// can only be cut between top-level items, so a layer inside a group
+    /// holds from the bottom of the outermost group it is in. The two are
+    /// the same index whenever the edited layer is not in a group.
     index: usize,
+    /// The layer being edited, which is at or above `index`.
+    edited: usize,
     below: Raster,
     /// The same thing at a fraction of the size, when the canvas is zoomed
     /// far enough out that the screen cannot tell.
@@ -75,10 +82,14 @@ struct SmallPreview {
     selection: Selection,
     /// The edited surface before the adjustment, at the same scale.
     base: Raster,
+    /// Which layer of the reduced document is the edited one. [`SMALL_EDITED`]
+    /// when nothing was kept above the cut but the layer itself, higher when
+    /// the layer is inside a group and the group came along with it.
+    edited: usize,
 }
 
-/// Where the edited layer sits in a [`SmallPreview`]: above the one layer
-/// everything below it was flattened into.
+/// Where the first kept layer sits in a [`SmallPreview`]: above the one
+/// layer everything below it was flattened into.
 const SMALL_EDITED: usize = 1;
 
 /// A live edit that the page previews and then commits or cancels: an
@@ -183,6 +194,27 @@ pub struct Clip {
 pub struct Editor {
     document: Document,
     selection: Selection,
+    /// The layers the panel has selected, beyond the active one — what a
+    /// Shift- or Ctrl-click builds up, and what Group, Delete and a drag
+    /// then act on together.
+    ///
+    /// They are ids rather than indices, and they live here rather than in
+    /// the document: which rows are picked out in the panel is no more part
+    /// of the picture than the marching ants are, and an undo has no
+    /// business putting a selection of rows back. Ids that are no longer in
+    /// the document are dropped when the set is read, so nothing has to
+    /// prune it as layers come and go.
+    ///
+    /// An *empty* set still means the active layer, which is the ordinary
+    /// state: one row picked out. `nothing_selected` is the other thing
+    /// empty could mean — the user clicked past the rows and picked out
+    /// nothing at all.
+    selected: Vec<LayerId>,
+    /// Set when the panel has no row picked out. The document still has an
+    /// active layer, because the tools have to have something to paint on;
+    /// what this says is that no *panel* operation has a subject, so Group,
+    /// Delete and Duplicate are refused until a row is clicked.
+    nothing_selected: bool,
     viewport: Viewport,
     history: History,
     settings: ToolSettings,
@@ -236,6 +268,8 @@ impl Editor {
         Editor {
             document: Document::new(width, height, background),
             selection: Selection::None,
+            selected: Vec::new(),
+            nothing_selected: false,
             viewport: Viewport::default(),
             history: History::new(HISTORY_LIMIT),
             settings: ToolSettings::default(),
@@ -287,6 +321,14 @@ impl Editor {
         file::save(&self.document, &self.settings.guides)
     }
 
+    /// A number that changes whenever the document does, and comes back to
+    /// what it was on an undo — [`crate::history::History::state_id`]. The
+    /// page's autosave asks for it to tell whether there is anything new
+    /// worth keeping.
+    pub fn document_state(&self) -> u64 {
+        self.history.state_id()
+    }
+
     /// Says the document has never been saved, whatever its history holds:
     /// what the page calls after restoring a recovered document, so that
     /// the close prompt still fires for work that is only in the browser's
@@ -306,6 +348,20 @@ impl Editor {
         self.cancel_session();
         self.abort_gesture();
         file::save(&self.document, &self.settings.guides)
+    }
+
+    /// Opens a Photoshop file, replacing the document.
+    ///
+    /// Returns what the user should be told about how it got here, if
+    /// anything: [`crate::psd`] takes the common shape of the format and is
+    /// deliberate about saying what it approximated. A `.psd` carries no
+    /// guides this reader keeps, so the old ones go.
+    pub fn open_psd(&mut self, bytes: &[u8]) -> Result<Option<String>, crate::psd::PsdError> {
+        let import = crate::psd::load(bytes)?;
+        self.replace_document(import.document);
+        self.settings.guides.h.clear();
+        self.settings.guides.v.clear();
+        Ok(import.note)
     }
 
     /// Opens an NPaint file, replacing the document and the guides.
@@ -394,11 +450,12 @@ impl Editor {
     /// Composites everything below `index` and keeps it for the session, so
     /// that the previews to come start from there. Only worth it when there
     /// is something below to save.
-    fn hold_preview_base(&mut self, index: usize) {
+    fn hold_preview_base(&mut self, edited: usize) {
+        let index = self.document.split_point(edited);
         let mut below = Raster::new(self.document.width(), self.document.height());
         let all = self.document.bounds();
         self.document.composite_below(index, &mut below, &all);
-        self.preview_base = Some(PreviewBase { index, below, small: None });
+        self.preview_base = Some(PreviewBase { index, edited, below, small: None });
         self.refresh_small_preview();
     }
 
@@ -434,6 +491,9 @@ impl Editor {
             return false;
         }
         let index = base.index;
+        // The synthetic "below" layer takes slot 0, so everything kept
+        // slides up by one.
+        let edited = SMALL_EDITED + (base.edited - index);
         let (w, h) = (self.document.width().div_ceil(step), self.document.height().div_ceil(step));
         // Everything below the edited layer, already flattened, as one
         // layer; then the edited layer and anything above it.
@@ -446,12 +506,12 @@ impl Editor {
             small.mask = l.mask.as_ref().map(|m| m.downscaled(step));
             small
         }));
-        let Some(mut document) = Document::from_parts(w, h, layers, SMALL_EDITED) else { return false };
-        document.set_active(SMALL_EDITED).expect("the edited layer is there");
+        let Some(mut document) = Document::from_parts(w, h, layers, edited) else { return false };
+        document.set_active(edited).expect("the edited layer is there");
         let selection = self.selection.downscaled(step);
         let base_surface = document.active_surface().clone();
         if let Some(base) = self.preview_base.as_mut() {
-            base.small = Some(SmallPreview { step, document, selection, base: base_surface });
+            base.small = Some(SmallPreview { step, document, selection, base: base_surface, edited });
         }
         true
     }
@@ -904,11 +964,239 @@ impl Editor {
         self.structural("Delete Layer", |d| d.remove_layer(index))
     }
 
-    pub fn move_layer(&mut self, from: usize, to: usize) -> Result<(), DocumentError> {
+    /// Drops a layer somewhere else in the stack — what a drag in the
+    /// layers panel does. Dropping a layer back where it already was is not
+    /// an edit and leaves no undo step.
+    pub fn move_layer_to(&mut self, from: usize, to: usize, drop: Drop) -> Result<usize, DocumentError> {
         if from == to {
+            return Ok(from);
+        }
+        // Dragging a row that is part of the panel's selection takes the
+        // whole selection with it; dragging any other row is that row alone.
+        let indices = self.dragged_layers(from);
+        // Dropping layers back where they already are is not an edit.
+        if !self.document.move_layers_would_change(&indices, to, drop) {
+            return Ok(from);
+        }
+        if indices.len() > 1 {
+            return self.structural("Move Layers", |d| d.move_layers_to(&indices, to, drop));
+        }
+        self.structural("Move Layer", |d| d.move_layer_to(from, to, drop))
+    }
+
+    /// Moves a layer one row up or down the panel, stepping over a group
+    /// rather than into it and out of a group when there is nowhere left.
+    pub fn reorder_layer(&mut self, index: usize, up: bool) -> Result<Option<usize>, DocumentError> {
+        if index >= self.document.layers().len() {
+            return Err(DocumentError::NoSuchLayer);
+        }
+        // Nothing to record when there is nowhere that way to go.
+        if self.document.reorder_target(index, up).is_none() {
+            return Ok(None);
+        }
+        self.structural("Move Layer", |d| d.reorder_layer(index, up))
+    }
+
+    // ---- The panel's selection ----------------------------------------------------
+
+    /// Which layers the panel has picked out, bottom-first. The active
+    /// layer is always one of them, and layers that have since gone are
+    /// not: the set is pruned as it is read, so nothing else has to.
+    pub fn selected_layers(&self) -> Vec<usize> {
+        if self.nothing_selected {
+            return Vec::new();
+        }
+        let mut indices: Vec<usize> = self.selected.iter().filter_map(|&id| self.document.index_of(id)).collect();
+        let active = self.document.active_index();
+        if !indices.contains(&active) {
+            indices.push(active);
+        }
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+    }
+
+    /// What a drag started on `from` carries: the whole panel selection
+    /// when that row is part of it, and otherwise just that row. Both the
+    /// line the panel draws and the move it then makes go through this, so
+    /// they cannot disagree.
+    pub fn dragged_layers(&self, from: usize) -> Vec<usize> {
+        let selected = self.selected_layers();
+        if selected.len() > 1 && selected.contains(&from) {
+            selected
+        } else {
+            vec![from]
+        }
+    }
+
+    pub fn layer_is_selected(&self, index: usize) -> bool {
+        if self.nothing_selected {
+            return false;
+        }
+        index == self.document.active_index() || self.document.layer(index).is_some_and(|l| self.selected.contains(&l.id()))
+    }
+
+    fn remember_selection(&mut self, indices: &[usize]) {
+        self.selected = indices.iter().filter_map(|&i| self.document.layer(i).map(Layer::id)).collect();
+        self.nothing_selected = false;
+    }
+
+    /// Adds a layer to the panel's selection, or takes it out again —
+    /// Ctrl-clicking a row. The active layer cannot be taken out; clicking
+    /// it makes it the only one selected instead.
+    pub fn toggle_layer_selected(&mut self, index: usize) -> Result<(), DocumentError> {
+        let id = self.document.layer(index).ok_or(DocumentError::NoSuchLayer)?.id();
+        // Ctrl-clicking with nothing picked out picks out that row, rather
+        // than adding it to a set that is not there.
+        if self.nothing_selected {
+            self.nothing_selected = false;
+            self.selected.clear();
+            return self.set_active_layer(index);
+        }
+        if index == self.document.active_index() {
+            self.selected.clear();
             return Ok(());
         }
-        self.structural("Move Layer", |d| d.move_layer(from, to))
+        match self.selected.iter().position(|&s| s == id) {
+            Some(at) => {
+                self.selected.remove(at);
+            }
+            None => {
+                // The active layer is only implicitly in the set, so it has
+                // to be written down before another row joins it.
+                let active = self.document.active_layer().id();
+                if !self.selected.contains(&active) {
+                    self.selected.push(active);
+                }
+                self.selected.push(id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Drops back to one selected layer, the active one — clicking the
+    /// empty part of the panel. There is always an active layer, since the
+    /// tools have to have something to paint on; what this clears is
+    /// everything Shift and Ctrl added to it.
+    pub fn clear_layer_selection(&mut self) {
+        self.selected.clear();
+        self.nothing_selected = true;
+    }
+
+    /// Selects everything between the active layer and `index` — Shift-
+    /// clicking a row. The active layer does not move, so shift-clicking
+    /// again from the same anchor grows or shrinks the run.
+    pub fn select_layer_range(&mut self, index: usize) -> Result<(), DocumentError> {
+        if index >= self.document.layers().len() {
+            return Err(DocumentError::NoSuchLayer);
+        }
+        // With nothing picked out there is no anchor to reach from, so a
+        // Shift-click is just a click.
+        if self.nothing_selected {
+            return self.set_active_layer(index);
+        }
+        let active = self.document.active_index();
+        let (from, to) = if index < active { (index, active) } else { (active, index) };
+        let run: Vec<usize> = (from..=to).collect();
+        self.remember_selection(&run);
+        Ok(())
+    }
+
+    // ---- Groups ------------------------------------------------------------------
+
+    pub fn add_group(&mut self) -> usize {
+        self.structural("New Group", |d| Ok(d.add_group(None))).expect("adding a group cannot fail")
+    }
+
+    /// Puts a layer into a new group in its place.
+    pub fn group_layer(&mut self, index: usize) -> Result<usize, DocumentError> {
+        self.structural("Group Layer", |d| d.group_layer(index, None))
+    }
+
+    /// Puts everything the panel has selected into one new group, in the
+    /// place of the topmost of them. The group is then the only thing
+    /// selected, as it is the only row left to click.
+    pub fn group_selected_layers(&mut self) -> Result<usize, DocumentError> {
+        let indices = self.selected_layers();
+        if indices.is_empty() {
+            return Err(DocumentError::NoSuchLayer);
+        }
+        let label = if indices.len() > 1 { "Group Layers" } else { "Group Layer" };
+        let at = self.structural(label, |d| d.group_layers(&indices, None))?;
+        self.selected.clear();
+        let _ = self.set_active_layer(at);
+        Ok(at)
+    }
+
+    /// Deletes everything the panel has selected. Refused, and nothing
+    /// deleted, if that would empty the document.
+    pub fn remove_selected_layers(&mut self) -> Result<(), DocumentError> {
+        let indices = self.selected_layers();
+        if indices.is_empty() {
+            return Err(DocumentError::NoSuchLayer);
+        }
+        if indices.len() <= 1 {
+            return self.remove_layer(self.document.active_index());
+        }
+        let label = "Delete Layers";
+        self.structural(label, |d| {
+            let roots = d.roots_among(&indices);
+            let doomed: usize = roots.iter().map(|&r| d.subtree(r).len()).sum();
+            if doomed >= d.layers().len() {
+                return Err(DocumentError::LastLayer);
+            }
+            // Highest first, so the ones still to go keep their indices.
+            for &root in roots.iter().rev() {
+                d.remove_layer(root)?;
+            }
+            Ok(())
+        })?;
+        self.selected.clear();
+        Ok(())
+    }
+
+    /// Duplicates everything the panel has selected, and leaves the copies
+    /// selected the way the originals were.
+    pub fn duplicate_selected_layers(&mut self) -> Result<usize, DocumentError> {
+        let indices = self.selected_layers();
+        if indices.is_empty() {
+            return Err(DocumentError::NoSuchLayer);
+        }
+        if indices.len() <= 1 {
+            return self.duplicate_layer(self.document.active_index());
+        }
+        let copies = self.structural("Duplicate Layers", |d| {
+            let roots = d.roots_among(&indices);
+            let mut copies = Vec::with_capacity(roots.len());
+            // Bottom-first, carrying how far the copies already made have
+            // pushed the layers above them up the stack.
+            let mut shift = 0;
+            for &root in &roots {
+                let at = d.duplicate_layer(root + shift)?;
+                shift += d.subtree(at).len();
+                copies.push(at);
+            }
+            Ok(copies)
+        })?;
+        self.remember_selection(&copies);
+        let last = *copies.last().expect("there was something to copy");
+        let _ = self.document.set_active(last);
+        Ok(last)
+    }
+
+    pub fn ungroup(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural("Ungroup", |d| d.ungroup(index))
+    }
+
+    pub fn flatten_group(&mut self, index: usize) -> Result<(), DocumentError> {
+        self.structural("Merge Group", |d| d.flatten_group(index))
+    }
+
+    /// Folding a group open or shut is a view setting, not an edit, so it
+    /// leaves no undo step — but it does live in the document, so that a
+    /// saved file opens folded the way it was left.
+    pub fn set_layer_collapsed(&mut self, index: usize, collapsed: bool) -> Result<(), DocumentError> {
+        self.document.set_collapsed(index, collapsed)
     }
 
     pub fn merge_down(&mut self, index: usize) -> Result<(), DocumentError> {
@@ -922,7 +1210,12 @@ impl Editor {
             self.cancel_session();
         }
         self.abort_gesture();
-        self.document.set_active(index)
+        self.document.set_active(index)?;
+        // A plain click is a selection of one; Shift and Ctrl go through
+        // `select_layer_range` and `toggle_layer_selected` instead.
+        self.selected.clear();
+        self.nothing_selected = false;
+        Ok(())
     }
 
     /// Switches the tools between a layer's pixels and its mask. Not an
@@ -1559,7 +1852,7 @@ impl Editor {
             return false;
         };
         if is_layer {
-            let _ = small.document.set_adjustment(SMALL_EDITED, adjustment.clone());
+            let _ = small.document.set_adjustment(small.edited, adjustment.clone());
         } else {
             let clip = small.selection.clip(small.document.bounds());
             let mut out = small.base.clone();
@@ -2588,11 +2881,226 @@ mod tests {
     fn moving_a_layer_to_itself_is_free() {
         let mut e = editor();
         e.add_layer();
-        assert!(e.move_layer(1, 1).is_ok());
+        assert!(e.move_layer_to(1, 1, Drop::Above).is_ok());
         assert_eq!(e.document().layers().len(), 2);
         // Only the add is in the history.
         assert!(e.undo());
         assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn grouping_is_one_undo_step_and_puts_the_picture_back() {
+        let mut e = editor();
+        let painted = e.add_layer();
+        paint(&mut e, |r| { let all = r.bounds(); r.fill_rect(Rect::new(5, 5, 4, 1), RED, &all) });
+        let before = e.document().composite();
+
+        let group = e.group_layer(painted).unwrap();
+        assert_eq!(e.document().layer(group).unwrap().kind.name(), "group");
+        assert_eq!(e.document().composite(), before, "a new group is pass-through and changes nothing");
+
+        // Painting inside the group still reaches the canvas.
+        e.set_active_layer(painted).unwrap();
+        click(&mut e, 6.0, 9.0);
+        assert_eq!(e.document().composite().get(6, 9), RED);
+
+        // Hiding the group takes the layer off screen without touching it.
+        e.set_layer_visible(group, false).unwrap();
+        assert_eq!(e.document().composite().get(6, 9), Rgba::WHITE);
+        assert!(e.document().hidden_by_group(painted));
+        assert!(e.undo(), "one step put the group back on");
+        assert_eq!(e.document().composite().get(6, 9), RED);
+    }
+
+    #[test]
+    fn a_layer_inside_a_group_previews_through_the_group() {
+        let mut e = editor();
+        let lower = e.add_layer();
+        let group = e.group_layer(lower).unwrap();
+        // A second layer inside the group, above the first, so the layer
+        // being edited is not itself the bottom of the group.
+        e.set_active_layer(lower).unwrap();
+        let painted = e.add_layer();
+        paint(&mut e, |r| {
+            let all = r.bounds();
+            r.fill_rect(Rect::new(5, 5, 5, 1), RED, &all)
+        });
+        let group = group + 1;
+        assert_eq!(e.document().depth(painted), 1);
+        e.set_layer_opacity(group, 0.5).unwrap();
+        e.set_active_layer(painted).unwrap();
+
+        // The session's cache may only cut the stack between top-level
+        // items, so a layer inside a group holds from below the group
+        // rather than from just below itself.
+        e.begin_adjustment().unwrap();
+        assert_eq!(e.preview_base.as_ref().map(|b| (b.index, b.edited)), Some((lower, painted)));
+
+        // What the preview draws has to be what the same adjustment applied
+        // for good would draw — the group's opacity included.
+        let mut direct = e.document().clone();
+        let all = direct.bounds();
+        let invert = Adjustment::from_params("invert", &[]).unwrap();
+        invert.apply(&mut direct.layer_mut(painted).unwrap().raster, &all);
+        let expected = direct.composite();
+
+        e.preview_adjustment("invert", &[]).unwrap();
+        let mut frame = Raster::new(20, 20);
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame.get(6, 5), expected.get(6, 5), "the group's opacity is still in the preview");
+        assert_eq!(frame.get(0, 0), expected.get(0, 0));
+        e.cancel_session();
+    }
+
+    #[test]
+    fn the_panel_selection_is_what_group_and_delete_act_on() {
+        let mut e = editor();
+        let a = e.add_layer();
+        let b = e.add_layer();
+        assert_eq!(e.selected_layers(), vec![b], "the active layer alone, to start with");
+
+        // Ctrl-clicking another row adds it; the active layer stays put.
+        e.toggle_layer_selected(a).unwrap();
+        assert_eq!(e.selected_layers(), vec![a, b]);
+        assert_eq!(e.document().active_index(), b);
+        assert!(e.layer_is_selected(a) && e.layer_is_selected(b) && !e.layer_is_selected(0));
+
+        // Grouping takes both, and leaves the group as the selection.
+        let group = e.group_selected_layers().unwrap();
+        assert_eq!(e.document().layers().len(), 4);
+        assert_eq!(e.document().children_of(group), 1..3);
+        assert_eq!(e.selected_layers(), vec![group]);
+        assert!(e.undo(), "grouping two layers is one step");
+        assert_eq!(e.document().layers().len(), 3);
+    }
+
+    #[test]
+    fn clicking_past_the_rows_picks_out_nothing_at_all() {
+        let mut e = editor();
+        let top = e.add_layer();
+        assert!(e.layer_is_selected(top));
+
+        e.clear_layer_selection();
+        assert!(!e.layer_is_selected(0) && !e.layer_is_selected(top), "no row is picked out");
+        assert!(e.selected_layers().is_empty());
+        // The tools still have somewhere to paint — the document always has
+        // an active layer — but nothing the panel does has a subject.
+        assert_eq!(e.document().active_index(), top);
+        assert_eq!(e.group_selected_layers(), Err(DocumentError::NoSuchLayer));
+        assert_eq!(e.remove_selected_layers(), Err(DocumentError::NoSuchLayer));
+        assert_eq!(e.document().layers().len(), 2, "and nothing happened");
+
+        // Clicking a row picks it out again, and so does Ctrl- or
+        // Shift-clicking, which have no anchor to work from.
+        e.toggle_layer_selected(0).unwrap();
+        assert_eq!(e.selected_layers(), vec![0]);
+        e.clear_layer_selection();
+        e.select_layer_range(top).unwrap();
+        assert_eq!(e.selected_layers(), vec![top]);
+    }
+
+    #[test]
+    fn shift_clicking_takes_the_run_between_the_active_layer_and_the_row() {
+        let mut e = editor();
+        e.add_layer();
+        e.add_layer();
+        let top = e.add_layer();
+        assert_eq!(top, 3);
+        e.set_active_layer(1).unwrap();
+        e.select_layer_range(3).unwrap();
+        assert_eq!(e.selected_layers(), vec![1, 2, 3]);
+        assert_eq!(e.document().active_index(), 1, "the anchor does not move");
+        // Shrinking it again from the same anchor.
+        e.select_layer_range(2).unwrap();
+        assert_eq!(e.selected_layers(), vec![1, 2]);
+        // And a plain click is a selection of one.
+        e.set_active_layer(0).unwrap();
+        assert_eq!(e.selected_layers(), vec![0]);
+    }
+
+    #[test]
+    fn deleting_a_whole_selection_is_refused_rather_than_emptying_the_document() {
+        let mut e = editor();
+        e.add_layer();
+        e.select_layer_range(0).unwrap();
+        assert_eq!(e.selected_layers(), vec![0, 1]);
+        let steps = e.history_labels().len();
+        assert_eq!(e.remove_selected_layers(), Err(DocumentError::LastLayer));
+        assert_eq!(e.document().layers().len(), 2, "and nothing was deleted on the way");
+        assert_eq!(e.history_labels().len(), steps, "a refusal leaves no step behind");
+    }
+
+    #[test]
+    fn duplicating_a_selection_copies_every_layer_and_selects_the_copies() {
+        let mut e = editor();
+        let middle = e.add_layer();
+        e.add_layer();
+        // The background and the middle layer, with the top one left out.
+        e.set_active_layer(0).unwrap();
+        e.toggle_layer_selected(middle).unwrap();
+        e.duplicate_selected_layers().unwrap();
+
+        let names: Vec<&str> = e.document().layers().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, vec!["Background", "Background copy", "Layer 2", "Layer 2 copy", "Layer 3"]);
+        // The copies are what is selected now, not whatever slid into their
+        // old indices.
+        let selected: Vec<&str> = e.selected_layers().iter().map(|&i| e.document().layers()[i].name.as_str()).collect();
+        assert_eq!(selected, vec!["Background copy", "Layer 2 copy"]);
+        assert_eq!(e.document().active_layer().name, "Layer 2 copy");
+        assert!(e.undo(), "duplicating a selection is one step");
+        assert_eq!(e.document().layers().len(), 3);
+    }
+
+    #[test]
+    fn dropping_a_layer_back_where_it_was_is_free_but_a_real_move_is_not() {
+        let mut e = editor();
+        e.add_layer();
+        // Two layers: Background at 0, Layer 2 at 1.
+        let steps = e.history_labels().len();
+        // Above the row already under it, and below the row already over
+        // it, are both where it already is.
+        assert_eq!(e.move_layer_to(1, 0, Drop::Above), Ok(1));
+        assert_eq!(e.move_layer_to(0, 1, Drop::Below), Ok(0));
+        assert_eq!(e.history_labels().len(), steps, "neither left a step behind");
+
+        // But the bottom layer dropped *above* the top one really moves.
+        assert_eq!(e.move_layer_to(0, 1, Drop::Above), Ok(1));
+        let names: Vec<&str> = e.document().layers().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, vec!["Layer 2", "Background"]);
+        assert_eq!(e.history_labels().len(), steps + 1);
+
+        // And the row now on top dropped below the other one, with
+        // nothing selected but the active layer, which has not moved.
+        assert_eq!(e.document().active_layer().name, "Layer 2");
+        assert_eq!(e.selected_layers(), vec![0], "the active layer alone");
+        assert_eq!(e.move_layer_to(1, 0, Drop::Below), Ok(0));
+        let names: Vec<&str> = e.document().layers().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, vec!["Background", "Layer 2"]);
+    }
+
+    #[test]
+    fn a_selection_of_layers_drags_together() {
+        let mut e = editor();
+        let a = e.add_layer();
+        let b = e.add_layer();
+        e.set_active_layer(a).unwrap();
+        e.toggle_layer_selected(b).unwrap();
+        // Dragging one of them below the background takes both.
+        e.move_layer_to(a, 0, Drop::Below).unwrap();
+        let names: Vec<&str> = e.document().layers().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, vec!["Layer 2", "Layer 3", "Background"]);
+    }
+
+    #[test]
+    fn deleting_a_group_takes_its_contents_and_one_undo_brings_them_back() {
+        let mut e = editor();
+        let painted = e.add_layer();
+        let group = e.group_layer(painted).unwrap();
+        assert_eq!(e.document().layers().len(), 3);
+        e.remove_layer(group).unwrap();
+        assert_eq!(e.document().layers().len(), 1);
+        assert!(e.undo());
+        assert_eq!(e.document().layers().len(), 3);
     }
 
     #[test]

@@ -10,7 +10,9 @@
 //! the text ([`SmartObject::text`]) so it can be set again. An
 //! **adjustment** layer has no pixels of its own: it applies an
 //! [`Adjustment`] to everything below it at composite time, and its
-//! `raster` stays empty.
+//! `raster` stays empty. A **group** has no pixels of its own either: it
+//! is a folder, and what it draws is its children composited together. See
+//! [`Layer::parent`] for how the stack holds the nesting.
 //!
 //! Any layer may carry a **mask**: a second, grey raster the same size as
 //! the document. White shows the layer, black hides it, and grey is in
@@ -117,17 +119,21 @@ pub enum LayerKind {
     Pixels,
     Adjustment(Adjustment),
     Smart(SmartObject),
+    /// A folder. Its children are the layers below it in the stack that
+    /// name it as their [`Layer::parent`]; it has no pixels of its own.
+    Group,
 }
 
 impl LayerKind {
-    /// `"pixels"`, `"adjustment"`, `"smart"` or `"text"` — the last being
-    /// a smart object that remembers its text.
+    /// `"pixels"`, `"adjustment"`, `"smart"`, `"text"` or `"group"` —
+    /// `"text"` being a smart object that remembers its text.
     pub fn name(&self) -> &'static str {
         match self {
             LayerKind::Pixels => "pixels",
             LayerKind::Adjustment(_) => "adjustment",
             LayerKind::Smart(object) if object.text.is_some() => "text",
             LayerKind::Smart(_) => "smart",
+            LayerKind::Group => "group",
         }
     }
 }
@@ -151,6 +157,8 @@ pub enum EditRefusal {
     /// A text layer's pixels are set from its text; edit that, rasterize it,
     /// or paint on its mask.
     TextLayer,
+    /// A group has no pixels; only its mask can be painted.
+    Group,
     /// The layer is locked: nothing on it may change until it is unlocked.
     Locked,
     /// The layer's transparency is locked, which painting respects but
@@ -164,6 +172,7 @@ impl std::fmt::Display for EditRefusal {
             EditRefusal::SmartObject => "a smart object cannot be painted on directly: rasterize it, or paint on its mask",
             EditRefusal::AdjustmentLayer => "an adjustment layer has no pixels: paint on its mask instead",
             EditRefusal::TextLayer => "a text layer cannot be painted on: edit it with the text tool, rasterize it, or paint on its mask",
+            EditRefusal::Group => "a group has no pixels of its own: paint on a layer inside it, or on the group's mask",
             EditRefusal::Locked => "the layer is locked: unlock it first",
             EditRefusal::AlphaLocked => "the layer's transparency is locked: unlock it to move or transform it",
         })
@@ -195,6 +204,17 @@ pub struct Layer {
     /// Lock transparent pixels: painting keeps every pixel's alpha, so a
     /// stroke lands only where there is already something.
     pub lock_alpha: bool,
+    /// The group this layer is in, if any.
+    ///
+    /// The stack stays one flat list — see [`crate::document`] — and a
+    /// group's children are the contiguous run of layers *below* it that
+    /// point at it, which is the arrangement a `.psd` stores and the order
+    /// they composite in. The parent is an id rather than an index so that
+    /// a reorder does not have to rewrite it.
+    pub parent: Option<LayerId>,
+    /// A group whose children the panel is not showing. Nothing to do with
+    /// how it composites.
+    pub collapsed: bool,
 }
 
 /// How much a mask pixel shows: its brightness, with anything transparent
@@ -243,7 +263,19 @@ impl Layer {
             target: Target::Pixels,
             locked: false,
             lock_alpha: false,
+            parent: None,
+            collapsed: false,
         }
+    }
+
+    /// An empty group. It carries no pixels; what it draws is its children.
+    /// Pass-through is Photoshop's default for a new group and the one that
+    /// changes nothing on screen when layers are folded into it.
+    pub fn new_group(id: LayerId, name: impl Into<String>) -> Layer {
+        let mut layer = Layer::new(id, name, Raster::new(0, 0));
+        layer.kind = LayerKind::Group;
+        layer.blend = BlendMode::PassThrough;
+        layer
     }
 
     /// An adjustment layer. It starts with a mask — white, or the selection
@@ -280,6 +312,17 @@ impl Layer {
 
     pub fn is_adjustment(&self) -> bool {
         matches!(self.kind, LayerKind::Adjustment(_))
+    }
+
+    pub fn is_group(&self) -> bool {
+        matches!(self.kind, LayerKind::Group)
+    }
+
+    /// Whether the layer draws pixels of its own at all. An adjustment
+    /// layer and a group do not: one changes what is below it, the other
+    /// holds what is inside it.
+    pub fn has_pixels(&self) -> bool {
+        !self.is_adjustment() && !self.is_group()
     }
 
     /// Whether the layer renders from a source at its own size — a smart
@@ -363,6 +406,7 @@ impl Layer {
             LayerKind::Smart(object) if object.text.is_some() => Some(EditRefusal::TextLayer),
             LayerKind::Smart(_) => Some(EditRefusal::SmartObject),
             LayerKind::Adjustment(_) => Some(EditRefusal::AdjustmentLayer),
+            LayerKind::Group => Some(EditRefusal::Group),
         }
     }
 
@@ -435,7 +479,9 @@ impl Layer {
     /// rasterized by it, since its source cannot carry a mask; an adjustment
     /// layer keeps its mask, having nothing to bake it into.
     pub fn apply_mask(&mut self) {
-        if self.mask.is_none() || self.is_adjustment() {
+        // An adjustment layer and a group have nothing to bake a mask
+        // into, so they keep theirs.
+        if self.mask.is_none() || !self.has_pixels() {
             return;
         }
         self.raster = self.rendered().into_owned();
@@ -459,7 +505,7 @@ impl Layer {
     pub fn map_rasters(&mut self, f: impl Fn(&Raster) -> Raster, place: impl Fn(&Affine) -> Affine, width: u32, height: u32) {
         match &mut self.kind {
             LayerKind::Pixels => self.raster = f(&self.raster),
-            LayerKind::Adjustment(_) => {}
+            LayerKind::Adjustment(_) | LayerKind::Group => {}
             LayerKind::Smart(object) => {
                 object.transform = place(&object.transform);
                 self.raster = object.render(width, height);

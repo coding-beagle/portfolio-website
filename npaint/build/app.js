@@ -187,7 +187,11 @@ let picker; // the colour picker
 let pickerTarget = "fg"; // which swatch the picker is editing
 let adjust; // the adjustment dialog
 // The document's name, from the file it came from; what Save and Export use.
-let docName = "npaint";
+// A document that came from nowhere is still saved under something, so the
+// default is a filename rather than a title — which is why anything that
+// shows the name to the user checks for it first.
+const UNTITLED = "npaint";
+let docName = UNTITLED;
 // The view furniture: none of it is in the document, so the page keeps it.
 let showRulers = false;
 let showGrid = false;
@@ -258,7 +262,6 @@ function touch() {
   needsDraw = true;
   layersDirty = true;
   antsDirty = true;
-  revision += 1;
   pullGuides();
 }
 
@@ -1533,6 +1536,8 @@ function resetColors() {
 const hasSelection = () => np.selection_rect().length > 0;
 const layerCount = () => np.layer_count();
 const active = () => np.active_layer();
+/** How many rows the panel has picked out; 1 is the active layer alone. */
+const selectedCount = () => np.selected_layer_count();
 
 /** The Image > Adjustments list: everything but the filters. */
 function adjustmentItems() {
@@ -1619,9 +1624,22 @@ function layerItems(index) {
   return [
     { label: "New Layer", shortcut: "Ctrl+Shift+N", action: () => act(() => np.add_layer()) },
     { label: "New Adjustment Layer", submenu: adjustmentLayerItems() },
-    { label: "Duplicate Layer", shortcut: "Ctrl+J", action: () => act(() => np.duplicate_layer(i())) },
-    { label: "Layer via Copy", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
-    { label: "Delete Layer", enabled: () => layerCount() > 1, action: () => act(() => np.remove_layer(i())) },
+    { label: "New Group", action: () => act(() => np.add_group()) },
+    {
+      label: () => (selectedCount() > 1 ? "Duplicate Layers" : "Duplicate Layer"),
+      shortcut: "Ctrl+J",
+      action: () => act(() => np.duplicate_selected_layers()),
+    },
+    {
+      label: "Layer via Copy",
+      enabled: () => hasSelection() && layerKind(i()) !== "group",
+      action: () => act(() => np.layer_via_copy()),
+    },
+    {
+      label: () => (selectedCount() > 1 ? "Delete Layers" : "Delete Layer"),
+      enabled: () => layerCount() > 1,
+      action: () => act(() => np.remove_selected_layers()),
+    },
     { sep: true },
     {
       label: "Edit Adjustment…",
@@ -1651,7 +1669,7 @@ function layerItems(index) {
       action: () => withActive(i(), () => pickFile("replace")),
     },
     { sep: true },
-    { label: "Rename…", action: () => act(() => renameLayer(i())) },
+    { label: "Rename…", shortcut: "F2", action: () => act(() => renameLayer(i())) },
     {
       label: "Hide Layer",
       checked: () => !np.layer_visible(i()),
@@ -1670,13 +1688,26 @@ function layerItems(index) {
     },
     { label: "Blend Mode", submenu: blendItems(i) },
     { sep: true },
-    { label: "Move Up", enabled: () => i() < layerCount() - 1, action: () => act(() => np.move_layer(i(), i() + 1)) },
-    { label: "Move Down", enabled: () => i() > 0, action: () => act(() => np.move_layer(i(), i() - 1)) },
+    // Grouping a layer wraps it where it is, so the picture does not change.
+    {
+      label: () => (selectedCount() > 1 ? `Group ${selectedCount()} Layers` : "Group Layer"),
+      shortcut: "Ctrl+G",
+      action: () => act(() => np.group_selected_layers()),
+    },
+    {
+      label: "Ungroup",
+      shortcut: "Ctrl+Shift+G",
+      enabled: () => layerKind(i()) === "group",
+      action: () => act(() => np.ungroup(i())),
+    },
+    { sep: true },
+    { label: "Move Up", enabled: () => np.can_reorder_layer(i(), true), action: () => act(() => np.reorder_layer(i(), true)) },
+    { label: "Move Down", enabled: () => np.can_reorder_layer(i(), false), action: () => act(() => np.reorder_layer(i(), false)) },
     { sep: true },
     {
-      label: "Merge Down",
+      label: () => (layerKind(i()) === "group" ? "Merge Group" : "Merge Down"),
       shortcut: "Ctrl+E",
-      enabled: () => i() > 0 && layerKind(i() - 1) === "pixels",
+      enabled: () => canMergeDown(i()),
       action: () => act(() => np.merge_down(i())),
     },
     { label: "Flatten Image", shortcut: "Ctrl+Shift+E", enabled: () => layerCount() > 1, action: () => act(() => np.flatten()) },
@@ -2215,7 +2246,11 @@ function canvasContextItems() {
     { sep: true },
     ...editItems().slice(8),
     { sep: true },
-    { label: "Duplicate Layer", shortcut: "Ctrl+J", action: () => act(() => np.duplicate_layer(active())) },
+    {
+      label: () => (selectedCount() > 1 ? "Duplicate Layers" : "Duplicate Layer"),
+      shortcut: "Ctrl+J",
+      action: () => act(() => np.duplicate_selected_layers()),
+    },
     { label: "Layer via Copy", enabled: hasSelection, action: () => act(() => np.layer_via_copy()) },
     { label: "Adjustments", submenu: adjustmentItems() },
     { sep: true },
@@ -2819,6 +2854,13 @@ async function isNPaintFile(file) {
   return (head[0] === 0x1f && head[1] === 0x8b) || String.fromCharCode(...head) === "NPAINT";
 }
 
+/** Whether a file is a Photoshop document, by name or by its first bytes. */
+async function isPsdFile(file) {
+  if (/\.psd$/i.test(file.name)) return true;
+  const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  return String.fromCharCode(...head) === "8BPS";
+}
+
 /** The pixels of an image file, decoded, at the picture's own size. */
 async function decodeImage(file) {
   const bitmap = await createImageBitmap(file);
@@ -2855,6 +2897,27 @@ async function loadFile(file, mode) {
     message(`Opened ${file.name}.`);
     return;
   }
+  // Photoshop's own file. A browser cannot decode one, so the engine reads
+  // it — with all its layers, where it can. It always replaces the document:
+  // a layered file is not something to drop into another one as a layer.
+  if (await isPsdFile(file)) {
+    if (np.is_modified() && !window.confirm("Open this file and lose the unsaved changes to the current document?")) return;
+    let note;
+    try {
+      note = np.open_psd(new Uint8Array(await file.arrayBuffer()));
+    } catch (e) {
+      message(`${file.name} could not be opened: ${e}`);
+      return;
+    }
+    docName = name;
+    clearGuides();
+    fit();
+    touch();
+    const layers = np.layer_count();
+    message(`Opened ${file.name} — ${layers} ${layers === 1 ? "layer" : "layers"}.${note ? " " + note : ""}`);
+    return;
+  }
+
   const { width, height, bytes } = await decodeImage(file);
   if (mode === "open") {
     if (np.is_modified() && !window.confirm("Open this image and lose the unsaved changes to the current document?")) return;
@@ -2913,7 +2976,7 @@ async function saveDocument() {
   touch();
   // The work is on the user's disk now, so the safety net is no longer
   // holding anything they cannot get back.
-  autosavedRevision = revision;
+  autosavedState = np.document_state();
   clearRecovery();
   message(`Saved ${base}.npaint (${Math.round(blob.size / 1024)} kB). Open it again with File > Open.`);
 }
@@ -2927,8 +2990,11 @@ async function saveDocument() {
 // Three things decide when it runs.
 //
 // *Only when there is something to keep*: the document has to be modified,
-// and to have changed since the last copy was taken. `revision` counts the
-// times `touch()` said something may have moved.
+// and to have changed since the last copy was taken. `np.document_state()`
+// is the engine's own answer to the second — a number that changes whenever
+// the document does and comes back on an undo — which is worth more than
+// anything the page could count for itself, since most edits never pass
+// through a function here at all.
 //
 // *Never in the middle of anything.* `snapshot_document` settles an open
 // session and an unfinished gesture before it writes, which mid-stroke or
@@ -2941,10 +3007,8 @@ async function saveDocument() {
 // each round measures itself and asks for the next one twenty times further
 // off, so the cost stays near five per cent of the clock whatever is open.
 
-/** Counts the times anything may have changed; `touch()` bumps it. */
-let revision = 0;
-/** The revision the last copy was taken at. */
-let autosavedRevision = 0;
+/** The document state the last copy was taken at; see `document_state`. */
+let autosavedState = null;
 /** The soonest and latest the next copy may be taken. */
 const AUTOSAVE_MIN_MS = 15000;
 const AUTOSAVE_MAX_MS = 300000;
@@ -2963,10 +3027,9 @@ async function offerRecovery() {
   const found = await readRecovery();
   if (!found) return;
   const when = new Date(found.savedAt).toLocaleString();
+  const what = found.name && found.name !== UNTITLED ? `"${found.name}"` : "an untitled document";
   const keep = window.confirm(
-    `NPaint has unsaved work from a previous session — "${found.name}", kept at ${when}.
-
-` +
+    `NPaint has unsaved work from a previous session — ${what}, kept at ${when}.\n\n` +
       `OK recovers it. Cancel throws it away for good.`,
   );
   if (!keep) {
@@ -2984,8 +3047,8 @@ async function offerRecovery() {
     syncGuides();
     fit();
     touch();
-    autosavedRevision = revision;
-    message(`Recovered "${found.name}". Save it with File > Save to keep it for good.`);
+    autosavedState = np.document_state();
+    message(`Recovered ${what}. Save it with File > Save to keep it for good.`);
   } catch (e) {
     message(`That recovered document could not be opened: ${e}`);
     await clearRecovery();
@@ -2999,12 +3062,12 @@ function scheduleAutosave(delay) {
 
 async function autosaveTick() {
   // Nothing worth keeping, or the middle of something: come back later.
-  if (!np.is_modified() || revision === autosavedRevision || np.has_session() || np.is_gesturing()) {
+  const state = np.document_state();
+  if (!np.is_modified() || state === autosavedState || np.has_session() || np.is_gesturing()) {
     scheduleAutosave(AUTOSAVE_MIN_MS);
     return;
   }
   const began = performance.now();
-  const at = revision;
   let ok = false;
   try {
     const blob = await deflate(np.snapshot_document());
@@ -3014,7 +3077,7 @@ async function autosaveTick() {
   }
   const cost = performance.now() - began;
   if (ok) {
-    autosavedRevision = at;
+    autosavedState = state;
     scheduleAutosave(cost * AUTOSAVE_DUTY);
     return;
   }
@@ -3371,8 +3434,8 @@ function writeImage(format, quality, name) {
 
 function bindLayers() {
   $("layer-add").addEventListener("click", () => act(() => np.add_layer()));
-  $("layer-dup").addEventListener("click", () => act(() => np.duplicate_layer(active())));
-  $("layer-delete").addEventListener("click", () => act(() => np.remove_layer(active())));
+  $("layer-dup").addEventListener("click", () => act(() => np.duplicate_selected_layers()));
+  $("layer-delete").addEventListener("click", () => act(() => np.remove_selected_layers()));
   $("layer-merge").addEventListener("click", () => act(() => np.merge_down(active())));
   // Photoshop's add-mask button: the selection becomes the mask, or the
   // mask reveals everything when nothing is selected.
@@ -3381,15 +3444,12 @@ function bindLayers() {
     const r = e.currentTarget.getBoundingClientRect();
     showContextMenu(r.left, r.top - 4, adjustmentLayerItems());
   });
-  // "Up" in the panel is towards the top of the stack, which is a higher index.
-  $("layer-up").addEventListener("click", () => {
-    const i = active();
-    if (i + 1 < layerCount()) act(() => np.move_layer(i, i + 1));
-  });
-  $("layer-down").addEventListener("click", () => {
-    const i = active();
-    if (i > 0) act(() => np.move_layer(i, i - 1));
-  });
+  $("layer-group").addEventListener("click", () => act(() => np.group_selected_layers()));
+  // "Up" in the panel is towards the top of the stack, which is a higher
+  // index. A layer steps over a group rather than into it, and out of the
+  // group it is in when there is no sibling left that way.
+  $("layer-up").addEventListener("click", () => act(() => np.reorder_layer(active(), true)));
+  $("layer-down").addEventListener("click", () => act(() => np.reorder_layer(active(), false)));
 
   const opacity = $("layer-opacity");
   opacity.addEventListener("input", () => {
@@ -3397,13 +3457,17 @@ function bindLayers() {
     $("layer-opacity-out").value = `${opacity.value}%`;
   });
 
+  // A group may also be Pass Through, which means nothing on any other
+  // kind of layer; the option is built once and hidden when it does not
+  // apply, rather than the list being rebuilt every render.
   const blend = $("layer-blend");
-  const names = NPaint.blend_mode_names();
-  const labels = NPaint.blend_mode_labels();
+  const names = NPaint.group_blend_mode_names();
+  const labels = NPaint.group_blend_mode_labels();
   names.forEach((name, k) => {
     const option = document.createElement("option");
     option.value = name;
     option.textContent = labels[k];
+    if (name === "pass-through") option.dataset.groupOnly = "1";
     blend.appendChild(option);
   });
   blend.addEventListener("change", () => act(() => np.set_layer_blend(active(), blend.value)));
@@ -3417,8 +3481,136 @@ function bindLayers() {
     if (!row) return;
     e.preventDefault();
     const index = Number(row.dataset.index);
-    act(() => np.set_active_layer(index));
+    // Right-clicking inside a selection acts on the whole of it; on a row
+    // outside it, that row becomes the selection first.
+    if (!np.layer_selected(index)) act(() => np.set_active_layer(index));
     showContextMenu(e.clientX, e.clientY, layerItems(index));
+  });
+
+  // Clicking the empty space under the rows drops back to a single
+  // selected layer. One layer is always active — the tools have to have
+  // something to paint on — so that is as far as unselecting goes.
+  $("layer-list").addEventListener("click", (e) => {
+    if (e.target.closest(".layer")) return;
+    act(() => np.clear_layer_selection());
+  });
+
+  bindLayerDragging();
+}
+
+// ---- Dragging a layer ----------------------------------------------------------
+//
+// A row is dropped in one of three places: above another row, below it, or —
+// over the middle of a group's row — inside it. Which one is decided from
+// where in the row the pointer is, so the whole gesture is one drag with a
+// line (or a lit-up group) showing where the layers would land.
+//
+// The panel draws the stack upside down: "above" in the panel is a *higher*
+// index, and the top of a group's contents is the row just under its own.
+// The engine is told the row and the place, and works the indices out.
+//
+// The target is found by measuring against the rows rather than by asking
+// which element the pointer is over. There is no gap between rows that way,
+// and the space under the last row means "below the bottom layer" rather
+// than nothing at all — dragging into it used to leave a line up that
+// nothing would honour.
+
+/** How much of a group's row, top and bottom, still means "beside it"
+ *  rather than "into it". The middle is the drop zone. */
+const DROP_EDGE = 0.3;
+
+/** The row being dragged, as a layer index, or null. */
+let dragging = null;
+
+/** Which row a pointer at `y` is over, and how far down it: clamped to the
+ *  ends, so every position in the panel resolves to somewhere. */
+function rowAt(y) {
+  const rows = [...$("layer-list").querySelectorAll(".layer")];
+  if (!rows.length) return null;
+  for (const row of rows) {
+    const box = row.getBoundingClientRect();
+    if (y < box.bottom) {
+      return { row, t: Math.max(0, (y - box.top) / (box.height || 1)) };
+    }
+  }
+  // Past the last row: below the bottom of the stack.
+  return { row: rows[rows.length - 1], t: 1 };
+}
+
+/** Where the drag would land: the row's index and which side of it. */
+function dropAt(y) {
+  const hit = rowAt(y);
+  if (!hit) return null;
+  const index = Number(hit.row.dataset.index);
+  // Only a group has an inside.
+  const inside = layerKind(index) === "group" && hit.t > DROP_EDGE && hit.t < 1 - DROP_EDGE;
+  return { row: hit.row, index, where: inside ? "inside" : hit.t < 0.5 ? "above" : "below" };
+}
+
+function clearDropMarks() {
+  $("layer-list")
+    .querySelectorAll(".drop-above, .drop-below, .drop-inside")
+    .forEach((el) => el.classList.remove("drop-above", "drop-below", "drop-inside"));
+}
+
+function bindLayerDragging() {
+  const list = $("layer-list");
+
+  list.addEventListener("dragstart", (e) => {
+    const row = e.target.closest(".layer");
+    if (!row) return;
+    dragging = Number(row.dataset.index);
+    row.classList.add("dragging");
+    // A drag that starts on a row the panel has picked out carries the
+    // whole selection; the engine decides that, so both the line below and
+    // the drop itself ask it rather than working it out twice.
+    if (np.layer_selected(dragging)) {
+      list.querySelectorAll(".layer").forEach((r) => {
+        if (np.layer_selected(Number(r.dataset.index))) r.classList.add("dragging");
+      });
+    }
+    e.dataTransfer.effectAllowed = "move";
+    // Firefox starts no drag at all without something on the transfer.
+    e.dataTransfer.setData("text/plain", String(dragging));
+  });
+
+  list.addEventListener("dragover", (e) => {
+    if (dragging === null) return;
+    clearDropMarks();
+    const drop = dropAt(e.clientY);
+    // No line where letting go would do nothing — dropping layers back
+    // where they already are, or a group onto its own contents. The engine
+    // answers for the whole drag, selection and all.
+    if (!drop || !np.move_would_change(dragging, drop.index, drop.where)) {
+      e.dataTransfer.dropEffect = "none";
+      return;
+    }
+    // Only a `dragover` that prevents the default lets a `drop` follow.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    drop.row.classList.add(`drop-${drop.where}`);
+  });
+
+  list.addEventListener("dragleave", (e) => {
+    if (!list.contains(e.relatedTarget)) clearDropMarks();
+  });
+
+  list.addEventListener("drop", (e) => {
+    if (dragging === null) return;
+    const drop = dropAt(e.clientY);
+    if (!drop) return;
+    e.preventDefault();
+    const from = dragging;
+    clearDropMarks();
+    act(() => np.move_layer_to(from, drop.index, drop.where));
+  });
+
+  // However the drag ended — dropped, cancelled with Esc, let go outside
+  // the panel — the marks go and the rows stop looking dragged.
+  list.addEventListener("dragend", () => {
+    dragging = null;
+    clearDropMarks();
+    list.querySelectorAll(".dragging").forEach((el) => el.classList.remove("dragging"));
   });
 }
 
@@ -3482,6 +3674,14 @@ function adjustmentThumbnail() {
   return thumb;
 }
 
+/** Whether a layer is folded away inside a collapsed group above it. */
+function insideCollapsed(index) {
+  for (let at = np.layer_parent(index); at >= 0; at = np.layer_parent(at)) {
+    if (np.layer_collapsed(at)) return true;
+  }
+  return false;
+}
+
 function renderLayers() {
   const list = $("layer-list");
   const count = layerCount();
@@ -3492,13 +3692,40 @@ function renderLayers() {
   const th = Math.max(1, Math.round(np.height() * fit));
 
   for (let i = count - 1; i >= 0; i--) {
+    // A collapsed group's contents are still in the stack; the panel simply
+    // does not draw their rows.
+    if (insideCollapsed(i)) continue;
     const li = document.createElement("li");
     const visible = np.layer_visible(i);
     const kind = layerKind(i);
+    const group = kind === "group";
     const masked = hasMask(i);
     const onMask = masked && np.layer_editing_mask(i);
-    li.className = "layer" + (i === act_ ? " active" : "") + (visible ? "" : " hidden-layer");
+    const picked = np.layer_selected(i);
+    li.className =
+      "layer" +
+      (picked && i === act_ ? " active" : "") +
+      (picked ? " selected" : "") +
+      (visible ? "" : " hidden-layer") +
+      (group ? " group" : "") +
+      (visible && np.layer_hidden_by_group(i) ? " group-hidden" : "");
     li.dataset.index = i;
+    li.style.setProperty("--depth", np.layer_depth(i));
+    li.draggable = true;
+
+    // The disclosure triangle. Every row has the cell so the thumbnails
+    // line up; only a group's is visible.
+    const twist = document.createElement("button");
+    twist.className = "twist";
+    if (group) {
+      const shut = np.layer_collapsed(i);
+      twist.textContent = shut ? "▶" : "▼";
+      twist.title = shut ? "Show what is in this group" : "Fold this group away";
+      twist.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act(() => np.set_layer_collapsed(i, !shut));
+      });
+    }
 
     const eye = document.createElement("button");
     eye.className = "eye";
@@ -3513,13 +3740,17 @@ function renderLayers() {
     // selects what it draws without making the layer active.
     const pixels = document.createElement("span");
     pixels.className = "thumb-wrap" + (onMask ? "" : " target");
-    pixels.appendChild(kind === "adjustment" ? adjustmentThumbnail() : thumbnailCanvas(np.layer_thumbnail(i, tw, th), tw, th, ""));
+    pixels.appendChild(
+      group ? folderThumbnail() : kind === "adjustment" ? adjustmentThumbnail() : thumbnailCanvas(np.layer_thumbnail(i, tw, th), tw, th, "")
+    );
     if (KIND_BADGE[kind]) {
       const badge = document.createElement("span");
       badge.className = "badge";
       badge.textContent = KIND_BADGE[kind].glyph;
       pixels.appendChild(badge);
       pixels.title = KIND_BADGE[kind].title;
+    } else if (group) {
+      pixels.title = "A group: what it draws is the layers inside it";
     } else {
       pixels.title = "Ctrl-click to select everything on this layer" + (masked ? "; click to edit the pixels" : "");
     }
@@ -3595,34 +3826,68 @@ function renderLayers() {
       lock.title = np.layer_locked(i) ? "Locked" : "Transparent pixels locked";
       name.appendChild(lock);
     }
-    name.title =
-      kind === "adjustment" ? "Double-click to change the adjustment" : kind === "text" ? "Double-click to edit the text" : "Double-click to rename";
+    name.title = "Double-click to rename (F2)";
     name.addEventListener("dblclick", (e) => {
       e.stopPropagation();
-      if (kind === "adjustment") withActive(i, () => editAdjustmentLayer(i));
-      else if (kind === "text") editTextLayer(i);
-      else beginRename(name, i);
+      // The name renames whatever the layer is — a group included. What
+      // opens an adjustment's settings or a text layer's text is a
+      // double-click on its thumbnail, which is what its badge promises.
+      beginRename(name, i);
     });
 
-    li.append(eye, thumbs, name);
-    li.addEventListener("click", () => act(() => np.set_active_layer(i)));
+    li.append(twist, eye, thumbs, name);
+    // Click picks one layer; Shift takes the run from the active one to
+    // here, and Ctrl (Cmd) adds or removes this one — as in every layered
+    // editor. The active layer is the anchor either way, and stays put.
+    li.addEventListener("click", (e) => {
+      act(() => {
+        if (e.shiftKey) np.select_layer_range(i);
+        else if (e.ctrlKey || e.metaKey) np.toggle_layer_selected(i);
+        else np.set_active_layer(i);
+      });
+    });
     list.appendChild(li);
   }
 
   const opacity = Math.round(np.layer_opacity(act_) * 100);
   $("layer-opacity").value = opacity;
   $("layer-opacity-out").value = `${opacity}%`;
-  $("layer-blend").value = np.layer_blend(act_);
+  const blend = $("layer-blend");
+  blend.querySelectorAll("option[data-group-only]").forEach((o) => {
+    o.hidden = layerKind(act_) !== "group";
+  });
+  blend.value = np.layer_blend(act_);
   $("layer-lock").classList.toggle("on", np.layer_locked(act_));
   $("layer-lock").setAttribute("aria-pressed", String(np.layer_locked(act_)));
   $("layer-lock-alpha").classList.toggle("on", np.layer_lock_alpha(act_));
   $("layer-lock-alpha").setAttribute("aria-pressed", String(np.layer_lock_alpha(act_)));
   $("layer-lock-alpha").disabled = layerKind(act_) !== "pixels";
-  $("layer-delete").disabled = count <= 1;
-  $("layer-merge").disabled = act_ === 0 || layerKind(act_ - 1) !== "pixels";
+  // Clicking past the rows picks out nothing, and then the operations
+  // that act on a selection have no subject.
+  const picked = selectedCount();
+  $("layer-delete").disabled = count <= 1 || picked === 0;
+  $("layer-dup").disabled = picked === 0;
+  $("layer-group").disabled = picked === 0;
+  $("layer-merge").disabled = !canMergeDown(act_);
   $("layer-mask").disabled = hasMask(act_);
-  $("layer-up").disabled = act_ >= count - 1;
-  $("layer-down").disabled = act_ === 0;
+  $("layer-up").disabled = !np.can_reorder_layer(act_, true);
+  $("layer-down").disabled = !np.can_reorder_layer(act_, false);
+}
+
+/** A group's thumbnail: a folder, since what it draws is the rows below it. */
+function folderThumbnail() {
+  const folder = document.createElement("span");
+  folder.className = "folder";
+  folder.textContent = "🗀";
+  return folder;
+}
+
+/** Whether Merge Down would do anything: a group merges into itself, and
+ *  anything else needs a pixel layer directly below it at the same level. */
+function canMergeDown(index) {
+  if (layerKind(index) === "group") return true;
+  const below = np.sibling_below(index);
+  return below >= 0 && layerKind(below) === "pixels";
 }
 
 // ---- History panel --------------------------------------------------------------
@@ -3674,6 +3939,12 @@ function renderHistory() {
 }
 
 function renameLayer(index) {
+  // A row inside a folded group has no field to type in, so the groups
+  // above it are opened first.
+  for (let at = np.layer_parent(index); at >= 0; at = np.layer_parent(at)) {
+    if (np.layer_collapsed(at)) np.set_layer_collapsed(at, false);
+  }
+  renderLayers();
   const row = $("layer-list").querySelector(`.layer[data-index="${index}"] .layer-name`);
   if (row) beginRename(row, index);
 }
@@ -3690,6 +3961,10 @@ function beginRename(nameEl, index) {
     done = true;
     act(() => np.rename_layer(index, input.value));
   };
+  // The render loop would replace the row — and the field with it — on the
+  // next frame if the panel were still marked dirty. Committing or
+  // cancelling marks it again.
+  layersDirty = false;
   input.addEventListener("blur", commit);
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
@@ -4097,6 +4372,10 @@ function bindKeyboard() {
     }
 
     switch (key) {
+      case "F2":
+        renameLayer(active());
+        e.preventDefault();
+        return;
       case "f":
         if (!endSizing(true)) beginSizing();
         return;
@@ -4114,7 +4393,15 @@ function bindKeyboard() {
         return;
       case "Delete":
       case "Backspace":
-        act(() => (e.altKey ? np.fill_selection() : np.clear_selection()));
+        // With something selected, Delete clears those pixels (Alt fills
+        // them). With nothing selected there are no pixels it could mean,
+        // so it deletes the layer — which is what the key does in the
+        // layers panel of every editor.
+        act(() => {
+          if (e.altKey) np.fill_selection();
+          else if (hasSelection()) np.clear_selection();
+          else np.remove_selected_layers();
+        });
         e.preventDefault();
         return;
       case "ArrowLeft":
@@ -4261,10 +4548,15 @@ function handleShortcut(key, shift, alt) {
       else showNewDialog();
       return true;
     case "j":
-      act(() => (hasSelection() ? np.layer_via_copy() : np.duplicate_layer(active())));
+      act(() => (hasSelection() ? np.layer_via_copy() : np.duplicate_selected_layers()));
       return true;
     case "e":
       act(() => (shift ? np.flatten() : np.merge_down(active())));
+      return true;
+    case "g":
+      // Ctrl+G folds the layer into a group where it is; Ctrl+Shift+G
+      // takes the group apart again, as everywhere else.
+      act(() => (shift ? np.ungroup(active()) : np.group_selected_layers()));
       return true;
     case "i":
       if (alt) showImageSizeDialog();

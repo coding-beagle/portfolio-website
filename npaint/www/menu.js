@@ -3,7 +3,8 @@
 //
 // An item is { label, shortcut?, action, enabled?, checked?, submenu? } or
 // { sep: true }. `enabled` and `checked` are functions evaluated when the
-// menu opens, so a menu built once always shows the current state.
+// menu opens, so a menu built once always shows the current state; `label`
+// may be one too, for a row whose wording depends on what it would act on.
 
 let openPopup = null; // the root popup element currently showing
 let openBarButton = null; // the menu-bar title it belongs to, if any
@@ -40,7 +41,7 @@ function buildPopup(items) {
     if (!enabled) row.classList.add("disabled");
     if (item.checked && item.checked()) row.classList.add("checked");
     const label = document.createElement("span");
-    label.textContent = item.label;
+    label.textContent = typeof item.label === "function" ? item.label() : item.label;
     row.appendChild(label);
     if (item.submenu) {
       row.classList.add("has-submenu");

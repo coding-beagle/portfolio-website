@@ -35,6 +35,14 @@ export class NPaint {
         return ret[0] >>> 0;
     }
     /**
+     * A new, empty group where a new layer would go.
+     * @returns {number}
+     */
+    add_group() {
+        const ret = wasm.npaint_add_group(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @returns {number}
      */
     add_layer() {
@@ -281,6 +289,17 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * Whether moving a layer one row that way would do anything, which is
+     * what greys out the panel's up and down buttons.
+     * @param {number} index
+     * @param {boolean} up
+     * @returns {boolean}
+     */
+    can_reorder_layer(index, up) {
+        const ret = wasm.npaint_can_reorder_layer(this.__wbg_ptr, index, up);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     can_undo() {
@@ -300,6 +319,14 @@ export class NPaint {
     cancel_session() {
         const ret = wasm.npaint_cancel_session(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Clicking the empty part of the panel: back to the active layer
+     * alone. One layer is always active — the tools need something to
+     * paint on — so this is as far as unselecting goes.
+     */
+    clear_layer_selection() {
+        wasm.npaint_clear_layer_selection(this.__wbg_ptr);
     }
     /**
      * @returns {boolean}
@@ -403,11 +430,33 @@ export class NPaint {
         wasm.npaint_deselect(this.__wbg_ptr);
     }
     /**
+     * A number that changes whenever the document does: what the page's
+     * autosave watches to know there is something new to keep. It crosses
+     * as a double, which counts document states exactly for as long as any
+     * session could last.
+     * @returns {number}
+     */
+    document_state() {
+        const ret = wasm.npaint_document_state(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @param {number} index
      * @returns {number}
      */
     duplicate_layer(index) {
         const ret = wasm.npaint_duplicate_layer(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Duplicates every selected layer.
+     * @returns {number}
+     */
+    duplicate_selected_layers() {
+        const ret = wasm.npaint_duplicate_selected_layers(this.__wbg_ptr);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -581,6 +630,50 @@ export class NPaint {
         var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * @returns {string[]}
+     */
+    static group_blend_mode_labels() {
+        const ret = wasm.npaint_group_blend_mode_labels();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The blend modes a *group* may be set to, pass-through first. The
+     * panel offers these instead when the layer is a group.
+     * @returns {string[]}
+     */
+    static group_blend_mode_names() {
+        const ret = wasm.npaint_group_blend_mode_names();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Puts a layer into a new group in its place. Nothing changes on
+     * screen: a new group is pass-through.
+     * @param {number} index
+     * @returns {number}
+     */
+    group_layer(index) {
+        const ret = wasm.npaint_group_layer(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * The same for everything the panel has selected, into one group.
+     * @returns {number}
+     */
+    group_selected_layers() {
+        const ret = wasm.npaint_group_selected_layers(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
     }
     /**
      * The guides as the engine has them: what an opened file brought in.
@@ -767,11 +860,35 @@ export class NPaint {
         }
     }
     /**
+     * Whether a group's contents are folded away in the panel.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_collapsed(index) {
+        const ret = wasm.npaint_layer_collapsed(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * @returns {number}
      */
     layer_count() {
         const ret = wasm.npaint_layer_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * How deep in the groups a layer sits: 0 at the top level.
+     * @param {number} index
+     * @returns {number}
+     */
+    layer_depth(index) {
+        const ret = wasm.npaint_layer_depth(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
     }
     /**
      * Whether the tools are painting on the layer's mask rather than its
@@ -798,6 +915,19 @@ export class NPaint {
         return ret[0] !== 0;
     }
     /**
+     * Whether a group above this layer is switched off, so that it is not
+     * on screen however its own eye is set.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_hidden_by_group(index) {
+        const ret = wasm.npaint_layer_hidden_by_group(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * @param {number} index
      * @returns {number}
      */
@@ -807,6 +937,17 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] >>> 0;
+    }
+    /**
+     * Whether `index` is the group at `group`, or inside it — what the
+     * panel checks before it offers a drop.
+     * @param {number} index
+     * @param {number} group
+     * @returns {boolean}
+     */
+    layer_is_inside(index, group) {
+        const ret = wasm.npaint_layer_is_inside(this.__wbg_ptr, index, group);
+        return ret !== 0;
     }
     /**
      * `"pixels"`, `"adjustment"` or `"smart"`.
@@ -914,6 +1055,18 @@ export class NPaint {
         return ret[0];
     }
     /**
+     * The group a layer is in, as its index, or -1 at the top level.
+     * @param {number} index
+     * @returns {number}
+     */
+    layer_parent(index) {
+        const ret = wasm.npaint_layer_parent(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
+    }
+    /**
      * A smart object's or text layer's placement, source pixels →
      * document pixels, as the six numbers of a CSS `matrix()`; empty for
      * any other layer.
@@ -928,6 +1081,16 @@ export class NPaint {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Whether the panel has this row picked out. The active layer always
+     * is; the others are what Shift- and Ctrl-clicking added.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_selected(index) {
+        const ret = wasm.npaint_layer_selected(this.__wbg_ptr, index);
+        return ret !== 0;
     }
     /**
      * A text layer's text, or an empty string for any other layer.
@@ -1036,14 +1199,47 @@ export class NPaint {
         }
     }
     /**
-     * @param {number} from
-     * @param {number} to
+     * Replaces a group with one layer holding what it drew.
+     * @param {number} index
      */
-    move_layer(from, to) {
-        const ret = wasm.npaint_move_layer(this.__wbg_ptr, from, to);
+    merge_group(index) {
+        const ret = wasm.npaint_merge_group(this.__wbg_ptr, index);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * Drops a layer on another one — what a drag in the layers panel ends
+     * with. `where_` is `"above"`, `"below"` or `"inside"`; a group brings
+     * its contents. Returns where the layer ended up.
+     * @param {number} from
+     * @param {number} to
+     * @param {string} where_
+     * @returns {number}
+     */
+    move_layer_to(from, to, where_) {
+        const ptr0 = passStringToWasm0(where_, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_move_layer_to(this.__wbg_ptr, from, to, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Whether a drop would actually move the layer. The panel asks before
+     * it draws the line, so that a line is only ever shown where letting
+     * go really does something.
+     * @param {number} from
+     * @param {number} to
+     * @param {string} where_
+     * @returns {boolean}
+     */
+    move_would_change(from, to, where_) {
+        const ptr0 = passStringToWasm0(where_, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_move_would_change(this.__wbg_ptr, from, to, ptr0, len0);
+        return ret !== 0;
     }
     /**
      * A new editor with a document of the given size. `background` is a hex
@@ -1132,6 +1328,33 @@ export class NPaint {
         const ret = wasm.npaint_open_image(this.__wbg_ptr, ptr0, len0, width, height, ptr1, len1);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Opens a Photoshop file, replacing the document. Returns a sentence
+     * about anything that had to be approximated, or an empty string when
+     * nothing did.
+     * @param {Uint8Array} bytes
+     * @returns {string}
+     */
+    open_psd(bytes) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.npaint_open_psd(this.__wbg_ptr, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -1346,6 +1569,16 @@ export class NPaint {
         }
     }
     /**
+     * Deletes every selected layer, or just the active one when that is
+     * all there is.
+     */
+    remove_selected_layers() {
+        const ret = wasm.npaint_remove_selected_layers(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {number} index
      * @param {string} name
      */
@@ -1391,6 +1624,20 @@ export class NPaint {
         var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * Moves a layer one row up (`up`) or down the panel. Returns where it
+     * ended up, or -1 if there was nowhere to go.
+     * @param {number} index
+     * @param {boolean} up
+     * @returns {number}
+     */
+    reorder_layer(index, up) {
+        const ret = wasm.npaint_reorder_layer(this.__wbg_ptr, index, up);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
     }
     /**
      * Swaps a smart object's picture for another, keeping its place.
@@ -1569,6 +1816,16 @@ export class NPaint {
         return ret[0] !== 0;
     }
     /**
+     * Shift-clicking a row: everything between the active layer and it.
+     * @param {number} index
+     */
+    select_layer_range(index) {
+        const ret = wasm.npaint_select_layer_range(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Selects the pixels the layer actually draws.
      * @returns {boolean}
      */
@@ -1650,6 +1907,14 @@ export class NPaint {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.npaint_select_subject_in_box(this.__wbg_ptr, x, y, w, h, ptr0, len0, matte_w, matte_h, shift, alt);
         return ret !== 0;
+    }
+    /**
+     * How many rows are selected. One means the active layer alone.
+     * @returns {number}
+     */
+    selected_layer_count() {
+        const ret = wasm.npaint_selected_layer_count(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * How many pixels are selected.
@@ -1789,6 +2054,16 @@ export class NPaint {
         const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.npaint_set_layer_blend(this.__wbg_ptr, index, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
+     * @param {boolean} collapsed
+     */
+    set_layer_collapsed(index, collapsed) {
+        const ret = wasm.npaint_set_layer_collapsed(this.__wbg_ptr, index, collapsed);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
@@ -2015,6 +2290,16 @@ export class NPaint {
         wasm.npaint_set_zoom_about(this.__wbg_ptr, zoom, x, y);
     }
     /**
+     * The layer directly below this one at the same level, or -1 when it
+     * is at the bottom of the group it is in. What Merge Down works on.
+     * @param {number} index
+     * @returns {number}
+     */
+    sibling_below(index) {
+        const ret = wasm.npaint_sibling_below(this.__wbg_ptr, index);
+        return ret;
+    }
+    /**
      * @returns {number}
      */
     size() {
@@ -2189,6 +2474,16 @@ export class NPaint {
         return ret;
     }
     /**
+     * Ctrl-clicking a row: adds it to the selection, or takes it out.
+     * @param {number} index
+     */
+    toggle_layer_selected(index) {
+        const ret = wasm.npaint_toggle_layer_selected(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @returns {number}
      */
     tolerance() {
@@ -2335,6 +2630,16 @@ export class NPaint {
     undo() {
         const ret = wasm.npaint_undo(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Dissolves a group, leaving its contents at the level it was on.
+     * @param {number} index
+     */
+    ungroup(index) {
+        const ret = wasm.npaint_ungroup(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @returns {number}

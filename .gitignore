@@ -25,6 +25,15 @@ __pycache__/
 # NPaint: cargo's build directory. npaint/build (the deployable page) IS
 # committed, like the other build folders — it is what cPanel pulls.
 npaint/target/
+# Ignore PSD test cases, keep them locally
+*psd
+
+# NPaint's sample Photoshop files. Real .psd files are tens of megabytes and
+# would sit in the history for good. The `.psd` reader's own tests build the
+# files they need, and `files_photoshop_actually_wrote` in src/psd.rs reads
+# whatever is in here if it is there and says nothing if it is not — so a
+# clean checkout is green and a machine with samples gets the extra cover.
+npaint/test_psds/
 
 # NPaint's Select Subject model and its ONNX Runtime: ~230 MB of binaries that
 # would sit in the history for good. `make fetch_npaint_model` pulls them, and

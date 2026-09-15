@@ -29,11 +29,41 @@ pub enum BlendMode {
     Saturation,
     Color,
     Luminosity,
+    /// A group's contents composite straight onto what is below the group,
+    /// as though the group were not there. Meaningless on any other kind of
+    /// layer, where it behaves as [`BlendMode::Normal`]; it is not in
+    /// [`BlendMode::ALL`] for that reason, and the panel offers it only for
+    /// a group.
+    PassThrough,
 }
 
 impl BlendMode {
-    /// Every mode, in the order the layers panel lists them.
+    /// Every mode, in the order the layers panel lists them. Pass-through
+    /// is not among them: see [`BlendMode::GROUP`].
     pub const ALL: &'static [BlendMode] = &[
+        BlendMode::Normal,
+        BlendMode::Darken,
+        BlendMode::Multiply,
+        BlendMode::ColorBurn,
+        BlendMode::Lighten,
+        BlendMode::Screen,
+        BlendMode::ColorDodge,
+        BlendMode::Overlay,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::Difference,
+        BlendMode::Exclusion,
+        BlendMode::Hue,
+        BlendMode::Saturation,
+        BlendMode::Color,
+        BlendMode::Luminosity,
+    ];
+
+    /// The modes a *group* may be set to: pass-through first, since that is
+    /// what a group opened from a `.psd` usually is and what Photoshop
+    /// gives a new one.
+    pub const GROUP: &'static [BlendMode] = &[
+        BlendMode::PassThrough,
         BlendMode::Normal,
         BlendMode::Darken,
         BlendMode::Multiply,
@@ -71,6 +101,7 @@ impl BlendMode {
             BlendMode::Saturation => "saturation",
             BlendMode::Color => "color",
             BlendMode::Luminosity => "luminosity",
+            BlendMode::PassThrough => "pass-through",
         }
     }
 
@@ -93,11 +124,12 @@ impl BlendMode {
             BlendMode::Saturation => "Saturation",
             BlendMode::Color => "Colour",
             BlendMode::Luminosity => "Luminosity",
+            BlendMode::PassThrough => "Pass Through",
         }
     }
 
     pub fn from_name(name: &str) -> Option<BlendMode> {
-        BlendMode::ALL.iter().copied().find(|m| m.name() == name)
+        BlendMode::GROUP.iter().copied().find(|m| m.name() == name)
     }
 
     /// Whether the mode works on each channel on its own.
@@ -108,7 +140,7 @@ impl BlendMode {
     /// `B(cb, cs)` for one channel of a separable mode.
     fn channel(self, cb: f32, cs: f32) -> f32 {
         match self {
-            BlendMode::Normal => cs,
+            BlendMode::Normal | BlendMode::PassThrough => cs,
             BlendMode::Darken => cb.min(cs),
             BlendMode::Multiply => cb * cs,
             BlendMode::ColorBurn => {

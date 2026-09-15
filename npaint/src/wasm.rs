@@ -16,6 +16,7 @@ use crate::autoselect::SampleMode;
 use crate::blend::BlendMode;
 use crate::brush::BrushTip;
 use crate::color::Rgba;
+use crate::document::Drop;
 use crate::editor::Editor;
 use crate::geometry::{Point, Rect};
 use crate::gradient::GradientShape;
@@ -41,6 +42,16 @@ pub struct NPaint {
 /// Errors cross the boundary as plain strings, which JavaScript receives as a
 /// thrown value. `JsError` would do the same but cannot be constructed off
 /// wasm, and this module's tests run natively.
+/// The three places the layers panel can show a drop at.
+fn drop_of(where_: &str) -> Option<Drop> {
+    match where_ {
+        "above" => Some(Drop::Above),
+        "below" => Some(Drop::Below),
+        "inside" => Some(Drop::Inside),
+        _ => None,
+    }
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -608,6 +619,14 @@ impl NPaint {
         self.editor.save_document()
     }
 
+    /// A number that changes whenever the document does: what the page's
+    /// autosave watches to know there is something new to keep. It crosses
+    /// as a double, which counts document states exactly for as long as any
+    /// session could last.
+    pub fn document_state(&self) -> f64 {
+        self.editor.document_state() as f64
+    }
+
     /// Marks the document as never saved — for a document restored from
     /// the page's crash-recovery store, which is unsaved work however new
     /// its history is.
@@ -626,6 +645,15 @@ impl NPaint {
         self.editor.open_document(bytes).map_err(err)?;
         self.resize_frame();
         Ok(())
+    }
+
+    /// Opens a Photoshop file, replacing the document. Returns a sentence
+    /// about anything that had to be approximated, or an empty string when
+    /// nothing did.
+    pub fn open_psd(&mut self, bytes: &[u8]) -> Result<String, String> {
+        let note = self.editor.open_psd(bytes).map_err(err)?;
+        self.resize_frame();
+        Ok(note.unwrap_or_default())
     }
 
     // ---- Layers --------------------------------------------------------------
@@ -668,6 +696,16 @@ impl NPaint {
 
     pub fn blend_mode_names() -> Vec<String> {
         BlendMode::ALL.iter().map(|m| m.name().to_owned()).collect()
+    }
+
+    /// The blend modes a *group* may be set to, pass-through first. The
+    /// panel offers these instead when the layer is a group.
+    pub fn group_blend_mode_names() -> Vec<String> {
+        BlendMode::GROUP.iter().map(|m| m.name().to_owned()).collect()
+    }
+
+    pub fn group_blend_mode_labels() -> Vec<String> {
+        BlendMode::GROUP.iter().map(|m| m.label().to_owned()).collect()
     }
 
     pub fn blend_mode_labels() -> Vec<String> {
@@ -905,8 +943,141 @@ impl NPaint {
         self.editor.remove_layer(index).map_err(err)
     }
 
-    pub fn move_layer(&mut self, from: usize, to: usize) -> Result<(), String> {
-        self.editor.move_layer(from, to).map_err(err)
+    /// Drops a layer on another one — what a drag in the layers panel ends
+    /// with. `where_` is `"above"`, `"below"` or `"inside"`; a group brings
+    /// its contents. Returns where the layer ended up.
+    pub fn move_layer_to(&mut self, from: usize, to: usize, where_: &str) -> Result<usize, String> {
+        let drop = drop_of(where_).ok_or_else(|| format!("no such drop: {where_}"))?;
+        self.editor.move_layer_to(from, to, drop).map_err(err)
+    }
+
+    /// Moves a layer one row up (`up`) or down the panel. Returns where it
+    /// ended up, or -1 if there was nowhere to go.
+    pub fn reorder_layer(&mut self, index: usize, up: bool) -> Result<i32, String> {
+        Ok(self.editor.reorder_layer(index, up).map_err(err)?.map_or(-1, |i| i as i32))
+    }
+
+    // ---- The panel's selection -----------------------------------------------
+
+    /// Whether the panel has this row picked out. The active layer always
+    /// is; the others are what Shift- and Ctrl-clicking added.
+    pub fn layer_selected(&self, index: usize) -> bool {
+        self.editor.layer_is_selected(index)
+    }
+
+    /// How many rows are selected. One means the active layer alone.
+    pub fn selected_layer_count(&self) -> usize {
+        self.editor.selected_layers().len()
+    }
+
+    /// Ctrl-clicking a row: adds it to the selection, or takes it out.
+    pub fn toggle_layer_selected(&mut self, index: usize) -> Result<(), String> {
+        self.editor.toggle_layer_selected(index).map_err(err)
+    }
+
+    /// Clicking the empty part of the panel: back to the active layer
+    /// alone. One layer is always active — the tools need something to
+    /// paint on — so this is as far as unselecting goes.
+    pub fn clear_layer_selection(&mut self) {
+        self.editor.clear_layer_selection();
+    }
+
+    /// Shift-clicking a row: everything between the active layer and it.
+    pub fn select_layer_range(&mut self, index: usize) -> Result<(), String> {
+        self.editor.select_layer_range(index).map_err(err)
+    }
+
+    // ---- Groups --------------------------------------------------------------
+
+    /// A new, empty group where a new layer would go.
+    pub fn add_group(&mut self) -> usize {
+        self.editor.add_group()
+    }
+
+    /// Puts a layer into a new group in its place. Nothing changes on
+    /// screen: a new group is pass-through.
+    pub fn group_layer(&mut self, index: usize) -> Result<usize, String> {
+        self.editor.group_layer(index).map_err(err)
+    }
+
+    /// The same for everything the panel has selected, into one group.
+    pub fn group_selected_layers(&mut self) -> Result<usize, String> {
+        self.editor.group_selected_layers().map_err(err)
+    }
+
+    /// Deletes every selected layer, or just the active one when that is
+    /// all there is.
+    pub fn remove_selected_layers(&mut self) -> Result<(), String> {
+        self.editor.remove_selected_layers().map_err(err)
+    }
+
+    /// Duplicates every selected layer.
+    pub fn duplicate_selected_layers(&mut self) -> Result<usize, String> {
+        self.editor.duplicate_selected_layers().map_err(err)
+    }
+
+    /// Dissolves a group, leaving its contents at the level it was on.
+    pub fn ungroup(&mut self, index: usize) -> Result<(), String> {
+        self.editor.ungroup(index).map_err(err)
+    }
+
+    /// Replaces a group with one layer holding what it drew.
+    pub fn merge_group(&mut self, index: usize) -> Result<(), String> {
+        self.editor.flatten_group(index).map_err(err)
+    }
+
+    /// The group a layer is in, as its index, or -1 at the top level.
+    pub fn layer_parent(&self, index: usize) -> Result<i32, String> {
+        self.layer(index)?;
+        Ok(self.editor.document().parent_index(index).map_or(-1, |i| i as i32))
+    }
+
+    /// How deep in the groups a layer sits: 0 at the top level.
+    pub fn layer_depth(&self, index: usize) -> Result<usize, String> {
+        self.layer(index)?;
+        Ok(self.editor.document().depth(index))
+    }
+
+    /// Whether a group's contents are folded away in the panel.
+    pub fn layer_collapsed(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.collapsed)
+    }
+
+    pub fn set_layer_collapsed(&mut self, index: usize, collapsed: bool) -> Result<(), String> {
+        self.editor.set_layer_collapsed(index, collapsed).map_err(err)
+    }
+
+    /// Whether a group above this layer is switched off, so that it is not
+    /// on screen however its own eye is set.
+    pub fn layer_hidden_by_group(&self, index: usize) -> Result<bool, String> {
+        self.layer(index)?;
+        Ok(self.editor.document().hidden_by_group(index))
+    }
+
+    /// Whether a drop would actually move the layer. The panel asks before
+    /// it draws the line, so that a line is only ever shown where letting
+    /// go really does something.
+    pub fn move_would_change(&self, from: usize, to: usize, where_: &str) -> bool {
+        let Some(drop) = drop_of(where_) else { return false };
+        self.editor.document().move_layers_would_change(&self.editor.dragged_layers(from), to, drop)
+    }
+
+    /// Whether moving a layer one row that way would do anything, which is
+    /// what greys out the panel's up and down buttons.
+    pub fn can_reorder_layer(&self, index: usize, up: bool) -> bool {
+        self.editor.document().reorder_target(index, up).is_some()
+    }
+
+    /// The layer directly below this one at the same level, or -1 when it
+    /// is at the bottom of the group it is in. What Merge Down works on.
+    pub fn sibling_below(&self, index: usize) -> i32 {
+        self.editor.document().sibling_below(index).map_or(-1, |i| i as i32)
+    }
+
+    /// Whether `index` is the group at `group`, or inside it — what the
+    /// panel checks before it offers a drop.
+    pub fn layer_is_inside(&self, index: usize, group: usize) -> bool {
+        self.editor.document().is_inside(index, group)
     }
 
     pub fn merge_down(&mut self, index: usize) -> Result<(), String> {
@@ -1797,6 +1968,14 @@ mod tests {
         let mut other = NPaint::new(1, 1, "#000000").unwrap();
         other.open_document(&snapshot).unwrap();
         assert_eq!(other.width(), 3);
+    }
+
+    #[test]
+    fn a_photoshop_file_crosses_the_boundary() {
+        let mut np = NPaint::new(2, 2, "#ffffff").unwrap();
+        assert!(np.open_psd(b"not one").unwrap_err().contains("not a Photoshop file"));
+        // The frame still matches the document it refused to replace.
+        assert_eq!(np.frame_len(), 2 * 2 * 4);
     }
 
     #[test]
