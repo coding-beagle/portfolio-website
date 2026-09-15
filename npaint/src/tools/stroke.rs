@@ -1,13 +1,14 @@
 //! Freehand strokes: the brush, the pencil and the eraser.
 //!
-//! All three are the same gesture — stamp a disc at every pixel the pointer
+//! All three are the same gesture — stamp a dab at every pixel the pointer
 //! passes — and differ only in what the stamp does. The stroke is built up as
 //! a coverage mask and applied to a copy of the layer taken at the start,
 //! so overlapping stamps within one stroke do not compound: a 50% brush lays
 //! down 50% everywhere it goes, as in Photoshop, rather than growing darker
-//! where the pointer slowed down. The coverage is soft at the rim by the
-//! brush's hardness, and where it is partial the paint is mixed in by that
-//! much; the pencil is always hard.
+//! where the pointer slowed down. The shape of the dab is the brush tip
+//! ([`crate::brush::BrushTip`]): a disc soft at the rim by the brush's
+//! hardness, or a square, a nib, chalk or spatter. Where the coverage is
+//! partial the paint is mixed in by that much; the pencil is always hard.
 //!
 //! Shift-clicking joins the new stroke to where the last one ended with a
 //! straight line, as in Photoshop, so a run of Shift-clicks draws a polyline.
@@ -58,7 +59,8 @@ impl StrokeTool {
         let Some(g) = self.gesture.as_mut() else { return };
         let all = g.mask.bounds();
         let from = g.last;
-        stamp_spaced(from, to, spacing(size), |p| g.mask.stamp_soft_disc(p, size, hardness, &all));
+        let tip = ctx.settings.tip;
+        stamp_spaced(from, to, spacing(size), |p| tip.stamp(&mut g.mask, p, size, hardness, &all));
         g.last = to;
 
         let reach = (size as i32) / 2 + 1;
@@ -75,7 +77,12 @@ impl StrokeTool {
         let mode = self.mode;
         for y in region.y..region.bottom() {
             for x in region.x..region.right() {
-                let cover = g.mask.get(x, y).a;
+                let mut cover = g.mask.get(x, y).a;
+                // The pencil is hard whatever the tip: a grain of chalk is
+                // a whole pixel or nothing.
+                if mode == StrokeMode::Pencil && cover > 0 {
+                    cover = 255;
+                }
                 let before = g.base.get(x, y);
                 let after = if cover == 0 {
                     before
@@ -369,6 +376,25 @@ mod tests {
         rig.settings.hardness = 0.0;
         rig.stroke(&[(15.0, 15.0)]);
         assert_eq!(rig.px(15, 9), RED, "the pencil is hard whatever the setting");
+    }
+
+    #[test]
+    fn the_tip_shapes_the_stroke() {
+        use crate::brush::BrushTip;
+        let mut rig = Rig::new(StrokeMode::Brush);
+        rig.settings.size = 9;
+        rig.settings.tip = BrushTip::Square;
+        rig.stroke(&[(15.0, 15.0)]);
+        assert_eq!(rig.painted(), 81, "a 9px square dab is 81 pixels");
+        assert_eq!(rig.px(11, 11), RED, "corners included");
+
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.settings.size = 9;
+        rig.settings.tip = BrushTip::Chalk;
+        rig.stroke(&[(5.0, 15.0), (25.0, 15.0)]);
+        let n = rig.painted();
+        assert!(n > 0 && n < 21 * 9, "grainy: {n} of the band");
+        assert!(rig.doc.active_layer().raster.pixels().iter().all(|p| p.a == 0 || *p == RED), "the pencil keeps chalk hard");
     }
 
     #[test]

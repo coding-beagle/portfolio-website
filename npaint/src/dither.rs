@@ -336,7 +336,7 @@ fn bayer(method: DitherMethod, x: i32, y: i32) -> f32 {
 /// A value in `0..1` from the coordinates alone: the same pixel always gets
 /// the same "random" threshold, so the noise does not crawl between
 /// previews or between a preview and the commit.
-fn hash(x: i32, y: i32, c: u32) -> f32 {
+pub(crate) fn hash(x: i32, y: i32, c: u32) -> f32 {
     let mut h = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ c.wrapping_mul(0xcb1a_b31f);
     h ^= h >> 15;
     h = h.wrapping_mul(0x2c1b_3c6d);

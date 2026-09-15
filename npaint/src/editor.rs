@@ -20,6 +20,7 @@ use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::snap::Snap;
+use crate::text::TextObject;
 use crate::tools::{sample_color, Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
 use crate::transform::{Affine, Hit, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
@@ -96,6 +97,20 @@ enum Session {
     /// The selection outline being moved, scaled or turned, with the pixels
     /// left alone; `before` is what cancelling puts back.
     TransformSelection { session: TransformSession, before: Selection },
+    /// A text layer being typed into — the active layer, set again by the
+    /// page on every keystroke — with what cancelling puts back.
+    Text { before: TextBefore },
+}
+
+/// What was there before a text session began.
+// One of these exists at a time and is moved twice; the size of the
+// larger variant is not worth a box.
+#[allow(clippy::large_enum_variant)]
+enum TextBefore {
+    /// The layer is new: the whole stack without it.
+    New(Document),
+    /// An existing text layer: the layer as it was.
+    Edit(Layer),
 }
 
 /// What an adjustment or transform session reported when it started.
@@ -114,6 +129,8 @@ pub enum SessionError {
     NotAdjustmentLayer,
     /// Transforming the selection needs a selection.
     NoSelection,
+    /// Editing text needs a text layer.
+    NotTextLayer,
 }
 
 impl std::fmt::Display for SessionError {
@@ -125,6 +142,7 @@ impl std::fmt::Display for SessionError {
             SessionError::Uneditable(why) => why.fmt(f),
             SessionError::NotAdjustmentLayer => f.write_str("this is not an adjustment layer"),
             SessionError::NoSelection => f.write_str("select something first"),
+            SessionError::NotTextLayer => f.write_str("this is not a text layer"),
         }
     }
 }
@@ -181,6 +199,10 @@ pub struct Editor {
     /// used as the undo snapshot on commit. The whole layer, because a
     /// smart object's transform changes its placement as well as its pixels.
     transform_base: Option<Layer>,
+    /// Whether the open transform is the move tool dragging a smart object
+    /// by its placement: it commits itself when the pointer comes up, as a
+    /// step called Move.
+    moving_smart: bool,
     /// The selection and guides as they were when a gesture that does not
     /// edit pixels began, so that a selection tool's drag is one undo step.
     gesture_aside: Option<Aside>,
@@ -214,6 +236,7 @@ impl Editor {
             session: None,
             preview_base: None,
             transform_base: None,
+            moving_smart: false,
             gesture_base: None,
             gesture_aside: None,
             clipboard: None,
@@ -478,6 +501,9 @@ impl Editor {
         if !self.tool.kind().edits_pixels() {
             return None;
         }
+        if self.tool.kind() == ToolKind::Move && self.moves_by_placement() {
+            return None;
+        }
         let layer = self.document.active_layer();
         if let Some(why) = layer.edit_refusal() {
             return Some(why);
@@ -519,11 +545,25 @@ impl Editor {
                 let tolerance = HANDLE_GRAB_PX / self.viewport.zoom();
                 return t.pointer_down(ev.pos, tolerance);
             }
-            Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. }) => return false,
+            Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. } | Session::Text { .. }) => return false,
             None => {}
         }
         if alt && self.tool.kind().alt_picks_color() {
             self.pick_color_at(ev.pos, false);
+            return true;
+        }
+        // The move tool moves a smart object — a text layer among them — by
+        // its placement rather than its pixels: a free transform's drag,
+        // begun wherever the click landed and committed on release, so
+        // nothing is resampled and the text stays text.
+        if self.tool.kind() == ToolKind::Move && self.moves_by_placement() {
+            if self.begin_transform().is_err() {
+                return false;
+            }
+            if let Some(Session::Transform(t)) = &mut self.session {
+                t.begin_move(ev.pos);
+            }
+            self.moving_smart = true;
             return true;
         }
         if self.tool.kind().edits_pixels() && (!self.document.active_layer().visible || self.edit_refusal().is_some()) {
@@ -594,6 +634,16 @@ impl Editor {
     pub fn pointer_up(&mut self, screen: Point, shift: bool, alt: bool) -> bool {
         if let Some(Session::Transform(t)) | Some(Session::TransformSelection { session: t, .. }) = &mut self.session {
             t.pointer_up();
+            if self.moving_smart {
+                // A click that went nowhere is not a step.
+                let unmoved = self.transform_base.as_ref().and_then(Layer::smart_object).map(|o| o.transform) == self.transform_session().map(TransformSession::matrix);
+                if unmoved {
+                    self.cancel_session();
+                } else {
+                    self.commit_session();
+                }
+                return true;
+            }
             return false;
         }
         if self.gesture.is_none() {
@@ -644,9 +694,22 @@ impl Editor {
         self.tool.dirtied().unwrap_or_else(|| self.document.bounds())
     }
 
-    /// Abandons the gesture in progress and the undo step it opened.
+    /// Abandons the gesture in progress and the undo step it opened — or
+    /// the move tool's drag of a smart object, which is a session.
     pub fn cancel_gesture(&mut self) -> bool {
+        if self.moving_smart {
+            return self.cancel_session();
+        }
         self.abort_gesture()
+    }
+
+    /// Whether the move tool would move the active layer by its placement:
+    /// a smart object or text layer, its pixels rather than its mask, that
+    /// can be moved at all. What cannot — a hidden or locked layer — is
+    /// refused the ordinary way.
+    fn moves_by_placement(&self) -> bool {
+        let layer = self.document.active_layer();
+        layer.is_smart() && !layer.editing_mask() && layer.visible && !layer.locked
     }
 
     fn abort_gesture(&mut self) -> bool {
@@ -1181,11 +1244,23 @@ impl Editor {
         self.cancel_session();
         self.abort_gesture();
         let layer = self.document.active_layer();
-        if (dx == 0 && dy == 0) || !layer.visible || layer.edit_refusal().is_some() || layer.keeps_alpha() {
+        let by_placement = self.moves_by_placement();
+        if (dx == 0 && dy == 0) || !layer.visible || (!by_placement && layer.edit_refusal().is_some()) || layer.keeps_alpha() {
             return false;
         }
-        let snapshot = Snapshot::of_active_layer(&self.document);
         let index = self.document.active_index();
+        if self.moves_by_placement() {
+            // A smart object or text layer moves by its placement, whole.
+            let Some(object) = layer.smart_object() else { return false };
+            let moved = Affine::translation(f64::from(dx), f64::from(dy)).then(&object.transform);
+            let snapshot = Snapshot::of_whole_layer(&self.document, index).expect("the active layer exists");
+            self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
+            let (w, h) = (self.document.width(), self.document.height());
+            self.document.active_layer_mut().set_smart_transform(moved, w, h);
+            self.touch_all();
+            return true;
+        }
+        let snapshot = Snapshot::of_active_layer(&self.document);
         self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
         let surface = self.document.active_surface();
         let (moving, mut out) = self.selection.split(surface);
@@ -1471,10 +1546,11 @@ impl Editor {
                 let index = self.document.active_index();
                 let (w, h) = (self.document.width(), self.document.height());
                 let smart = before.is_smart() && !before.editing_mask();
+                let label = if std::mem::take(&mut self.moving_smart) { "Move" } else { "Free Transform" };
                 let rendered = t.render();
                 *self.document.active_layer_mut() = before.clone();
                 if smart {
-                    self.record(Snapshot::Layer(before), "Free Transform");
+                    self.record(Snapshot::Layer(before), label);
                     self.document.active_layer_mut().set_smart_transform(t.matrix(), w, h);
                 } else {
                     self.record(Snapshot::of_layer(&self.document, index).expect("the active layer exists"), "Free Transform");
@@ -1490,6 +1566,19 @@ impl Editor {
             Session::TransformSelection { before, .. } => {
                 let aside = Aside { selection: before, ..self.aside() };
                 self.history.push(Snapshot::Nothing, aside, "Transform Selection");
+            }
+            Session::Text { before } => {
+                // Nothing typed, or nothing but spaces: as good as cancelled.
+                // A layer of nothing would be invisible and baffling.
+                let blank = self.document.active_layer().text().is_none_or(TextObject::is_blank);
+                match before {
+                    TextBefore::New(doc) if blank => self.document = doc,
+                    TextBefore::New(doc) => self.record(Snapshot::Structure(doc), "Add Text"),
+                    TextBefore::Edit(layer) if blank || *self.document.active_layer() == layer => {
+                        *self.document.active_layer_mut() = layer;
+                    }
+                    TextBefore::Edit(layer) => self.record(Snapshot::Layer(layer), "Edit Text"),
+                }
             }
         }
         self.touch_all();
@@ -1507,11 +1596,16 @@ impl Editor {
                 let _ = self.document.set_adjustment(index, before);
             }
             Session::Transform(_) => {
+                self.moving_smart = false;
                 if let Some(base) = self.transform_base.take() {
                     *self.document.active_layer_mut() = base;
                 }
             }
             Session::TransformSelection { before, .. } => self.selection = before,
+            Session::Text { before } => match before {
+                TextBefore::New(doc) => self.document = doc,
+                TextBefore::Edit(layer) => *self.document.active_layer_mut() = layer,
+            },
         }
         self.touch_all();
         true
@@ -1527,7 +1621,7 @@ impl Editor {
         self.open_session()?;
         let layer = self.document.active_layer();
         if let Some(why) = layer.edit_refusal() {
-            if why != EditRefusal::SmartObject {
+            if !matches!(why, EditRefusal::SmartObject | EditRefusal::TextLayer) {
                 return Err(SessionError::Uneditable(why));
             }
         }
@@ -1555,6 +1649,93 @@ impl Editor {
         self.transform_base = Some(layer.clone());
         self.session = Some(Session::Transform(session));
         Ok(())
+    }
+
+    // ---- Text session (the text tool) ------------------------------------------------
+    //
+    // The engine has no fonts, so the page draws the text and hands the
+    // picture over; what the engine keeps is the text and its style, and
+    // the picture as a smart object's source (see `text.rs`, `layer.rs`).
+    // Typing is a session: `begin_text_layer` or `begin_text_edit` opens
+    // it, `preview_text` sets the layer again on every keystroke, and
+    // `commit_session` records one undo step — or none, if nothing was
+    // typed, in which case a new layer is taken away again.
+
+    /// Starts a new text layer above the active one, its text's top-left
+    /// corner at the screen point, in the options bar's style and the
+    /// foreground colour. The layer is there from now on, empty, and goes
+    /// again if the session ends with nothing typed. Returns its index.
+    pub fn begin_text_layer(&mut self, screen: Point) -> Result<usize, SessionError> {
+        if self.session.is_some() {
+            return Err(SessionError::Busy);
+        }
+        self.abort_gesture();
+        let at = self.viewport.screen_to_doc(screen);
+        let before = self.document.clone();
+        let text = TextObject::empty(self.settings.text.clone(), self.settings.color);
+        // An empty picture, so the first rendering is anchored to the click
+        // itself: its left edge, middle or right edge, by the alignment.
+        let index = self.document.add_text_layer(text, Raster::new(0, 0), at);
+        self.session = Some(Session::Text { before: TextBefore::New(before) });
+        self.touch_all();
+        Ok(index)
+    }
+
+    /// Starts editing the text of layer `index`, which becomes active. Its
+    /// style and colour become the options bar's, so what the page shows
+    /// and what it draws with agree.
+    pub fn begin_text_edit(&mut self, index: usize) -> Result<(), SessionError> {
+        let layer = self.document.layer(index).ok_or(SessionError::NotTextLayer)?;
+        if layer.locked {
+            return Err(SessionError::Uneditable(EditRefusal::Locked));
+        }
+        let text = layer.text().ok_or(SessionError::NotTextLayer)?.clone();
+        self.set_active_layer(index).map_err(|_| SessionError::NotTextLayer)?;
+        self.open_session()?;
+        self.settings.text = text.style;
+        self.settings.color = text.color;
+        let before = self.document.active_layer().clone();
+        self.session = Some(Session::Text { before: TextBefore::Edit(before) });
+        Ok(())
+    }
+
+    /// Sets the text of the layer being edited: `text` as typed, `source`
+    /// as the page has drawn it in the current style and foreground colour,
+    /// with the block's top-left corner at `origin` within it. False when
+    /// no text session is open.
+    pub fn preview_text(&mut self, text: &str, origin: Point, source: Raster) -> bool {
+        if !self.is_editing_text() {
+            return false;
+        }
+        let object = TextObject { text: text.to_owned(), style: self.settings.text.clone(), color: self.settings.color, origin };
+        let index = self.document.active_index();
+        if self.document.set_text(index, object, source).is_err() {
+            return false;
+        }
+        self.touch_all();
+        true
+    }
+
+    pub fn is_editing_text(&self) -> bool {
+        matches!(self.session, Some(Session::Text { .. }))
+    }
+
+    /// The text layer under a screen point, if there is one: what a click
+    /// with the text tool edits rather than starting afresh.
+    pub fn text_layer_at(&self, screen: Point) -> Option<usize> {
+        self.document.text_layer_at(self.viewport.screen_to_doc(screen))
+    }
+
+    /// The text behind layer `index`, if it is a text layer.
+    pub fn layer_text(&self, index: usize) -> Option<&TextObject> {
+        self.document.layer(index)?.text()
+    }
+
+    /// Where a smart object's (or text layer's) source lands in the
+    /// document: source pixels → document pixels. The page puts its text
+    /// box through this so the caret sits on the letters.
+    pub fn layer_placement(&self, index: usize) -> Option<Affine> {
+        Some(self.document.layer(index)?.smart_object()?.transform)
     }
 
     /// Starts a free transform of the selection outline alone: the same
@@ -3575,5 +3756,311 @@ mod tests {
         assert_eq!(e.history_labels(), vec!["Paint Bucket"]);
         assert!(e.undo());
         assert_eq!(px(&e, 4, 0), Rgba::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod text_session_tests {
+    use super::*;
+    use crate::text::TextAlign;
+
+    const RED: Rgba = Rgba::opaque(255, 0, 0);
+
+    fn px(e: &Editor, x: i32, y: i32) -> Rgba {
+        e.document().composite().get(x, y)
+    }
+
+    /// The page's rendering, stood in for: a solid block `w` x `h` with one
+    /// pixel of padding around it.
+    fn drawn(w: u32, h: u32) -> (Point, Raster) {
+        let mut r = Raster::new(w + 2, h + 2);
+        r.fill_rect(Rect::new(1, 1, w as i32, h as i32), RED, &Rect::new(0, 0, (w + 2) as i32, (h + 2) as i32));
+        (Point::new(1.0, 1.0), r)
+    }
+
+    fn type_text(e: &mut Editor, text: &str, w: u32, h: u32) {
+        let (origin, source) = drawn(w, h);
+        assert!(e.preview_text(text, origin, source));
+    }
+
+    #[test]
+    fn typing_makes_a_text_layer_at_the_click_as_one_undo_step() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        let index = e.begin_text_layer(Point::new(10.0, 5.0)).unwrap();
+        assert_eq!(index, 1);
+        assert!(e.is_editing_text());
+        assert_eq!(e.document().layers().len(), 2, "the layer is there at once");
+        assert_eq!(e.document().active_layer().kind.name(), "text");
+        assert_eq!(e.begin_text_layer(Point::new(0.0, 0.0)), Err(SessionError::Busy));
+
+        type_text(&mut e, "Hi", 4, 2);
+        assert_eq!(px(&e, 10, 5), RED, "the block's corner is on the click");
+        assert_eq!(px(&e, 13, 6), RED);
+        assert_eq!(px(&e, 14, 7), Rgba::WHITE);
+        assert_eq!(e.document().active_layer().name, "Hi");
+        assert!(e.is_dirty());
+
+        type_text(&mut e, "Hiya", 8, 2);
+        assert_eq!(px(&e, 17, 6), RED, "left-aligned: it grew to the right");
+        assert!(e.commit_session());
+        assert!(!e.is_editing_text());
+        assert_eq!(e.history_labels(), vec!["Add Text".to_owned()]);
+        let t = e.layer_text(1).unwrap();
+        assert_eq!(t.text, "Hiya");
+        assert_eq!(t.color, RED);
+        assert!(e.undo());
+        assert_eq!(e.document().layers().len(), 1, "one step takes the layer away");
+        assert!(e.redo());
+        assert_eq!(e.layer_text(1).unwrap().text, "Hiya");
+        assert_eq!(e.text_layer_at(Point::new(12.0, 6.0)), Some(1));
+        assert_eq!(e.text_layer_at(Point::new(2.0, 2.0)), None);
+        assert_eq!(e.layer_placement(1).unwrap().apply(Point::new(1.0, 1.0)), Point::new(10.0, 5.0));
+        assert_eq!(e.layer_placement(0), None);
+    }
+
+    #[test]
+    fn nothing_typed_leaves_nothing_behind() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.begin_text_layer(Point::new(3.0, 3.0)).unwrap();
+        assert!(e.commit_session());
+        assert_eq!(e.document().layers().len(), 1);
+        assert!(!e.can_undo(), "and no step");
+
+        e.begin_text_layer(Point::new(3.0, 3.0)).unwrap();
+        type_text(&mut e, "  \n ", 2, 2);
+        assert!(e.commit_session());
+        assert_eq!(e.document().layers().len(), 1, "spaces are nothing");
+
+        e.begin_text_layer(Point::new(3.0, 3.0)).unwrap();
+        type_text(&mut e, "x", 2, 2);
+        assert_eq!(px(&e, 3, 3), RED);
+        assert!(e.cancel_session());
+        assert_eq!(e.document().layers().len(), 1);
+        assert_eq!(px(&e, 3, 3), Rgba::WHITE);
+        assert!(!e.can_undo());
+        assert!(!e.preview_text("x", Point::default(), Raster::new(1, 1)), "no session, no preview");
+    }
+
+    #[test]
+    fn editing_a_text_layer_takes_its_style_and_records_one_step() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().text.size = 12.0;
+        e.settings_mut().text.align = TextAlign::Right;
+        e.begin_text_layer(Point::new(10.0, 5.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        e.commit_session();
+        // Someone changes the options bar and the colour in the meantime.
+        e.settings_mut().color = Rgba::BLACK;
+        e.settings_mut().text.size = 99.0;
+        e.settings_mut().text.align = TextAlign::Left;
+        e.add_layer();
+        assert_eq!(e.document().active_index(), 2);
+
+        assert_eq!(e.begin_text_edit(0), Err(SessionError::NotTextLayer));
+        assert_eq!(e.begin_text_edit(9), Err(SessionError::NotTextLayer));
+        e.begin_text_edit(1).unwrap();
+        assert_eq!(e.document().active_index(), 1, "the text layer became active");
+        assert_eq!(e.settings().text.size, 12.0, "its style is the options bar's now");
+        assert_eq!(e.settings().text.align, TextAlign::Right);
+        assert_eq!(e.settings().color, RED);
+
+        // Nothing changed: no step.
+        assert!(e.commit_session());
+        assert_eq!(e.history_labels().len(), 2, "Add Text, New Layer");
+
+        // Right-aligned text ends at the click: "ab" ran from x = 6 to 9.
+        assert_eq!(px(&e, 9, 5), RED);
+        assert_eq!(px(&e, 10, 5), Rgba::WHITE);
+        assert_eq!(px(&e, 5, 5), Rgba::WHITE);
+        e.begin_text_edit(1).unwrap();
+        type_text(&mut e, "abcd", 8, 2);
+        assert_eq!(px(&e, 9, 6), RED, "the right edge stayed");
+        assert_eq!(px(&e, 10, 6), Rgba::WHITE);
+        assert_eq!(px(&e, 2, 6), RED, "and it grew to the left");
+        assert!(e.commit_session());
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Edit Text"));
+        assert_eq!(e.layer_text(1).unwrap().text, "abcd");
+        assert!(e.undo());
+        assert_eq!(e.layer_text(1).unwrap().text, "ab");
+        assert_eq!(px(&e, 2, 6), Rgba::WHITE);
+
+        // Emptying an existing layer puts it back rather than leaving a
+        // blank layer behind.
+        e.begin_text_edit(1).unwrap();
+        type_text(&mut e, "", 0, 0);
+        assert!(e.commit_session());
+        assert_eq!(e.layer_text(1).unwrap().text, "ab");
+    }
+
+    #[test]
+    fn a_text_layer_refuses_the_brush_but_transforms_and_rasterizes() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        e.commit_session();
+        e.set_tool(ToolKind::Pencil);
+        assert_eq!(e.edit_refusal(), Some(EditRefusal::TextLayer));
+        assert!(!e.pointer_down(Point::new(4.0, 4.0), false, false));
+
+        e.begin_transform().unwrap();
+        e.transform_nudge(2.0, 0.0);
+        assert!(e.commit_session());
+        assert_eq!(px(&e, 6, 4), RED);
+        assert_eq!(px(&e, 4, 4), Rgba::WHITE);
+        assert_eq!(e.document().active_layer().kind.name(), "text", "still text after a transform");
+        e.begin_text_edit(1).unwrap();
+        type_text(&mut e, "abcd", 8, 2);
+        assert_eq!(px(&e, 6, 4), RED, "set again where the transform put it");
+        assert_eq!(px(&e, 13, 5), RED);
+        e.commit_session();
+
+        e.rasterize_layer(1).unwrap();
+        assert_eq!(e.document().active_layer().kind.name(), "pixels");
+        assert_eq!(e.layer_text(1), None);
+        assert_eq!(e.edit_refusal(), None);
+    }
+
+    #[test]
+    fn a_layer_operation_or_an_undo_ends_the_session() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        e.add_layer();
+        assert!(!e.is_editing_text());
+        assert_eq!(e.document().layers().len(), 2, "the unfinished text went, the new layer came");
+        assert!(e.document().layers().iter().all(|l| !l.is_text()));
+
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        assert!(e.undo(), "the New Layer step");
+        assert!(!e.is_editing_text());
+        assert_eq!(e.document().layers().len(), 1);
+
+        // A text session takes the pointer over: a click starts nothing.
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        e.set_tool(ToolKind::Brush);
+        assert!(!e.pointer_down(Point::new(1.0, 1.0), false, false));
+        assert!(e.is_editing_text());
+        e.cancel_session();
+    }
+
+    #[test]
+    fn a_locked_or_hidden_text_layer_is_not_edited() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        e.commit_session();
+        e.set_layer_locked(1, true).unwrap();
+        assert_eq!(e.begin_text_edit(1), Err(SessionError::Uneditable(EditRefusal::Locked)));
+        e.set_layer_locked(1, false).unwrap();
+        e.set_layer_visible(1, false).unwrap();
+        assert_eq!(e.begin_text_edit(1), Err(SessionError::Hidden));
+        assert_eq!(e.text_layer_at(Point::new(5.0, 5.0)), None);
+    }
+
+    #[test]
+    fn the_move_tool_and_the_arrow_keys_move_text_by_its_placement() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab", 4, 2);
+        e.commit_session();
+        e.set_tool(ToolKind::Move);
+        assert_eq!(e.edit_refusal(), None, "the move tool is not refused a text layer");
+
+        // A drag: the placement moves, the text stays text, one step called Move.
+        assert!(e.pointer_down(Point::new(5.0, 5.0), false, false));
+        assert!(e.is_transforming(), "a move of a smart object is a transform underneath");
+        assert!(e.pointer_move(Point::new(8.0, 6.0), false, false));
+        assert!(e.pointer_up(Point::new(8.0, 6.0), false, false));
+        assert!(!e.is_transforming());
+        assert_eq!(px(&e, 7, 5), RED);
+        assert_eq!(px(&e, 4, 4), Rgba::WHITE);
+        assert_eq!(e.document().active_layer().kind.name(), "text");
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Move"));
+        assert_eq!(e.layer_placement(1).unwrap().apply(Point::new(1.0, 1.0)), Point::new(7.0, 5.0));
+
+        // A click that goes nowhere is not a step.
+        let steps = e.history_labels().len();
+        assert!(e.pointer_down(Point::new(8.0, 6.0), false, false));
+        assert!(e.pointer_up(Point::new(8.0, 6.0), false, false));
+        assert_eq!(e.history_labels().len(), steps);
+        assert!(!e.is_transforming());
+
+        // Escape mid-drag puts it back.
+        assert!(e.pointer_down(Point::new(8.0, 6.0), false, false));
+        e.pointer_move(Point::new(12.0, 6.0), false, false);
+        assert_eq!(px(&e, 11, 5), RED);
+        assert!(e.cancel_gesture());
+        assert!(!e.is_transforming());
+        assert_eq!(px(&e, 11, 5), Rgba::WHITE);
+        assert_eq!(px(&e, 7, 5), RED);
+        assert_eq!(e.history_labels().len(), steps);
+
+        // The arrow keys, coalesced into one step.
+        assert!(e.nudge_layer(1, 0));
+        assert!(e.nudge_layer(1, 0));
+        assert_eq!(px(&e, 9, 5), RED);
+        assert_eq!(px(&e, 7, 5), Rgba::WHITE);
+        assert_eq!(e.history_labels().len(), steps + 1);
+        assert!(e.undo());
+        assert_eq!(px(&e, 7, 5), RED, "both nudges undone together");
+        assert!(e.document().active_layer().is_text());
+
+        // Editing the text afterwards keeps it where it was moved to.
+        e.begin_text_edit(1).unwrap();
+        type_text(&mut e, "abcd", 8, 2);
+        assert_eq!(px(&e, 7, 5), RED);
+        assert_eq!(px(&e, 14, 5), RED);
+        e.commit_session();
+
+        // Locked, it is refused like anything else.
+        e.set_layer_locked(1, true).unwrap();
+        assert!(!e.pointer_down(Point::new(8.0, 6.0), false, false));
+        assert_eq!(e.edit_refusal(), Some(EditRefusal::Locked));
+        assert!(!e.nudge_layer(1, 0));
+    }
+
+    #[test]
+    fn a_plain_smart_object_moves_the_same_way() {
+        let mut e = Editor::new(8, 8, Rgba::TRANSPARENT);
+        e.place_smart_object("photo", Raster::filled(2, 2, RED));
+        e.set_tool(ToolKind::Move);
+        assert!(e.pointer_down(Point::new(3.0, 3.0), false, false));
+        e.pointer_move(Point::new(5.0, 3.0), false, false);
+        e.pointer_up(Point::new(5.0, 3.0), false, false);
+        assert_eq!(px(&e, 5, 3), RED);
+        assert_eq!(px(&e, 3, 3).a, 0);
+        assert!(e.document().active_layer().is_smart(), "still a smart object");
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Move"));
+        // On its mask, the move tool moves the mask's pixels as before.
+        e.add_layer_mask(1, false).unwrap();
+        assert!(e.pointer_down(Point::new(5.0, 3.0), false, false));
+        assert!(!e.is_transforming());
+        e.pointer_up(Point::new(5.0, 3.0), false, false);
+    }
+
+    #[test]
+    fn text_survives_the_file() {
+        let mut e = Editor::new(20, 20, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().text.font = "serif".to_owned();
+        e.settings_mut().text.bold = true;
+        e.begin_text_layer(Point::new(4.0, 4.0)).unwrap();
+        type_text(&mut e, "ab\ncd", 4, 2);
+        e.commit_session();
+        let bytes = e.save_document();
+        let mut back = Editor::new(1, 1, Rgba::WHITE);
+        back.open_document(&bytes).unwrap();
+        let t = back.layer_text(1).unwrap();
+        assert_eq!(t.text, "ab\ncd");
+        assert_eq!(t.style.font, "serif");
+        assert!(t.style.bold);
+        assert_eq!(t.color, RED);
+        assert_eq!(t.origin, Point::new(1.0, 1.0));
+        assert_eq!(back.document(), e.document());
     }
 }

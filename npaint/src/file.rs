@@ -29,6 +29,10 @@
 //!   it is aimed at, after the ones belonging to the adjustment itself. A
 //!   format-1 adjustment has no such value and comes back aimed at RGB,
 //!   which is what it always did, so nothing else changed on the wire.
+//! * **3** — a fourth layer kind, `3`, the text layer: a smart object's
+//!   source and placement as kind `2` writes them, then the text, its font
+//!   name, size, bold, italic, alignment, colour and origin. Kind `2` is
+//!   unchanged; a format-2 file simply has no kind `3` in it.
 
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
@@ -36,11 +40,12 @@ use crate::document::Document;
 use crate::layer::{Layer, LayerId, LayerKind, SmartObject, Target};
 use crate::raster::Raster;
 use crate::snap::Guides;
+use crate::text::{TextAlign, TextObject, TextStyle};
 use crate::transform::Affine;
 
 const MAGIC: &[u8; 6] = b"NPAINT";
 /// The format this build writes. See the module's version history.
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileError {
@@ -107,6 +112,20 @@ impl Writer {
             self.f64(v);
         }
     }
+
+    fn text(&mut self, t: &TextObject) {
+        self.str(&t.text);
+        self.str(&t.style.font);
+        self.f64(t.style.size);
+        self.u8(u8::from(t.style.bold));
+        self.u8(u8::from(t.style.italic));
+        self.u8(t.style.align.anchor_index());
+        for v in [t.color.r, t.color.g, t.color.b, t.color.a] {
+            self.u8(v);
+        }
+        self.f64(t.origin.x);
+        self.f64(t.origin.y);
+    }
 }
 
 /// The document and its guides as NPaint file bytes.
@@ -143,9 +162,12 @@ pub fn save(doc: &Document, guides: &Guides) -> Vec<u8> {
                 }
             }
             LayerKind::Smart(object) => {
-                w.u8(2);
+                w.u8(if object.text.is_some() { 3 } else { 2 });
                 w.raster(&object.source);
                 w.affine(&object.transform);
+                if let Some(text) = &object.text {
+                    w.text(text);
+                }
             }
         }
         match &layer.mask {
@@ -217,6 +239,22 @@ impl Reader<'_> {
     fn affine(&mut self) -> Result<Affine, FileError> {
         Ok(Affine { a: self.f64()?, b: self.f64()?, c: self.f64()?, d: self.f64()?, e: self.f64()?, f: self.f64()? })
     }
+
+    fn text(&mut self) -> Result<TextObject, FileError> {
+        let text = self.str()?;
+        let font = self.str()?;
+        let mut style = TextStyle { font, ..TextStyle::default() };
+        style.set_size(self.f64()?);
+        style.bold = self.u8()? != 0;
+        style.italic = self.u8()? != 0;
+        style.align = TextAlign::from_anchor_index(self.u8()?).ok_or(FileError::Corrupt("text alignment"))?;
+        let color = crate::color::Rgba::new(self.u8()?, self.u8()?, self.u8()?, self.u8()?);
+        let origin = crate::geometry::Point::new(self.f64()?, self.f64()?);
+        if !origin.x.is_finite() || !origin.y.is_finite() {
+            return Err(FileError::Corrupt("text origin"));
+        }
+        Ok(TextObject { text, style, color, origin })
+    }
 }
 
 /// A document and its guides from NPaint file bytes. The guides come back
@@ -266,10 +304,13 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
                 let adjustment = Adjustment::from_params(&name, &params).map_err(|_| FileError::Corrupt("adjustment"))?;
                 (LayerKind::Adjustment(adjustment), Raster::new(0, 0))
             }
-            2 => {
+            kind @ (2 | 3) => {
                 let source = r.raster()?;
                 let transform = r.affine()?;
-                let object = SmartObject { source, transform };
+                let mut object = SmartObject::new(source, transform);
+                if kind == 3 {
+                    object.text = Some(r.text()?);
+                }
                 let raster = object.render(width, height);
                 (LayerKind::Smart(object), raster)
             }
@@ -348,6 +389,14 @@ mod tests {
         doc.add_adjustment_layer(Adjustment::from_params("curves", &[0.0, 0.0, 100.0, 150.0, 255.0, 255.0, 2.0]).unwrap(), None);
         doc.place_smart_object("photo", Raster::filled(2, 2, Rgba::BLACK));
         doc.set_smart_transform(3, Affine::translation(3.0, 1.0)).unwrap();
+        // A text layer, in a style that is nothing like the default.
+        let text = TextObject {
+            text: "Hi\nthere ✓".to_owned(),
+            style: TextStyle { font: "Georgia, serif".to_owned(), size: 13.5, bold: true, italic: true, align: TextAlign::Center },
+            color: Rgba::new(10, 20, 30, 200),
+            origin: crate::geometry::Point::new(2.0, 3.0),
+        };
+        doc.add_text_layer(text, Raster::filled(3, 2, RED), crate::geometry::Point::new(1.0, 1.0));
         doc.set_active(1).unwrap();
         doc
     }
@@ -398,9 +447,10 @@ mod tests {
         let mut bytes = save(&document(), &Guides::default());
         assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), VERSION, "the version is written where the reader looks");
         // Every format up to this one is still read. The bytes are the same
-        // shape throughout; what changed between 1 and 2 is only what an
+        // shape throughout: what changed between 1 and 2 is only what an
         // adjustment's parameters may say, and an older one that says
-        // nothing about a channel comes back on RGB (see `adjust`).
+        // nothing about a channel comes back on RGB (see `adjust`); 3 added
+        // a layer kind, which an older file simply never contains.
         for older in 1..VERSION {
             bytes[6..8].copy_from_slice(&older.to_le_bytes());
             let (doc, _) = load(&bytes).expect("an older file still opens");

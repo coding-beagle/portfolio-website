@@ -175,6 +175,30 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
+    /**
+     * Starts editing the text of layer `index`.
+     * @param {number} index
+     */
+    begin_text_edit(index) {
+        const ret = wasm.npaint_begin_text_edit(this.__wbg_ptr, index);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Starts a new text layer with its text's corner at a screen point.
+     * Returns the layer's index.
+     * @param {number} x
+     * @param {number} y
+     * @returns {number}
+     */
+    begin_text_layer(x, y) {
+        const ret = wasm.npaint_begin_text_layer(this.__wbg_ptr, x, y);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
     begin_transform() {
         const ret = wasm.npaint_begin_transform(this.__wbg_ptr);
         if (ret[1]) {
@@ -204,6 +228,47 @@ export class NPaint {
      */
     static blend_mode_names() {
         const ret = wasm.npaint_blend_mode_names();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    brush_tip() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_brush_tip(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Whether the hardness slider means anything to the current tip.
+     * @returns {boolean}
+     */
+    brush_tip_has_hardness() {
+        const ret = wasm.npaint_brush_tip_has_hardness(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string[]}
+     */
+    static brush_tip_labels() {
+        const ret = wasm.npaint_brush_tip_labels();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string[]}
+     */
+    static brush_tip_names() {
+        const ret = wasm.npaint_brush_tip_names();
         var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
@@ -568,6 +633,13 @@ export class NPaint {
     /**
      * @returns {boolean}
      */
+    is_editing_text() {
+        const ret = wasm.npaint_is_editing_text(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
     is_gesturing() {
         const ret = wasm.npaint_is_gesturing(this.__wbg_ptr);
         return ret !== 0;
@@ -800,6 +872,60 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0];
+    }
+    /**
+     * A smart object's or text layer's placement, source pixels →
+     * document pixels, as the six numbers of a CSS `matrix()`; empty for
+     * any other layer.
+     * @param {number} index
+     * @returns {Float64Array}
+     */
+    layer_placement(index) {
+        const ret = wasm.npaint_layer_placement(this.__wbg_ptr, index);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * A text layer's text, or an empty string for any other layer.
+     * @param {number} index
+     * @returns {string}
+     */
+    layer_text(index) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.npaint_layer_text(this.__wbg_ptr, index);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Where the block of text starts within a text layer's source, as
+     * `[x, y]`; empty for any other layer.
+     * @param {number} index
+     * @returns {Float64Array}
+     */
+    layer_text_origin(index) {
+        const ret = wasm.npaint_layer_text_origin(this.__wbg_ptr, index);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * A small RGBA thumbnail of one layer's pixels, `w` by `h`,
@@ -1093,6 +1219,29 @@ export class NPaint {
     preview_ptr() {
         const ret = wasm.npaint_preview_ptr(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Sets the text being edited: the text itself, and its rendering as
+     * straight-alpha RGBA bytes of `width` by `height`, with the block of
+     * text starting at (`ox`, `oy`) inside it.
+     * @param {string} text
+     * @param {number} ox
+     * @param {number} oy
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     * @returns {boolean}
+     */
+    preview_text(text, ox, oy, width, height, bytes) {
+        const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_preview_text(this.__wbg_ptr, ptr0, len0, ox, oy, width, height, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * @param {number} index
@@ -1500,6 +1649,18 @@ export class NPaint {
         }
     }
     /**
+     * The shape of the brush's dab, by name: see [`BrushTip::name`].
+     * @param {string} name
+     */
+    set_brush_tip(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_brush_tip(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * @param {string} hex
      */
     set_color(hex) {
@@ -1658,6 +1819,44 @@ export class NPaint {
         wasm.npaint_set_snap(this.__wbg_ptr, on);
     }
     /**
+     * "left", "center" or "right".
+     * @param {string} name
+     */
+    set_text_align(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_text_align(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {boolean} bold
+     */
+    set_text_bold(bold) {
+        wasm.npaint_set_text_bold(this.__wbg_ptr, bold);
+    }
+    /**
+     * @param {string} font
+     */
+    set_text_font(font) {
+        const ptr0 = passStringToWasm0(font, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.npaint_set_text_font(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @param {boolean} italic
+     */
+    set_text_italic(italic) {
+        wasm.npaint_set_text_italic(this.__wbg_ptr, italic);
+    }
+    /**
+     * @param {number} size
+     */
+    set_text_size(size) {
+        wasm.npaint_set_text_size(this.__wbg_ptr, size);
+    }
+    /**
      * @param {number} tolerance
      */
     set_tolerance(tolerance) {
@@ -1725,6 +1924,67 @@ export class NPaint {
     }
     swap_colors() {
         wasm.npaint_swap_colors(this.__wbg_ptr);
+    }
+    /**
+     * @returns {string}
+     */
+    text_align() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_text_align(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {boolean}
+     */
+    text_bold() {
+        const ret = wasm.npaint_text_bold(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {string}
+     */
+    text_font() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_text_font(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {boolean}
+     */
+    text_italic() {
+        const ret = wasm.npaint_text_italic(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * The text layer under a screen point, or -1.
+     * @param {number} x
+     * @param {number} y
+     * @returns {number}
+     */
+    text_layer_at(x, y) {
+        const ret = wasm.npaint_text_layer_at(this.__wbg_ptr, x, y);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    text_size() {
+        const ret = wasm.npaint_text_size(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {number}

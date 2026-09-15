@@ -18,6 +18,9 @@ use crate::layer::{Layer, LayerId, Target};
 use crate::raster::Raster;
 use crate::selection::Selection;
 
+// A snapshot is built once and moved into the history; what the variants
+// weigh in memory is their rasters, not the enum.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Snapshot {
     /// One surface of one layer — its pixels or its mask — found by id so a

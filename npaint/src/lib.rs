@@ -17,6 +17,7 @@
 pub mod adjust;
 pub mod autoselect;
 pub mod blend;
+pub mod brush;
 pub mod checker;
 pub mod color;
 pub mod dither;
@@ -30,6 +31,7 @@ pub mod mask;
 pub mod raster;
 pub mod selection;
 pub mod snap;
+pub mod text;
 pub mod tools;
 pub mod transform;
 pub mod viewport;

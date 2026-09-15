@@ -24,6 +24,9 @@ npaint/
                    (two colours, cell, phase, from the edges) and unmixes it
                    to real alpha — Image > Remove Checkerboard Background
     blend.rs       the blend modes: the W3C formulas, one function per mode
+    brush.rs       the brush tips: round, square, calligraphy, chalk,
+                   spatter — each a rule from a pixel's position to the
+                   coverage one dab lays down
     autoselect/    the automatic selections: pure functions of the pixels
       mod.rs       colour distance, the Sobel edge map, the Select Similar set
       wand.rs      magic wand: flood or global colour match
@@ -45,6 +48,9 @@ npaint/
                    feather, smooth, antialias, contours (the marching ants)
     document.rs    the layer stack; add/remove/move/merge/composite
     selection.rs   what painting may touch: nothing, a rect, or a Mask
+    text.rs        what a text layer remembers: the text, its style (font,
+                   size, bold, italic, alignment), colour, and where the
+                   block starts in the picture the page drew of it
     viewport.rs    zoom and pan, screen <-> document mapping
     history.rs     undo/redo as labelled before-snapshots: one surface of a
                    layer (pixels or mask), a whole layer, the whole stack, or
@@ -59,11 +65,13 @@ npaint/
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
       movetool.rs  move (translate the selection or the layer)
-      stroke.rs    brush, pencil, eraser (one gesture, three stamps, and a
-                   hardness the pencil ignores)
+      stroke.rs    brush, pencil, eraser (one gesture, three stamps, a tip
+                   from brush.rs, and a hardness the pencil ignores)
       bucket.rs    paint bucket: the wand's patch, filled
       eyedropper.rs the eyedropper, and the Alt-click under every brush
       shape.rs     line, rectangle, ellipse (rubber-band)
+      text.rs      the text tool: a kind with no gesture of its own — a
+                   click opens a text session in editor.rs (see "Text")
       view.rs      zoom (click / alt-click / marquee or scrubby drag) and hand
     transform.rs   Affine, bilinear resampling, the free-transform session
     editor.rs      the facade: one document + selection + viewport + history + tool
@@ -271,6 +279,14 @@ tool by another route (one undo step per run of presses), and
 `nudge_selection` moves only the outline. Edit > Stroke deliberately paints
 both sides of the edge, so it does not go through the funnel either.
 
+On a smart object or a text layer (its pixels, not its mask) the move tool
+does not touch pixels at all: `pointer_down` opens a free-transform session
+with a move drag already begun (`TransformSession::begin_move`, grabbed
+wherever the click landed), `pointer_up` commits it as a step called Move —
+or cancels it, if the pointer went nowhere — and Escape cancels it
+(`Editor::moving_smart`). The arrow keys change the placement the same way.
+The selection is not carried along, since the placement is the whole layer.
+
 Coverage is 8-bit, so `feather` and `antialias` are not special cases; the
 two cheap shapes (nothing selected, a plain rectangle) stay as themselves and
 a mask that turns out to be a solid rectangle collapses back into one.
@@ -336,6 +352,68 @@ mask directly — drag to add, Alt-drag to rub out — which is how an automatic
 selection gets tidied up without starting again. It is the only tool that
 starts from an *empty* mask when nothing is selected, because a brush there is
 building a selection rather than cutting one out of the whole canvas.
+
+## Brush tips
+
+A stroke (`tools/stroke.rs`) is a run of dabs whose coverage combines by
+maximum into one mask for the whole gesture; the *tip*
+(`ToolSettings::tip`, a `brush::BrushTip`) is what one dab covers. Round
+is `Raster::stamp_soft_disc`; the others go through `Raster::max_cover_in`,
+which raises the coverage under a rectangle to whatever a closure says and
+never lowers it. Square and calligraphy (a nib a quarter as thick as it is
+long, at 45°) take the hardness as the round tip does; chalk is the disc
+with a grain keyed to the canvas coordinates by `dither::hash`, so passing
+twice over a point finds the same grain rather than filling it in; spatter
+throws a handful of dots per dab, seeded by the dab's position, so dots
+build up where the pointer lingers. Every tip stays inside the
+`size`-square about the dab, which is what the stroke's dirty rectangle
+assumes, and every tip is one pixel at size 1. The pencil treats any
+coverage as full, so it stays hard under chalk too. The page shows the
+hardness slider only when `brush_tip_has_hardness` says it means anything,
+and draws the brush ring as a square for the square tip.
+
+## Text
+
+The engine has no fonts. A text layer is a **smart object whose source the
+page drew from text** and which remembers the text (`SmartObject::text`, a
+`text::TextObject`): the font, size, bold, italic, alignment, colour, the
+string, and `origin` — where the block of text starts inside the source,
+the padding the page gave the rendering. `LayerKind::name` says `"text"`
+for such a layer, `Layer::edit_refusal` gives `EditRefusal::TextLayer`
+for its pixels, and everything that works on a smart object — free
+transform, the move tool, layer flips, canvas operations, Rasterize,
+`content_bounds`, the file — works on a text layer unchanged. Replace
+Contents drops the text, since the picture is no longer it.
+
+Typing is a session in `editor.rs` (`Session::Text`). A click with the text
+tool asks `text_layer_at` (the topmost visible text layer whose box holds
+the point) and then either `begin_text_edit(index)` — which makes the layer
+active and copies its style and colour into `ToolSettings::text` and the
+foreground colour, so the options bar shows what the layer is set in — or
+`begin_text_layer(screen)`, which adds an empty text layer at once (its
+source 0x0) so that the first rendering is anchored to the click: its
+left edge, middle or right edge by the alignment. On every keystroke, and
+on every change in the options bar or the foreground colour, the page draws
+the text on a canvas (`rasterizeText` in `app.js`: lines at a pitch of 1.2
+em, each baseline where a CSS line box of that pitch would put it, padding
+of half an em) and calls `preview_text(text, ox, oy, w, h, bytes)`;
+`Layer::set_text` keeps the block's anchored edge where it was
+(`TextObject::anchor`, in source pixels, applied *before* the placement so
+it holds through any transform the layer has had) and re-renders.
+`commit_session` records one step — "Add Text" or "Edit Text" — unless the
+text is blank or unchanged, in which case a new layer goes away again and
+an edited one is put back. Any layer operation, undo or new document
+cancels the session, as with every session, and the page notices through
+`is_editing_text` and takes its box away.
+
+The page's text box is a `textarea` over the canvas with invisible text
+(the canvas shows the engine's rendering) put through the layer's
+placement (`layer_placement`, the six numbers of a CSS `matrix()`) and the
+zoom, laid out in source pixels, so its caret sits on the letters at any
+zoom or rotation. Ctrl+Enter or a click elsewhere keeps the text; Escape
+throws it away; changing tool keeps it. The text tool is on `Y`: `T` is
+free transform, since Ctrl+T is the browser's new tab and Shift+T is not
+safe from it either.
 
 ## Sessions: adjustments and free transform
 
@@ -481,6 +559,12 @@ what the numbers mean.
 `editItems` and `selectItems` are shared between the menu bar and the
 context menus, so add to those rather than to one menu.
 
+**A brush tip.** A `BrushTip` variant in `brush.rs` with a name, a label
+and an arm in `stamp` that writes coverage through `Raster::max_cover_in`
+and stays inside the dab's square; say in `has_hardness` whether the slider
+applies. The options bar lists the tips from `brush_tip_names`, so nothing
+changes in the page.
+
 **Layer properties, filters, adjustments.** Add the operation to `Document`
 (pure, tested), wrap it in `Editor` through `structural(label, ..)` so it is
 an undo step with a name in the history panel, expose it in `wasm.rs`, bind
@@ -529,6 +613,7 @@ Every layer is one struct with a `kind`, and the tools do not know which:
   Because a smart object's placement may reach past the canvas,
   `Document::content_bounds` is the union of those placements with the
   canvas, and Image > Reveal All grows the canvas to it.
+* **Text layers** are smart objects with a `text` — see "Text".
 * **History.** A pixel edit snapshots the *surface* it touched
   (`Snapshot::LayerPixels` carries the `Target`); a layer flip or a smart
   transform snapshots the whole `Layer`; everything else the stack.
@@ -573,7 +658,10 @@ on the mark or on the name.
 ## Known gaps
 
 No lasso or polygon drawn by hand, though the mask machinery is there for
-one; no text, gradients or blur-type filters; the dither's error-diffusion
+one; no gradients or blur-type filters; text has one style per layer (no
+mixed runs), no wrapping to a box, no letter or line spacing controls, and
+is set in whatever the browser has for the font's name; the brush tips have
+no angle or spacing controls, and no tip of the user's own; the dither's error-diffusion
 patterns are a serial pass over every pixel, so as a live adjustment *layer*
 on a very large canvas they cost noticeably more per composite than the
 ordered ones; no layer

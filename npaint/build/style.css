@@ -294,6 +294,49 @@ button.opt {
 .viewport.tool-hand canvas {
   cursor: grab;
 }
+.viewport.tool-text canvas {
+  cursor: text;
+}
+
+/*
+ * The text tool's box: a textarea laid over the canvas, put through the
+ * layer's placement and the zoom with a CSS matrix so that it lays its
+ * lines out exactly where the engine draws them. Its own text is invisible
+ * — the canvas shows the live rendering — and only the caret and the
+ * selection highlight show through.
+ */
+.text-edit {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  box-sizing: content-box;
+  z-index: 3;
+}
+.text-edit::selection {
+  background: rgba(90, 150, 255, 0.35);
+}
+#opt-bold {
+  font-weight: 700;
+}
+#opt-italic {
+  font-style: italic;
+}
+#opt-font {
+  max-width: 11em;
+}
+#opt-font-size {
+  width: 5em;
+}
 .viewport.panning.dragging canvas {
   cursor: grabbing;
 }

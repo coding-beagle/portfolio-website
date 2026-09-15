@@ -5,9 +5,12 @@
 //! nothing else. A **smart object** keeps its source picture at its own size
 //! and a transform that places it in the document; `raster` is only what
 //! that renders to, and every transform starts again from the source, so
-//! scaling one down and back up loses nothing. An **adjustment** layer has no
-//! pixels of its own: it applies an [`Adjustment`] to everything below it at
-//! composite time, and its `raster` stays empty.
+//! scaling one down and back up loses nothing. A **text** layer is a smart
+//! object whose source was set from text by the page, and which remembers
+//! the text ([`SmartObject::text`]) so it can be set again. An
+//! **adjustment** layer has no pixels of its own: it applies an
+//! [`Adjustment`] to everything below it at composite time, and its
+//! `raster` stays empty.
 //!
 //! Any layer may carry a **mask**: a second, grey raster the same size as
 //! the document. White shows the layer, black hides it, and grey is in
@@ -23,6 +26,7 @@ use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
 use crate::mask::Mask;
 use crate::raster::Raster;
+use crate::text::TextObject;
 use crate::transform::Affine;
 
 /// Identifies a layer for as long as the document lives, independent of its
@@ -39,9 +43,36 @@ pub struct SmartObject {
     pub source: Raster,
     /// Source pixel coordinates → document coordinates.
     pub transform: Affine,
+    /// What the source was drawn from, when it was drawn from text: this
+    /// is what makes the layer a text layer. Replacing the contents drops
+    /// it, since the picture is no longer the text.
+    pub text: Option<TextObject>,
 }
 
 impl SmartObject {
+    /// A picture placed by `transform`, with no text behind it.
+    pub fn new(source: Raster, transform: Affine) -> SmartObject {
+        SmartObject { source, transform, text: None }
+    }
+
+    /// Sets the text again: a new source drawn by the page from `text`,
+    /// placed so that the block's anchored edge (see [`TextAlign::anchor`])
+    /// stays where the old one's was — left-aligned text grows to the
+    /// right, centred text grows both ways, right-aligned text grows to the
+    /// left — through whatever transform the layer has since been given.
+    ///
+    /// [`TextAlign::anchor`]: crate::text::TextAlign::anchor
+    pub fn set_text(&mut self, text: TextObject, source: Raster) {
+        if let Some(old) = &self.text {
+            let was = old.anchor(self.source.width());
+            let now = text.anchor(source.width());
+            // The shift is in source pixels, so it goes *before* the
+            // transform: `then` applies its argument first.
+            self.transform = self.transform.then(&Affine::translation(was.x - now.x, was.y - now.y));
+        }
+        self.text = Some(text);
+        self.source = source;
+    }
     /// The object as it lands on a document of the given size.
     pub fn render(&self, width: u32, height: u32) -> Raster {
         self.source.transformed_into(&self.transform, width, height)
@@ -77,7 +108,7 @@ impl SmartObject {
         let dx = ((f64::from(width) - sw * scale) / 2.0).round();
         let dy = ((f64::from(height) - sh * scale) / 2.0).round();
         let transform = Affine::translation(dx, dy).then(&Affine::scaling(scale, scale));
-        SmartObject { source, transform }
+        SmartObject::new(source, transform)
     }
 }
 
@@ -89,10 +120,13 @@ pub enum LayerKind {
 }
 
 impl LayerKind {
+    /// `"pixels"`, `"adjustment"`, `"smart"` or `"text"` — the last being
+    /// a smart object that remembers its text.
     pub fn name(&self) -> &'static str {
         match self {
             LayerKind::Pixels => "pixels",
             LayerKind::Adjustment(_) => "adjustment",
+            LayerKind::Smart(object) if object.text.is_some() => "text",
             LayerKind::Smart(_) => "smart",
         }
     }
@@ -114,6 +148,9 @@ pub enum EditRefusal {
     SmartObject,
     /// An adjustment layer has no pixels; only its mask can be painted.
     AdjustmentLayer,
+    /// A text layer's pixels are set from its text; edit that, rasterize it,
+    /// or paint on its mask.
+    TextLayer,
     /// The layer is locked: nothing on it may change until it is unlocked.
     Locked,
     /// The layer's transparency is locked, which painting respects but
@@ -126,6 +163,7 @@ impl std::fmt::Display for EditRefusal {
         f.write_str(match self {
             EditRefusal::SmartObject => "a smart object cannot be painted on directly: rasterize it, or paint on its mask",
             EditRefusal::AdjustmentLayer => "an adjustment layer has no pixels: paint on its mask instead",
+            EditRefusal::TextLayer => "a text layer cannot be painted on: edit it with the text tool, rasterize it, or paint on its mask",
             EditRefusal::Locked => "the layer is locked: unlock it first",
             EditRefusal::AlphaLocked => "the layer's transparency is locked: unlock it to move or transform it",
         })
@@ -244,8 +282,35 @@ impl Layer {
         matches!(self.kind, LayerKind::Adjustment(_))
     }
 
+    /// Whether the layer renders from a source at its own size — a smart
+    /// object, or a text layer, which is one.
     pub fn is_smart(&self) -> bool {
         matches!(self.kind, LayerKind::Smart(_))
+    }
+
+    pub fn is_text(&self) -> bool {
+        self.text().is_some()
+    }
+
+    /// The text behind a text layer.
+    pub fn text(&self) -> Option<&TextObject> {
+        match &self.kind {
+            LayerKind::Smart(object) => object.text.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Sets a text layer's text and the picture the page drew from it, and
+    /// re-renders; the layer takes the text's first line as its name. Does
+    /// nothing on any other kind of layer.
+    pub fn set_text(&mut self, text: TextObject, source: Raster, width: u32, height: u32) {
+        if let LayerKind::Smart(object) = &mut self.kind {
+            if object.text.is_some() {
+                self.name = text.layer_name();
+                object.set_text(text, source);
+                self.raster = object.render(width, height);
+            }
+        }
     }
 
     pub fn adjustment(&self) -> Option<Adjustment> {
@@ -293,8 +358,9 @@ impl Layer {
         if self.editing_mask() {
             return None;
         }
-        match self.kind {
+        match &self.kind {
             LayerKind::Pixels => None,
+            LayerKind::Smart(object) if object.text.is_some() => Some(EditRefusal::TextLayer),
             LayerKind::Smart(_) => Some(EditRefusal::SmartObject),
             LayerKind::Adjustment(_) => Some(EditRefusal::AdjustmentLayer),
         }
@@ -536,7 +602,7 @@ mod tests {
         assert_eq!(on_pixels.edit_refusal(), Some(EditRefusal::AdjustmentLayer));
         assert_eq!(on_pixels.raster.width(), 0, "and there are no pixels there anyway");
 
-        let object = SmartObject { source: Raster::filled(1, 1, RED), transform: Affine::IDENTITY };
+        let object = SmartObject::new(Raster::filled(1, 1, RED), Affine::IDENTITY);
         let mut smart = Layer::new_smart(LayerId(3), "photo", object, 2, 2);
         assert_eq!(smart.edit_refusal(), Some(EditRefusal::SmartObject));
         assert_eq!(smart.raster.get(0, 0), RED, "rendered on creation");
@@ -587,11 +653,101 @@ mod tests {
 
     #[test]
     fn a_smart_object_re_renders_from_its_source_when_moved() {
-        let object = SmartObject { source: Raster::filled(1, 1, RED), transform: Affine::IDENTITY };
+        let object = SmartObject::new(Raster::filled(1, 1, RED), Affine::IDENTITY);
         let mut layer = Layer::new_smart(LayerId(1), "p", object, 4, 4);
         layer.set_smart_transform(Affine::translation(2.0, 2.0), 4, 4);
         assert_eq!(layer.raster.get(2, 2), RED);
         assert_eq!(layer.raster.get(0, 0).a, 0);
         assert_eq!(layer.smart_object().unwrap().source.get(0, 0), RED, "the source is untouched");
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+    use crate::text::{TextAlign, TextObject, TextStyle};
+
+    const RED: Rgba = Rgba::opaque(255, 0, 0);
+
+    fn text(s: &str, align: TextAlign, pad: f64) -> TextObject {
+        let mut t = TextObject::empty(TextStyle { align, ..TextStyle::default() }, RED);
+        t.text = s.to_owned();
+        t.origin = Point::new(pad, pad);
+        t
+    }
+
+    fn text_layer(align: TextAlign) -> Layer {
+        // A 10-wide rendering with 1 of padding: an 8-wide block, placed
+        // with its block corner at (5, 5).
+        let mut object = SmartObject::new(Raster::filled(10, 4, RED), Affine::translation(4.0, 4.0));
+        object.text = Some(text("ab", align, 1.0));
+        Layer::new_smart(LayerId(1), "ab", object, 40, 40)
+    }
+
+    #[test]
+    fn a_text_layer_is_a_smart_object_that_says_so() {
+        let layer = text_layer(TextAlign::Left);
+        assert!(layer.is_smart() && layer.is_text());
+        assert_eq!(layer.kind.name(), "text");
+        assert_eq!(layer.edit_refusal(), Some(EditRefusal::TextLayer));
+        assert_eq!(layer.text().unwrap().text, "ab");
+        assert_eq!(layer.raster.get(5, 5), RED, "rendered where it was placed");
+        let mut plain = layer.clone();
+        plain.rasterize();
+        assert_eq!(plain.kind.name(), "pixels");
+        assert!(!plain.is_text());
+        assert_eq!(plain.raster.get(5, 5), RED);
+    }
+
+    #[test]
+    fn setting_the_text_again_keeps_the_aligned_edge_where_it_was() {
+        // The new rendering is 20 wide with 2 of padding: a 16-wide block.
+        let wider = |align| (text("abcd", align, 2.0), Raster::filled(20, 6, RED));
+
+        let mut left = text_layer(TextAlign::Left);
+        let (t, s) = wider(TextAlign::Left);
+        left.set_text(t, s, 40, 40);
+        assert_eq!(left.name, "abcd", "named after the text");
+        let block = |l: &Layer| {
+            let o = l.smart_object().unwrap();
+            let t = o.text.as_ref().unwrap();
+            let w = f64::from(o.source.width()) - 2.0 * t.origin.x;
+            let tl = o.transform.apply(t.origin);
+            (tl.x, tl.x + w)
+        };
+        assert_eq!(block(&left), (5.0, 21.0), "grew to the right");
+
+        let mut centre = text_layer(TextAlign::Center);
+        let (t, s) = wider(TextAlign::Center);
+        centre.set_text(t, s, 40, 40);
+        assert_eq!(block(&centre), (1.0, 17.0), "grew both ways about x = 9");
+
+        let mut right = text_layer(TextAlign::Right);
+        let (t, s) = wider(TextAlign::Right);
+        right.set_text(t, s, 40, 40);
+        assert_eq!(block(&right), (-3.0, 13.0), "grew to the left");
+        assert_eq!(right.raster.get(12, 6), RED, "and re-rendered");
+    }
+
+    #[test]
+    fn set_text_goes_through_the_placement_it_has_been_given() {
+        let mut layer = text_layer(TextAlign::Left);
+        // Doubled: the block corner (1,1) in source lands at 4 + 2 = 6.
+        layer.set_smart_transform(Affine::translation(4.0, 4.0).then(&Affine::scaling(2.0, 2.0)), 40, 40);
+        layer.set_text(text("abcd", TextAlign::Left, 2.0), Raster::filled(20, 6, RED), 40, 40);
+        let o = layer.smart_object().unwrap();
+        assert_eq!(o.transform.apply(Point::new(2.0, 2.0)), Point::new(6.0, 6.0), "the corner stays put");
+        assert_eq!(o.transform.scale(), (2.0, 2.0), "and so does the scale");
+    }
+
+    #[test]
+    fn set_text_does_nothing_to_other_layers() {
+        let mut pixels = Layer::new(LayerId(1), "a", Raster::new(2, 2));
+        pixels.set_text(text("x", TextAlign::Left, 0.0), Raster::filled(1, 1, RED), 2, 2);
+        assert!(!pixels.is_text());
+        assert_eq!(pixels.name, "a");
+        let mut smart = Layer::new_smart(LayerId(2), "p", SmartObject::new(Raster::new(1, 1), Affine::IDENTITY), 2, 2);
+        smart.set_text(text("x", TextAlign::Left, 0.0), Raster::filled(1, 1, RED), 2, 2);
+        assert!(!smart.is_text(), "a plain smart object does not become text by accident");
     }
 }

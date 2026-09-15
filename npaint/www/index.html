@@ -30,6 +30,10 @@
           <input id="opt-size" type="range" min="1" max="200" value="8" />
           <input id="opt-size-num" type="number" min="1" max="500" value="8" />
         </label>
+        <label class="opt" id="opt-tip-wrap" title="The shape of the brush's dab">
+          <span>Tip</span>
+          <select id="opt-tip"></select>
+        </label>
         <label class="opt" id="opt-hardness-wrap" title="How far out from the centre the brush is solid before it fades">
           <span>Hardness</span>
           <input id="opt-hardness" type="range" min="0" max="100" value="100" />
@@ -74,6 +78,27 @@
           <input type="checkbox" id="opt-scrubby" />
           Scrubby zoom
         </label>
+        <label class="opt" id="opt-font-wrap" title="The typeface. What the browser has; a name it lacks falls back to something like it">
+          <span>Font</span>
+          <select id="opt-font"></select>
+        </label>
+        <label class="opt" id="opt-font-size-wrap" title="The size of the type, in pixels">
+          <span>Size</span>
+          <input id="opt-font-size" type="number" min="1" max="2000" step="1" value="48" />
+        </label>
+        <div class="opt seg" id="opt-text-style-wrap" role="group" aria-label="Type style">
+          <button id="opt-bold" aria-pressed="false" title="Bold">B</button>
+          <button id="opt-italic" aria-pressed="false" title="Italic">I</button>
+        </div>
+        <div class="opt seg" id="opt-align-wrap" role="radiogroup" aria-label="Alignment">
+          <button id="opt-align-left" class="seg-on" aria-pressed="true" title="Align left: the text grows to the right of the click">⫷</button>
+          <button id="opt-align-center" aria-pressed="false" title="Centre: the text grows both ways about the click">☰</button>
+          <button id="opt-align-right" aria-pressed="false" title="Align right: the text grows to the left of the click">⫸</button>
+        </div>
+        <div class="opt" id="text-bar" hidden>
+          <button id="text-cancel" title="Throw the typing away (Esc)">Cancel</button>
+          <button id="text-apply" class="primary" title="Keep the text (Ctrl+Enter, or click elsewhere)">Apply</button>
+        </div>
         <div class="opt" id="crop-bar" hidden>
           <button id="crop-cancel" title="Clear the crop box (Esc)">Cancel</button>
           <button id="crop-apply" class="primary" title="Crop to the box (Enter)">Crop</button>

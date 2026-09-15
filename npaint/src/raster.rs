@@ -410,6 +410,23 @@ impl Raster {
         });
     }
 
+    /// Raises the coverage inside `rect` to whatever `cover` says for each
+    /// pixel, never lowering what is there — the general form of
+    /// [`Raster::stamp_soft_disc`], for the brush tips that are not discs
+    /// (see [`crate::brush`]). Only the alpha is meaningful in the result.
+    pub fn max_cover_in(&mut self, rect: Rect, clip: &Rect, mut cover: impl FnMut(i32, i32) -> u8) {
+        self.for_each_in(rect, clip, |r, x, y| {
+            let c = cover(x, y);
+            if c == 0 {
+                return;
+            }
+            let i = y as usize * r.width as usize + x as usize;
+            if c > r.pixels[i].a {
+                r.pixels[i] = Rgba::new(255, 255, 255, c);
+            }
+        });
+    }
+
     /// Like [`Raster::stamp_disc`], but erasing instead of painting.
     pub fn erase_disc(&mut self, center: Point, diameter: u32, strength: f32, clip: &Rect) {
         self.stamp(center, diameter, clip, |r, x, y| r.erase(x, y, strength, clip));

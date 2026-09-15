@@ -407,6 +407,12 @@ impl TransformSession {
             && local.y <= f64::from(b.bottom())
     }
 
+    /// Begins a move from `p`, wherever `p` is — the move tool grabs a smart
+    /// object anywhere, handles or no handles.
+    pub fn begin_move(&mut self, p: Point) {
+        self.drag = Some(Drag::Move { start: p, origin: self.matrix });
+    }
+
     /// Begins a drag. Returns whether anything was hit.
     pub fn pointer_down(&mut self, p: Point, tolerance: f64) -> bool {
         self.drag = match self.hit(p, tolerance) {

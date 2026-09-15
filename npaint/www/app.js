@@ -31,6 +31,7 @@ const ICON = {
   line: '<path d="M5 19L19 5"/>',
   rectangle: '<rect x="4" y="6" width="16" height="12"/>',
   ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
+  text: '<path d="M5 7V4h14v3M12 4v16M9 20h6"/>',
   zoom: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20M8 10.5h5M10.5 8v5"/>',
   hand: '<path d="M8 12V6a1.5 1.5 0 013 0v5V5a1.5 1.5 0 013 0v6V7a1.5 1.5 0 013 0v7.5a5.5 5.5 0 01-11 0V10a1.5 1.5 0 013 0z"/>',
 };
@@ -97,6 +98,12 @@ const TOOLS = [
   { name: "line", label: "Line", key: "L", hint: "Drag to draw a line. Shift snaps to 45°." },
   { name: "rectangle", label: "Rectangle", key: "U", hint: "Drag to draw. Shift for a square, Alt to draw from the centre." },
   { name: "ellipse", label: "Ellipse", key: "O", hint: "Drag to draw. Shift for a circle, Alt to draw from the centre." },
+  {
+    name: "text",
+    label: "Text",
+    key: "Y",
+    hint: "Click to start typing, or click a text layer to edit it. Ctrl+Enter or a click elsewhere keeps it; Esc throws it away.",
+  },
   {
     name: "zoom",
     label: "Zoom",
@@ -329,6 +336,13 @@ function step(now) {
     antsDirty = false;
   }
   const transforming = np.is_transforming();
+  // The text box follows the canvas; and a layer operation, an undo or a
+  // new document ends the session in the engine, after which there is
+  // nothing for the box to type into.
+  if (textEdit) {
+    if (!np.is_editing_text()) closeTextBox();
+    else if (needsDraw) placeTextBox();
+  }
   // While a transform previews, the marquee still sits where the pixels used
   // to be. The transform box is what is true, so show only that.
   const showing = transforming ? [] : ants;
@@ -700,7 +714,13 @@ function drawBrushRing(zoom) {
   if (radius < 1.5) return;
   vctx.save();
   vctx.beginPath();
-  vctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  // The ring is the dab's outline: a square for the square tip, the disc
+  // every other tip fits inside otherwise.
+  if (BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine" && np.brush_tip() === "square") {
+    vctx.rect(at.x - radius, at.y - radius, radius * 2, radius * 2);
+  } else {
+    vctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
+  }
   vctx.lineWidth = 3;
   vctx.strokeStyle = "rgba(0,0,0,0.45)";
   vctx.stroke();
@@ -953,6 +973,7 @@ const TOOL_GROUPS = [
   ["move"],
   ["brush", "pencil", "eraser", "bucket", "eyedropper"],
   ["line", "rectangle", "ellipse"],
+  ["text"],
   ["zoom", "hand"],
 ];
 
@@ -982,6 +1003,7 @@ function buildToolbox() {
 
 function setTool(name) {
   endSizing(false);
+  commitText();
   tool = name;
   np.set_tool(name);
   for (const b of document.querySelectorAll(".tool")) {
@@ -1003,7 +1025,11 @@ function zoomHint() {
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
   const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket";
-  const hasHardness = tool === "brush" || tool === "eraser";
+  const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser";
+  // The pencil is hard whatever the slider says, and chalk and spatter
+  // have their grain and their dots in place of a soft rim.
+  const hasHardness = (tool === "brush" || tool === "eraser") && np.brush_tip_has_hardness();
+  const isText = tool === "text";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
   const subject = tool === "subject";
   const marquee = tool === "select" || tool === "ellipse-select" || tool === "crop";
@@ -1015,10 +1041,25 @@ function syncOptions() {
     tool === "move" ||
     tool === "wand" ||
     tool === "bucket" ||
-    tool === "eyedropper";
+    tool === "eyedropper" ||
+    isText;
   const usesSize = !viewTool && !(isShape && np.fill());
   $("opt-opacity-wrap").hidden = !hasOpacity;
+  $("opt-tip-wrap").hidden = !hasTip;
+  $("opt-tip").value = np.brush_tip();
   $("opt-hardness-wrap").hidden = !hasHardness;
+  $("opt-font-wrap").hidden = !isText;
+  $("opt-font-size-wrap").hidden = !isText;
+  $("opt-text-style-wrap").hidden = !isText;
+  $("opt-align-wrap").hidden = !isText;
+  $("text-bar").hidden = !textEdit;
+  if (isText) {
+    $("opt-font").value = np.text_font();
+    if (document.activeElement !== $("opt-font-size")) $("opt-font-size").value = np.text_size();
+    setPressed($("opt-bold"), np.text_bold());
+    setPressed($("opt-italic"), np.text_italic());
+    for (const a of ["left", "center", "right"]) setPressed($(`opt-align-${a}`), np.text_align() === a);
+  }
   $("opt-hardness").value = Math.round(np.hardness() * 100);
   $("opt-hardness-out").value = `${Math.round(np.hardness() * 100)}%`;
   $("opt-fill-wrap").hidden = !isShape;
@@ -1047,17 +1088,110 @@ function syncOptions() {
 }
 
 function toggleSeg(onEl, offEl, first) {
-  onEl.classList.toggle("seg-on", first);
-  onEl.setAttribute("aria-pressed", String(first));
-  offEl.classList.toggle("seg-on", !first);
-  offEl.setAttribute("aria-pressed", String(!first));
+  setPressed(onEl, first);
+  setPressed(offEl, !first);
 }
+
+function setPressed(el, on) {
+  el.classList.toggle("seg-on", on);
+  el.setAttribute("aria-pressed", String(on));
+}
+
+/**
+ * The typefaces the text tool offers. The generic families are always
+ * there; the named ones are the common web-safe set, and one the machine
+ * lacks falls back to the family the browser thinks nearest. The file keeps
+ * the name, so a document set in a face another machine lacks comes back
+ * in the fallback there and in the face itself here.
+ */
+const FONTS = [
+  "sans-serif",
+  "serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "Arial",
+  "Helvetica",
+  "Verdana",
+  "Tahoma",
+  "Trebuchet MS",
+  "Georgia",
+  "Times New Roman",
+  "Garamond",
+  "Palatino",
+  "Courier New",
+  "Impact",
+  "Comic Sans MS",
+  "Brush Script MT",
+];
 
 function bindOptions() {
   const size = $("opt-size");
   const sizeNum = $("opt-size-num");
   size.addEventListener("input", () => setSize(Number(size.value)));
   sizeNum.addEventListener("change", () => setSize(Number(sizeNum.value) || 1));
+
+  const tip = $("opt-tip");
+  const tipNames = NPaint.brush_tip_names();
+  const tipLabels = NPaint.brush_tip_labels();
+  tipNames.forEach((name, i) => {
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = tipLabels[i];
+    tip.appendChild(o);
+  });
+  tip.addEventListener("change", () => {
+    np.set_brush_tip(tip.value);
+    syncOptions();
+  });
+
+  // The text tool's type settings. A change while a text layer is being
+  // typed into sets that layer again at once.
+  const font = $("opt-font");
+  for (const family of FONTS) {
+    const o = document.createElement("option");
+    o.value = family;
+    o.textContent = family;
+    o.style.fontFamily = family;
+    font.appendChild(o);
+  }
+  font.addEventListener("change", () => {
+    np.set_text_font(font.value);
+    previewText();
+  });
+  const fontSize = $("opt-font-size");
+  const applyFontSize = () => {
+    np.set_text_size(Number(fontSize.value) || np.text_size());
+    fontSize.value = np.text_size();
+    previewText();
+  };
+  fontSize.addEventListener("change", applyFontSize);
+  fontSize.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      applyFontSize();
+      fontSize.blur();
+    }
+  });
+  $("opt-bold").addEventListener("click", () => {
+    np.set_text_bold(!np.text_bold());
+    syncOptions();
+    previewText();
+  });
+  $("opt-italic").addEventListener("click", () => {
+    np.set_text_italic(!np.text_italic());
+    syncOptions();
+    previewText();
+  });
+  for (const a of ["left", "center", "right"]) {
+    $(`opt-align-${a}`).addEventListener("click", () => {
+      np.set_text_align(a);
+      syncOptions();
+      previewText();
+    });
+  }
+  $("text-apply").addEventListener("click", commitText);
+  $("text-cancel").addEventListener("click", cancelText);
 
   const opacity = $("opt-opacity");
   opacity.addEventListener("input", () => {
@@ -1228,6 +1362,8 @@ function openPicker(target) {
 function syncSwatches() {
   $("swatch-fg").style.setProperty("--swatch", np.color());
   $("swatch-bg").style.setProperty("--swatch", np.background());
+  // Text being typed is in the foreground colour: a new colour sets it again.
+  if (textEdit && textEdit.color !== np.color()) previewText();
 }
 
 function swapColors() {
@@ -1324,6 +1460,11 @@ function layerItems(index) {
       enabled: () => layerKind(i()) === "adjustment",
       action: () => withActive(i(), () => editAdjustmentLayer(i())),
     },
+    {
+      label: "Edit Text…",
+      enabled: () => layerKind(i()) === "text",
+      action: () => editTextLayer(i()),
+    },
     { label: "Layer Mask", submenu: maskItems(i) },
     { sep: true },
     {
@@ -1333,7 +1474,7 @@ function layerItems(index) {
     },
     {
       label: "Rasterize Layer",
-      enabled: () => layerKind(i()) === "smart",
+      enabled: () => layerKind(i()) === "smart" || layerKind(i()) === "text",
       action: () => act(() => np.rasterize_layer(i())),
     },
     {
@@ -1915,6 +2056,181 @@ function canvasContextItems() {
 
 function beginTransform() {
   act(() => np.begin_transform());
+}
+
+// ---- Text -------------------------------------------------------------------------
+//
+// The engine has no fonts, so the page sets the type: it draws the text on
+// a canvas in the chosen face and hands the pixels to the engine, which
+// keeps them as a text layer (a smart object that remembers its text). While
+// a layer is being typed into, a textarea sits over the canvas, put through
+// the layer's placement and the zoom so its caret lands on the letters; its
+// own text is invisible, and the canvas shows what the engine has.
+
+/** The text layer being typed into, and the box over it. */
+let textEdit = null;
+
+/** Line pitch as a multiple of the type size, in the box and on the canvas alike. */
+const TEXT_LINE = 1.2;
+/** The most a rendering may measure on a side, which is what browsers allow of a canvas. */
+const MAX_TEXT_CANVAS = 8192;
+const textCanvas = document.createElement("canvas");
+const tctx = textCanvas.getContext("2d", { willReadFrequently: true });
+
+function textFontCss() {
+  return `${np.text_italic() ? "italic " : ""}${np.text_bold() ? "bold " : ""}${np.text_size()}px ${np.text_font()}`;
+}
+
+/** How far across the block the anchored edge is: 0 left, ½ centre, 1 right. */
+function textAnchor() {
+  return { left: 0, center: 0.5, right: 1 }[np.text_align()] ?? 0;
+}
+
+/**
+ * Lines, their widths, the line pitch and the font's ascent and descent for
+ * `text` in the current style. The box and the rendering both come from
+ * this, so they agree.
+ */
+function measureText(text) {
+  const size = np.text_size();
+  tctx.font = textFontCss();
+  const lines = text.split("\n");
+  const widths = lines.map((l) => tctx.measureText(l).width);
+  const m = tctx.measureText("Hg");
+  const asc = m.fontBoundingBoxAscent ?? size * 0.8;
+  const desc = m.fontBoundingBoxDescent ?? size * 0.25;
+  return { lines, widths, width: Math.ceil(Math.max(0, ...widths)), pitch: size * TEXT_LINE, asc, desc, size };
+}
+
+/**
+ * Draws `text` in the current style and foreground colour, with padding
+ * round the block for overhangs and antialiasing, and returns the pixels
+ * with where the block begins in them.
+ */
+function rasterizeText(text) {
+  const m = measureText(text);
+  const pad = Math.ceil(m.size * 0.5);
+  const w = Math.max(1, Math.min(MAX_TEXT_CANVAS, m.width + 2 * pad));
+  const h = Math.max(1, Math.min(MAX_TEXT_CANVAS, Math.ceil(m.lines.length * m.pitch) + 2 * pad));
+  textCanvas.width = w;
+  textCanvas.height = h;
+  tctx.font = textFontCss();
+  tctx.fillStyle = np.color();
+  tctx.textBaseline = "alphabetic";
+  const k = textAnchor();
+  // Each line's baseline sits where a CSS line box of the same pitch puts
+  // it: half the leading, then the ascent.
+  m.lines.forEach((line, i) => {
+    const x = pad + (m.width - m.widths[i]) * k;
+    const y = pad + i * m.pitch + (m.pitch - (m.asc + m.desc)) / 2 + m.asc;
+    tctx.fillText(line, x, y);
+  });
+  const bytes = tctx.getImageData(0, 0, w, h).data;
+  return { w, h, pad, bytes: new Uint8Array(bytes.buffer) };
+}
+
+/** A click with the text tool: edit the text layer there, or start one. */
+function beginTextAt(x, y) {
+  const hit = np.text_layer_at(x, y);
+  act(() => {
+    if (hit >= 0) np.begin_text_edit(hit);
+    else np.begin_text_layer(x, y);
+  });
+  if (np.is_editing_text()) openTextBox(active());
+}
+
+/** Edits a text layer from the layers panel or the menu. */
+function editTextLayer(index) {
+  setTool("text");
+  act(() => np.begin_text_edit(index));
+  if (np.is_editing_text()) openTextBox(index);
+}
+
+function openTextBox(index) {
+  const box = document.createElement("textarea");
+  box.className = "text-edit";
+  box.spellcheck = false;
+  box.wrap = "off";
+  box.setAttribute("aria-label", "Text");
+  box.value = np.layer_text(index);
+  box.addEventListener("input", previewText);
+  box.addEventListener("keydown", (e) => {
+    // The box's keys are its own: no tool shortcuts while typing.
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelText();
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      commitText();
+    }
+  });
+  viewport.appendChild(box);
+  textEdit = { index, box, color: np.color() };
+  placeTextBox();
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  // The layer's own style is the options bar's now.
+  syncOptions();
+}
+
+/** Sets the layer being typed into from the box, in the current style. */
+function previewText() {
+  if (!textEdit) return;
+  const text = textEdit.box.value;
+  const { w, h, pad, bytes } = rasterizeText(text);
+  textEdit.color = np.color();
+  act(() => np.preview_text(text, pad, pad, w, h, bytes));
+  placeTextBox();
+}
+
+/**
+ * Puts the box where the engine draws the text: the layer's placement
+ * (source pixels to document pixels) and then the zoom, as one CSS matrix,
+ * with the box laid out in source pixels inside it.
+ */
+function placeTextBox() {
+  if (!textEdit) return;
+  const { box, index } = textEdit;
+  const m = np.layer_placement(index);
+  if (m.length !== 6) return;
+  const [ox, oy] = np.layer_text_origin(index);
+  const zoom = np.zoom();
+  const t = measureText(box.value);
+  // Room for the caret when there is nothing typed yet, widened about the
+  // anchored edge so the caret sits where the text will start.
+  const width = Math.max(t.width, t.size);
+  const left = ox - (width - t.width) * textAnchor();
+  box.style.font = textFontCss();
+  box.style.lineHeight = `${t.pitch}px`;
+  box.style.textAlign = np.text_align();
+  box.style.width = `${width + 2}px`;
+  box.style.height = `${t.lines.length * t.pitch}px`;
+  box.style.caretColor = np.color();
+  const [a, b, c, d, e, f] = m;
+  const px = np.pan_x();
+  const py = np.pan_y();
+  box.style.transform = `matrix(${a * zoom}, ${b * zoom}, ${c * zoom}, ${d * zoom}, ${e * zoom + px}, ${f * zoom + py}) translate(${left}px, ${oy}px)`;
+}
+
+/** Keeps the text. Nothing typed takes a new layer away again. */
+function commitText() {
+  if (!textEdit) return;
+  act(() => np.commit_session());
+  closeTextBox();
+}
+
+function cancelText() {
+  if (!textEdit) return;
+  act(() => np.cancel_session());
+  closeTextBox();
+}
+
+function closeTextBox() {
+  if (!textEdit) return;
+  textEdit.box.remove();
+  textEdit = null;
+  syncOptions();
 }
 
 // ---- Dialogs --------------------------------------------------------------------
@@ -2659,6 +2975,7 @@ const THUMB_H = 30;
 const KIND_BADGE = {
   adjustment: { glyph: "◑", title: "Adjustment layer: double-click to change its settings" },
   smart: { glyph: "▣", title: "Smart object: transforms from its original pixels" },
+  text: { glyph: "T", title: "Text layer: double-click to edit the text" },
 };
 
 /**
@@ -2762,6 +3079,11 @@ function renderLayers() {
         e.stopPropagation();
         withActive(i, () => editAdjustmentLayer(i));
       });
+    } else if (kind === "text") {
+      pixels.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        editTextLayer(i);
+      });
     }
 
     const thumbs = document.createElement("span");
@@ -2807,10 +3129,12 @@ function renderLayers() {
       lock.title = np.layer_locked(i) ? "Locked" : "Transparent pixels locked";
       name.appendChild(lock);
     }
-    name.title = kind === "adjustment" ? "Double-click to change the adjustment" : "Double-click to rename";
+    name.title =
+      kind === "adjustment" ? "Double-click to change the adjustment" : kind === "text" ? "Double-click to edit the text" : "Double-click to rename";
     name.addEventListener("dblclick", (e) => {
       e.stopPropagation();
       if (kind === "adjustment") withActive(i, () => editAdjustmentLayer(i));
+      else if (kind === "text") editTextLayer(i);
       else beginRename(name, i);
     });
 
@@ -3044,6 +3368,15 @@ function bindPointer() {
       e.preventDefault();
       return;
     }
+    if (textEdit) {
+      // A click away from the text keeps it. With the text tool that is
+      // all the click does; with any other tool it goes on to do its work.
+      commitText();
+      if (tool === "text" && e.button === 0) {
+        e.preventDefault();
+        return;
+      }
+    }
     // Space with Ctrl or Alt is a temporary zoom tool.
     if (spaceHeld && e.button === 0 && (e.ctrlKey || e.metaKey || e.altKey)) {
       if (e.altKey) np.zoom_out_about(x, y);
@@ -3074,6 +3407,10 @@ function bindPointer() {
     } else if (wantsPan) {
       pan = { x, y };
       viewport.classList.add("panning", "dragging");
+    } else if (e.button === 0 && tool === "text") {
+      beginTextAt(x, y);
+      e.preventDefault();
+      return;
     } else if (e.button === 0) {
       // With the zoom tool, the options-bar "zoom out" acts like Alt.
       const alt = e.altKey || (tool === "zoom" && zoomOutMode);
@@ -3327,7 +3664,8 @@ function bindKeyboard() {
         return;
       case "t":
         // Ctrl+T is the browser's new-tab shortcut and never reaches the
-        // page, so plain T is the one that actually works.
+        // page, so plain T is the one that actually works. The text tool
+        // is on Y, the key beside it, for the same reason.
         beginTransform();
         return;
       case "x":

@@ -6,10 +6,11 @@
 
 use crate::adjust::Adjustment;
 use crate::color::Rgba;
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect};
 use crate::layer::{mask_raster, BlendMode, Layer, LayerId, LayerKind, SmartObject, Target};
 use crate::mask::Mask;
 use crate::raster::Raster;
+use crate::text::TextObject;
 use crate::transform::Affine;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,7 +105,7 @@ impl Document {
             next_id: 1,
         };
         let id = doc.take_id();
-        let object = SmartObject { source: raster, transform: Affine::IDENTITY };
+        let object = SmartObject::new(raster, Affine::IDENTITY);
         let (w, h) = (doc.width, doc.height);
         doc.layers.push(Layer::new_smart(id, name, object, w, h));
         doc
@@ -287,8 +288,46 @@ impl Document {
         let bounds = layer.raster.content_bounds().unwrap_or(Rect::new(0, 0, 1, 1));
         let source = layer.raster.resized(bounds.w as u32, bounds.h as u32, -bounds.x, -bounds.y);
         let transform = Affine::translation(f64::from(bounds.x), f64::from(bounds.y));
-        layer.kind = LayerKind::Smart(SmartObject { source, transform });
+        layer.kind = LayerKind::Smart(SmartObject::new(source, transform));
         Ok(())
+    }
+
+    /// A new text layer above the active one, holding `text` as the page
+    /// has drawn it (`source`), placed so that the block's top-left corner —
+    /// [`TextObject::origin`] in the source — lands on `at`. Returns its
+    /// index.
+    pub fn add_text_layer(&mut self, text: TextObject, source: Raster, at: Point) -> usize {
+        let id = self.take_id();
+        let name = text.layer_name();
+        let transform = Affine::translation(at.x - text.origin.x, at.y - text.origin.y);
+        let mut object = SmartObject::new(source, transform);
+        object.text = Some(text);
+        self.insert_above_active(Layer::new_smart(id, name, object, self.width, self.height))
+    }
+
+    /// Sets a text layer's text again — see [`Layer::set_text`].
+    pub fn set_text(&mut self, index: usize, text: TextObject, source: Raster) -> Result<(), DocumentError> {
+        let (width, height) = (self.width, self.height);
+        let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
+        if !layer.is_text() {
+            return Err(DocumentError::WrongKind);
+        }
+        layer.set_text(text, source, width, height);
+        Ok(())
+    }
+
+    /// The topmost visible text layer whose box holds the document point
+    /// `at` — what a click with the text tool edits, if anything. The box
+    /// rather than the glyphs, so a click between two letters counts.
+    pub fn text_layer_at(&self, at: Point) -> Option<usize> {
+        let (x, y) = (at.x.floor() as i32, at.y.floor() as i32);
+        self.layers
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, l)| l.visible && l.is_text())
+            .find(|(_, l)| l.smart_object().is_some_and(|o| o.extent().contains(x, y)))
+            .map(|(i, _)| i)
     }
 
     /// Makes a smart object ordinary pixels again: what it renders to now.
@@ -303,6 +342,7 @@ impl Document {
 
     /// Swaps a smart object's picture for another, keeping the box it
     /// occupies: the new source is scaled to fill the old one's footprint.
+    /// A text layer stops being one: the picture is no longer its text.
     pub fn replace_smart_contents(&mut self, index: usize, source: Raster) -> Result<(), DocumentError> {
         let (width, height) = (self.width, self.height);
         let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
@@ -313,6 +353,7 @@ impl Document {
         let sy = f64::from(object.source.height().max(1)) / f64::from(source.height().max(1));
         object.transform = object.transform.then(&Affine::scaling(sx, sy));
         object.source = source;
+        object.text = None;
         layer.raster = object.render(width, height);
         Ok(())
     }
@@ -1169,5 +1210,73 @@ mod tests {
         doc.active_layer_mut().visible = false;
         doc.merge_down(1).unwrap();
         assert_eq!(doc.composite().get(0, 0), Rgba::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+    use crate::text::{TextAlign, TextStyle};
+
+    const RED: Rgba = Rgba::opaque(255, 0, 0);
+
+    fn hello() -> TextObject {
+        let mut t = TextObject::empty(TextStyle::default(), RED);
+        t.text = "Hello".to_owned();
+        t.origin = Point::new(1.0, 1.0);
+        t
+    }
+
+    #[test]
+    fn a_text_layer_is_added_above_the_active_one_at_the_click() {
+        let mut doc = Document::new(20, 20, Rgba::WHITE);
+        // A 6x4 rendering with 1 of padding: the block is 4x2 at (10, 5).
+        let index = doc.add_text_layer(hello(), Raster::filled(6, 4, RED), Point::new(10.0, 5.0));
+        assert_eq!(index, 1);
+        assert_eq!(doc.active_index(), 1);
+        let layer = doc.active_layer();
+        assert_eq!(layer.kind.name(), "text");
+        assert_eq!(layer.name, "Hello");
+        assert_eq!(layer.raster.get(9, 4), RED, "the padding lands a pixel up and left of the click");
+        assert_eq!(layer.raster.get(14, 7), RED);
+        assert_eq!(layer.raster.get(15, 8).a, 0);
+
+        assert_eq!(doc.text_layer_at(Point::new(12.0, 6.0)), Some(1));
+        assert_eq!(doc.text_layer_at(Point::new(9.5, 4.5)), Some(1), "anywhere in its box, padding included");
+        assert_eq!(doc.text_layer_at(Point::new(2.0, 2.0)), None);
+        doc.layer_mut(1).unwrap().visible = false;
+        assert_eq!(doc.text_layer_at(Point::new(12.0, 6.0)), None, "a hidden one is not clickable");
+    }
+
+    #[test]
+    fn the_topmost_text_layer_under_the_point_wins() {
+        let mut doc = Document::new(20, 20, Rgba::WHITE);
+        doc.add_text_layer(hello(), Raster::filled(6, 4, RED), Point::new(5.0, 5.0));
+        doc.add_text_layer(hello(), Raster::filled(6, 4, RED), Point::new(7.0, 5.0));
+        assert_eq!(doc.text_layer_at(Point::new(8.0, 6.0)), Some(2));
+        assert_eq!(doc.text_layer_at(Point::new(4.5, 6.0)), Some(1));
+        doc.move_layer(2, 1).unwrap();
+        assert_eq!(doc.text_layer_at(Point::new(8.0, 6.0)), Some(2), "order in the stack, not age");
+    }
+
+    #[test]
+    fn setting_the_text_renames_and_re_renders_and_only_works_on_text() {
+        let mut doc = Document::new(20, 20, Rgba::WHITE);
+        let index = doc.add_text_layer(hello(), Raster::filled(6, 4, RED), Point::new(10.0, 5.0));
+        let mut t = hello();
+        t.text = "Hi".to_owned();
+        t.style.align = TextAlign::Right;
+        doc.set_text(index, t, Raster::filled(4, 4, Rgba::BLACK)).unwrap();
+        let layer = doc.layer(index).unwrap();
+        assert_eq!(layer.name, "Hi");
+        assert_eq!(layer.raster.get(10, 5), Rgba::BLACK, "narrower, left edge kept: the old text was left-aligned");
+        assert_eq!(layer.raster.get(13, 7).a, 0);
+        assert_eq!(doc.set_text(0, hello(), Raster::new(1, 1)), Err(DocumentError::WrongKind));
+        assert_eq!(doc.set_text(9, hello(), Raster::new(1, 1)), Err(DocumentError::NoSuchLayer));
+
+        doc.replace_smart_contents(index, Raster::filled(2, 2, RED)).unwrap();
+        assert_eq!(doc.layer(index).unwrap().kind.name(), "smart", "replaced contents are no longer text");
+        doc.rasterize_layer(index).unwrap();
+        assert_eq!(doc.layer(index).unwrap().kind.name(), "pixels");
     }
 }

@@ -16,6 +16,7 @@ mod select;
 mod shape;
 mod stroke;
 mod subjectbox;
+mod text;
 mod view;
 mod wand;
 
@@ -26,10 +27,12 @@ pub use select::{MarqueeShape, MarqueeTool};
 pub use shape::{Shape, ShapeTool};
 pub use stroke::{StrokeMode, StrokeTool};
 pub use subjectbox::SubjectBoxTool;
+pub use text::TextTool;
 pub use view::{HandTool, ZoomTool};
 pub use wand::{MagicWandTool, QuickSelectTool, RefineTool};
 
 use crate::autoselect::SampleMode;
+use crate::brush::BrushTip;
 use crate::color::Rgba;
 use crate::document::Document;
 use crate::geometry::{Point, Rect};
@@ -57,6 +60,7 @@ pub enum ToolKind {
     Line,
     Rectangle,
     Ellipse,
+    Text,
     Zoom,
     Hand,
 }
@@ -79,6 +83,7 @@ impl ToolKind {
         ToolKind::Line,
         ToolKind::Rectangle,
         ToolKind::Ellipse,
+        ToolKind::Text,
         ToolKind::Zoom,
         ToolKind::Hand,
     ];
@@ -101,6 +106,7 @@ impl ToolKind {
             ToolKind::Line => "line",
             ToolKind::Rectangle => "rectangle",
             ToolKind::Ellipse => "ellipse",
+            ToolKind::Text => "text",
             ToolKind::Zoom => "zoom",
             ToolKind::Hand => "hand",
         }
@@ -123,13 +129,17 @@ impl ToolKind {
             ToolKind::Line => "Line",
             ToolKind::Rectangle => "Rectangle",
             ToolKind::Ellipse => "Ellipse",
+            ToolKind::Text => "Text",
             ToolKind::Zoom => "Zoom",
             ToolKind::Hand => "Hand",
         }
     }
 
     /// Whether the tool changes the document at all. The others only move
-    /// the view or the selection, and may be used on a hidden layer.
+    /// the view or the selection, and may be used on a hidden layer. The
+    /// text tool is among the others because its gesture is not a pointer
+    /// gesture at all: a click opens a text session (see `editor.rs`), and
+    /// the page drives that.
     pub fn edits_pixels(self) -> bool {
         !matches!(
             self,
@@ -141,6 +151,7 @@ impl ToolKind {
                 | ToolKind::SubjectBox
                 | ToolKind::Refine
                 | ToolKind::Eyedropper
+                | ToolKind::Text
                 | ToolKind::Zoom
                 | ToolKind::Hand
         )
@@ -183,6 +194,7 @@ impl ToolKind {
             ToolKind::Line => Box::new(ShapeTool::new(Shape::Line)),
             ToolKind::Rectangle => Box::new(ShapeTool::new(Shape::Rectangle)),
             ToolKind::Ellipse => Box::new(ShapeTool::new(Shape::Ellipse)),
+            ToolKind::Text => Box::new(TextTool),
         }
     }
 }
@@ -196,6 +208,8 @@ pub struct ToolSettings {
     pub background: Rgba,
     /// Brush diameter and line/outline thickness, in document pixels.
     pub size: u32,
+    /// The shape of the brush's dab. The brush, pencil and eraser share it.
+    pub tip: BrushTip,
     /// Brush opacity, `0.0..=1.0`. The pencil ignores it.
     pub opacity: f32,
     /// How far out from the centre a brush dab is solid before it fades,
@@ -221,6 +235,9 @@ pub struct ToolSettings {
     /// The box the subject tool has drawn out, in document pixels, waiting
     /// for the page to run the model over it.
     pub subject_box: Option<Rect>,
+    /// The type settings for the text tool, and for the text layer being
+    /// edited, which takes them over while it is.
+    pub text: crate::text::TextStyle,
 }
 
 impl Default for ToolSettings {
@@ -229,6 +246,7 @@ impl Default for ToolSettings {
             color: Rgba::BLACK,
             background: Rgba::WHITE,
             size: 8,
+            tip: BrushTip::Round,
             opacity: 1.0,
             hardness: 1.0,
             fill: true,
@@ -239,6 +257,7 @@ impl Default for ToolSettings {
             antialias: true,
             guides: Guides::default(),
             subject_box: None,
+            text: crate::text::TextStyle::default(),
         }
     }
 }

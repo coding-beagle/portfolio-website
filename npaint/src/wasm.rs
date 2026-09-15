@@ -14,6 +14,7 @@ use wasm_bindgen::prelude::*;
 use crate::adjust::Adjustment;
 use crate::autoselect::SampleMode;
 use crate::blend::BlendMode;
+use crate::brush::BrushTip;
 use crate::color::Rgba;
 use crate::editor::Editor;
 use crate::geometry::{Point, Rect};
@@ -21,6 +22,7 @@ use crate::layer::{mask_cover, Target};
 use crate::mask::SelectMode;
 use crate::transform::{Handle, Hit};
 use crate::raster::Raster;
+use crate::text::TextAlign;
 use crate::tools::ToolKind;
 
 #[wasm_bindgen]
@@ -227,6 +229,129 @@ impl NPaint {
 
     pub fn hardness(&self) -> f32 {
         self.editor.settings().hardness
+    }
+
+    /// The shape of the brush's dab, by name: see [`BrushTip::name`].
+    pub fn set_brush_tip(&mut self, name: &str) -> Result<(), String> {
+        let tip = BrushTip::from_name(name).ok_or_else(|| format!("no brush tip called \"{name}\""))?;
+        self.editor.settings_mut().tip = tip;
+        Ok(())
+    }
+
+    pub fn brush_tip(&self) -> String {
+        self.editor.settings().tip.name().to_owned()
+    }
+
+    /// Whether the hardness slider means anything to the current tip.
+    pub fn brush_tip_has_hardness(&self) -> bool {
+        self.editor.settings().tip.has_hardness()
+    }
+
+    pub fn brush_tip_names() -> Vec<String> {
+        BrushTip::ALL.iter().map(|t| t.name().to_owned()).collect()
+    }
+
+    pub fn brush_tip_labels() -> Vec<String> {
+        BrushTip::ALL.iter().map(|t| t.label().to_owned()).collect()
+    }
+
+    // ---- Text -------------------------------------------------------------------
+    //
+    // The type settings the text tool uses, and the text session. The page
+    // draws the text (it has the fonts) and hands the picture over; see
+    // `Editor::preview_text`.
+
+    pub fn set_text_font(&mut self, font: &str) {
+        self.editor.settings_mut().text.font = font.to_owned();
+    }
+
+    pub fn text_font(&self) -> String {
+        self.editor.settings().text.font.clone()
+    }
+
+    pub fn set_text_size(&mut self, size: f64) {
+        self.editor.settings_mut().text.set_size(size);
+    }
+
+    pub fn text_size(&self) -> f64 {
+        self.editor.settings().text.size
+    }
+
+    pub fn set_text_bold(&mut self, bold: bool) {
+        self.editor.settings_mut().text.bold = bold;
+    }
+
+    pub fn text_bold(&self) -> bool {
+        self.editor.settings().text.bold
+    }
+
+    pub fn set_text_italic(&mut self, italic: bool) {
+        self.editor.settings_mut().text.italic = italic;
+    }
+
+    pub fn text_italic(&self) -> bool {
+        self.editor.settings().text.italic
+    }
+
+    /// "left", "center" or "right".
+    pub fn set_text_align(&mut self, name: &str) -> Result<(), String> {
+        let align = TextAlign::from_name(name).ok_or_else(|| format!("no alignment called \"{name}\""))?;
+        self.editor.settings_mut().text.align = align;
+        Ok(())
+    }
+
+    pub fn text_align(&self) -> String {
+        self.editor.settings().text.align.name().to_owned()
+    }
+
+    /// Starts a new text layer with its text's corner at a screen point.
+    /// Returns the layer's index.
+    pub fn begin_text_layer(&mut self, x: f64, y: f64) -> Result<usize, String> {
+        self.editor.begin_text_layer(Point::new(x, y)).map_err(err)
+    }
+
+    /// Starts editing the text of layer `index`.
+    pub fn begin_text_edit(&mut self, index: usize) -> Result<(), String> {
+        self.editor.begin_text_edit(index).map_err(err)
+    }
+
+    /// Sets the text being edited: the text itself, and its rendering as
+    /// straight-alpha RGBA bytes of `width` by `height`, with the block of
+    /// text starting at (`ox`, `oy`) inside it.
+    pub fn preview_text(&mut self, text: &str, ox: f64, oy: f64, width: u32, height: u32, bytes: &[u8]) -> Result<bool, String> {
+        let raster = Raster::from_rgba_bytes(width, height, bytes)
+            .ok_or_else(|| "image bytes do not match the size given".to_owned())?;
+        Ok(self.editor.preview_text(text, Point::new(ox, oy), raster))
+    }
+
+    pub fn is_editing_text(&self) -> bool {
+        self.editor.is_editing_text()
+    }
+
+    /// The text layer under a screen point, or -1.
+    pub fn text_layer_at(&self, x: f64, y: f64) -> i32 {
+        self.editor.text_layer_at(Point::new(x, y)).map_or(-1, |i| i as i32)
+    }
+
+    /// A text layer's text, or an empty string for any other layer.
+    pub fn layer_text(&self, index: usize) -> Result<String, String> {
+        self.layer(index)?;
+        Ok(self.editor.layer_text(index).map(|t| t.text.clone()).unwrap_or_default())
+    }
+
+    /// Where the block of text starts within a text layer's source, as
+    /// `[x, y]`; empty for any other layer.
+    pub fn layer_text_origin(&self, index: usize) -> Result<Vec<f64>, String> {
+        self.layer(index)?;
+        Ok(self.editor.layer_text(index).map(|t| vec![t.origin.x, t.origin.y]).unwrap_or_default())
+    }
+
+    /// A smart object's or text layer's placement, source pixels →
+    /// document pixels, as the six numbers of a CSS `matrix()`; empty for
+    /// any other layer.
+    pub fn layer_placement(&self, index: usize) -> Result<Vec<f64>, String> {
+        self.layer(index)?;
+        Ok(self.editor.layer_placement(index).map(|m| vec![m.a, m.b, m.c, m.d, m.e, m.f]).unwrap_or_default())
     }
 
     pub fn set_tolerance(&mut self, tolerance: u8) {
@@ -1520,6 +1645,60 @@ mod tests {
         assert_eq!(np.edit_refusal(), "");
         np.convert_to_smart_object(i).unwrap();
         assert_eq!(np.layer_kind(i).unwrap(), "smart");
+    }
+
+    #[test]
+    fn brush_tips_cross_the_boundary() {
+        let mut np = NPaint::new(4, 4, "").unwrap();
+        assert_eq!(np.brush_tip(), "round");
+        assert!(np.brush_tip_has_hardness());
+        np.set_brush_tip("spatter").unwrap();
+        assert_eq!(np.brush_tip(), "spatter");
+        assert!(!np.brush_tip_has_hardness());
+        assert!(np.set_brush_tip("fan").is_err());
+        assert_eq!(NPaint::brush_tip_names().len(), NPaint::brush_tip_labels().len());
+        assert!(NPaint::brush_tip_names().contains(&"calligraphy".to_owned()));
+    }
+
+    #[test]
+    fn text_crosses_the_boundary() {
+        let mut np = NPaint::new(8, 8, "").unwrap();
+        np.set_text_font("serif");
+        np.set_text_size(12.0);
+        np.set_text_bold(true);
+        np.set_text_italic(true);
+        np.set_text_align("center").unwrap();
+        assert!(np.set_text_align("justify").is_err());
+        assert_eq!((np.text_font(), np.text_size(), np.text_bold(), np.text_italic(), np.text_align().as_str()), ("serif".to_owned(), 12.0, true, true, "center"));
+
+        assert_eq!(np.text_layer_at(2.0, 2.0), -1);
+        let i = np.begin_text_layer(2.0, 2.0).unwrap();
+        assert_eq!(i, 1);
+        assert!(np.is_editing_text());
+        let red = [255u8, 0, 0, 255].repeat(4);
+        assert!(np.preview_text("ab", 0.0, 0.0, 2, 2, &red).unwrap());
+        assert!(np.preview_text("ab", 0.0, 0.0, 3, 3, &red).is_err(), "bytes that do not match");
+        assert!(np.commit_session());
+        assert!(!np.is_editing_text());
+        assert_eq!(np.layer_kind(i).unwrap(), "text");
+        assert_eq!(np.layer_text(i).unwrap(), "ab");
+        assert_eq!(np.layer_text(0).unwrap(), "");
+        assert_eq!(np.layer_text_origin(i).unwrap(), vec![0.0, 0.0]);
+        assert!(np.layer_text_origin(0).unwrap().is_empty());
+        assert_eq!(np.layer_placement(i).unwrap(), vec![1.0, 0.0, 0.0, 1.0, 1.0, 2.0], "centred on the click");
+        assert!(np.layer_placement(0).unwrap().is_empty());
+        assert_eq!(np.text_layer_at(2.5, 2.5), 1);
+        assert_eq!(np.text_layer_at(3.5, 3.5), -1, "past its right edge");
+        assert!(np.layer_text(9).is_err());
+
+        np.set_text_size(30.0);
+        np.begin_text_edit(i).unwrap();
+        assert_eq!(np.text_size(), 12.0, "the layer's style takes over");
+        assert!(np.cancel_session());
+        assert!(np.begin_text_edit(0).is_err(), "not a text layer");
+        np.set_tool("text").unwrap();
+        assert_eq!(np.tool(), "text");
+        assert_eq!(np.edit_refusal(), "", "the text tool paints nothing, so nothing is refused");
     }
 
     #[test]
