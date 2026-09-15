@@ -86,6 +86,20 @@ impl Rect {
         self.y + self.h
     }
 
+    /// The smallest rect containing both. An empty rect contributes
+    /// nothing, so a union with one is the other.
+    pub fn union(&self, other: &Rect) -> Rect {
+        if self.is_empty() {
+            return *other;
+        }
+        if other.is_empty() {
+            return *self;
+        }
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        Rect::new(x, y, self.right().max(other.right()) - x, self.bottom().max(other.bottom()) - y)
+    }
+
     pub const fn is_empty(&self) -> bool {
         self.w <= 0 || self.h <= 0
     }

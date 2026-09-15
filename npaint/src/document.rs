@@ -92,6 +92,24 @@ impl Document {
         doc
     }
 
+    /// A document the size of `raster`, whose only layer is that image kept
+    /// as a smart object — what Open does, so the picture's own pixels
+    /// survive every transform it is put through.
+    pub fn from_smart_object(name: &str, raster: Raster) -> Document {
+        let mut doc = Document {
+            width: raster.width(),
+            height: raster.height(),
+            layers: Vec::new(),
+            active: 0,
+            next_id: 1,
+        };
+        let id = doc.take_id();
+        let object = SmartObject { source: raster, transform: Affine::IDENTITY };
+        let (w, h) = (doc.width, doc.height);
+        doc.layers.push(Layer::new_smart(id, name, object, w, h));
+        doc
+    }
+
     /// A document assembled from saved parts. `None` if the layers' ids
     /// collide or the active index is out of range — a damaged file.
     pub fn from_parts(width: u32, height: u32, layers: Vec<Layer>, active: usize) -> Option<Document> {
@@ -123,6 +141,17 @@ impl Document {
 
     pub fn bounds(&self) -> Rect {
         Rect::new(0, 0, self.width as i32, self.height as i32)
+    }
+
+    /// Everything the layers reach, the canvas included: what Reveal All
+    /// grows to. Only a smart object can answer anything but the canvas —
+    /// every other layer's raster *is* the canvas, so nothing it holds can
+    /// be outside — which is what keeps this cheap enough to ask often.
+    pub fn content_bounds(&self) -> Rect {
+        self.layers
+            .iter()
+            .filter_map(|l| l.smart_object().map(SmartObject::extent))
+            .fold(self.bounds(), |all, r| all.union(&r))
     }
 
     pub fn layers(&self) -> &[Layer] {
@@ -420,7 +449,8 @@ impl Document {
         let below = &mut self.layers[index - 1];
         below.apply_mask();
         if top.visible {
-            Self::blend_layer(&mut below.raster, &top);
+            let all = below.raster.bounds();
+            Self::blend_layer(&mut below.raster, &top, &all);
         }
         if self.active >= index {
             self.active = self.active.saturating_sub(1);
@@ -496,35 +526,78 @@ impl Document {
         }
     }
 
-    /// Composites one layer onto `dst`, through its mask, opacity and blend
-    /// mode. An adjustment layer has nothing of its own to draw: it adjusts
+    /// An adjustment layer's result, mixed back over what was there: by the
+    /// blend mode first, then by how much of it shows (`t`, the opacity
+    /// through the mask).
+    fn finish_adjustment(was: Rgba, mut now: Rgba, t: f32, blend: BlendMode) -> Rgba {
+        if blend != BlendMode::Normal && was.a > 0 {
+            now = now.blend_over(was, blend);
+        }
+        if t >= 1.0 { now } else { was.lerp(now, t) }
+    }
+
+    /// [`Document::finish_adjustment`] for the usual case, where the adjustment is a
+    /// function of the colour and nothing has to be computed for a pixel
+    /// that the mask hides anyway.
+    fn mix_adjustment(was: Rgba, f: &crate::adjust::PixelMap<'_>, t: f32, blend: BlendMode) -> Rgba {
+        if t <= 0.0 {
+            return was;
+        }
+        Self::finish_adjustment(was, f.map(was), t, blend)
+    }
+
+    /// Composites one layer onto `dst` inside `clip`, through its mask,
+    /// opacity and blend mode. An adjustment layer has nothing of its own to draw: it adjusts
     /// what is already there, and its opacity and mask say how much of that
     /// shows; its blend mode blends the adjusted result back over the
     /// original, as in Photoshop.
-    fn blend_layer(dst: &mut Raster, layer: &Layer) {
+    fn blend_layer(dst: &mut Raster, layer: &Layer, clip: &Rect) {
         match &layer.kind {
             LayerKind::Adjustment(adjustment) => {
                 if layer.opacity <= 0.0 {
                     return;
                 }
-                let mut adjusted = dst.clone();
-                adjustment.apply(&mut adjusted, &dst.bounds());
-                for y in 0..dst.height() as i32 {
-                    for x in 0..dst.width() as i32 {
-                        let t = layer.opacity * f32::from(layer.mask_cover(x, y)) / 255.0;
-                        if t <= 0.0 {
-                            continue;
-                        }
-                        let was = dst.get(x, y);
-                        let mut now = adjusted.get(x, y);
-                        if layer.blend != BlendMode::Normal && was.a > 0 {
-                            now = now.blend_over(was, layer.blend);
-                        }
-                        dst.set(x, y, if t >= 1.0 { now } else { was.lerp(now, t) });
+                let (opacity, blend) = (layer.opacity, layer.blend);
+                let mask = layer.render_mask();
+                let cover = move |x: i32, y: i32| match mask {
+                    Some(m) => opacity * f32::from(crate::layer::mask_cover(m.get(x, y))) / 255.0,
+                    None => opacity,
+                };
+                match adjustment.pixel_map() {
+                    // Almost every adjustment is a function of the colour
+                    // alone, so the result is worked out and mixed back in
+                    // one pass, in place. The copy below is 33 MB at 4K.
+                    // The mask, when there is one, is read alongside a row
+                    // at a time: this pass runs over the whole canvas on
+                    // every tick of the dialog's sliders.
+                    Some(f) => match mask {
+                        Some(m) => dst.map_with(m, clip, |was, mp| {
+                            let t = opacity * f32::from(crate::layer::mask_cover(mp)) / 255.0;
+                            Self::mix_adjustment(was, &f, t, blend)
+                        }),
+                        None => dst.map_in(clip, |was| Self::mix_adjustment(was, &f, opacity, blend)),
+                    },
+                    None => {
+                        // A dither needs its neighbours, so this one does
+                        // need a copy — but only of the part being redrawn.
+                        let area = clip.intersect(&dst.bounds());
+                        let mut adjusted = dst.crop(&area);
+                        let inner = adjusted.bounds();
+                        adjustment.apply(&mut adjusted, &inner);
+                        dst.map_at(&area, |was, x, y| {
+                            let t = cover(x, y);
+                            if t <= 0.0 {
+                                return was;
+                            }
+                            Self::finish_adjustment(was, adjusted.get(x - area.x, y - area.y), t, blend)
+                        })
                     }
                 }
             }
-            _ => dst.composite_blend(&layer.rendered(), layer.opacity, layer.blend),
+            _ => match layer.render_mask() {
+                Some(mask) => dst.composite_blend_masked(&layer.raster, mask, layer.opacity, layer.blend, crate::layer::mask_cover, clip),
+                None => dst.composite_blend(&layer.raster, layer.opacity, layer.blend, clip),
+            },
         }
     }
 
@@ -532,22 +605,46 @@ impl Document {
     /// buffer. Hidden layers and layers at zero opacity contribute nothing.
     pub fn composite(&self) -> Raster {
         let mut out = Raster::new(self.width, self.height);
-        self.composite_into(&mut out);
+        let all = self.bounds();
+        self.composite_into(&mut out, &all);
         out
     }
 
-    /// [`Document::composite`] into an existing buffer, to avoid allocating a
-    /// frame every redraw.
-    pub fn composite_into(&self, out: &mut Raster) {
-        // Reusing the buffer matters: at 6000x4500 a fresh one is 108 MB,
-        // and this runs for every stroke update.
-        if out.width() == self.width && out.height() == self.height {
-            out.clear();
-        } else {
+    /// [`Document::composite`] into an existing buffer, redrawing `clip`
+    /// only and leaving the rest of the buffer as it was.
+    ///
+    /// Reusing the buffer matters — at 6000x4500 a fresh one is 108 MB —
+    /// and so does the clip: this runs for every stroke update, and a brush
+    /// dab has no business recompositing eight million pixels. Every layer
+    /// is composited a pixel at a time, so redrawing a rectangle of the
+    /// frame gives exactly what redrawing all of it would have.
+    pub fn composite_into(&self, out: &mut Raster, clip: &Rect) {
+        let mut clip = *clip;
+        if out.width() != self.width || out.height() != self.height {
             *out = Raster::new(self.width, self.height);
+            clip = self.bounds();
         }
-        for layer in self.layers.iter().filter(|l| l.visible) {
-            Self::blend_layer(out, layer);
+        self.composite_below(0, out, &clip);
+        self.composite_from(0, out, &clip);
+    }
+
+    /// Composites the layers *below* `index` into `out`, which is cleared
+    /// first. What an editing session keeps while one layer is being
+    /// changed over and over: nothing under it can move until the session
+    /// ends, so it is worth compositing once.
+    pub fn composite_below(&self, index: usize, out: &mut Raster, clip: &Rect) {
+        out.clear_in(clip);
+        for layer in self.layers.iter().take(index).filter(|l| l.visible) {
+            Self::blend_layer(out, layer, clip);
+        }
+    }
+
+    /// Composites layer `index` and everything above it onto `out`, which
+    /// must already hold what is below them — [`Document::composite_below`]
+    /// with the same index, or a copy of what it left.
+    pub fn composite_from(&self, index: usize, out: &mut Raster, clip: &Rect) {
+        for layer in self.layers.iter().skip(index).filter(|l| l.visible) {
+            Self::blend_layer(out, layer, clip);
         }
     }
 }
@@ -555,6 +652,7 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
 
@@ -576,6 +674,24 @@ mod tests {
         assert_eq!((doc.width(), doc.height()), (3, 2));
         assert_eq!(names(&doc), vec!["cat.png"]);
         assert_eq!(doc.composite().get(2, 1), RED);
+    }
+
+    #[test]
+    fn from_smart_object_keeps_the_picture_at_its_own_size() {
+        let doc = Document::from_smart_object("cat.png", Raster::filled(3, 2, RED));
+        assert_eq!((doc.width(), doc.height()), (3, 2));
+        assert!(doc.layer(0).unwrap().is_smart());
+        assert_eq!(doc.composite().get(2, 1), RED);
+        assert_eq!(doc.content_bounds(), doc.bounds(), "it fills the canvas exactly");
+    }
+
+    #[test]
+    fn content_bounds_counts_what_hangs_off_the_canvas() {
+        let mut doc = Document::new(4, 4, Rgba::TRANSPARENT);
+        assert_eq!(doc.content_bounds(), doc.bounds(), "the canvas is the floor");
+        let i = doc.place_smart_object("photo", Raster::filled(2, 2, RED));
+        doc.layer_mut(i).unwrap().set_smart_transform(Affine::translation(3.0, -2.0), 4, 4);
+        assert_eq!(doc.content_bounds(), Rect::new(0, -2, 5, 6));
     }
 
     #[test]
@@ -657,7 +773,7 @@ mod tests {
         doc.active_layer_mut().blend = BlendMode::Screen;
         assert!((doc.composite().get(0, 0).r as i32 - 192).abs() <= 1);
         // An adjustment layer's mode blends its result back over the original.
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         doc.active_layer_mut().blend = BlendMode::Darken;
         let r = doc.composite().get(0, 0).r;
         assert!((r as i32 - 63).abs() <= 2, "inverted 192 is 63, which is the darker: {r}");
@@ -779,7 +895,7 @@ mod tests {
     #[test]
     fn layer_via_copy_of_an_adjustment_layer_is_an_empty_pixel_layer() {
         let mut doc = Document::new(3, 2, Rgba::WHITE);
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         let i = doc.layer_via_copy(doc.bounds());
         let layer = doc.layer(i).unwrap();
         assert_eq!(layer.kind, LayerKind::Pixels);
@@ -839,6 +955,46 @@ mod tests {
         assert_eq!(doc.set_target(1, Target::Mask), Err(DocumentError::NoMask));
     }
 
+    /// The composite applies a layer's mask as it goes rather than building
+    /// the masked copy first, which is the same picture — within the one
+    /// rounding it saves, since coverage and opacity are now applied
+    /// together instead of one after the other.
+    #[test]
+    fn compositing_through_a_mask_matches_masking_the_layer_first() {
+        for (opacity, blend) in [(1.0, BlendMode::Normal), (0.5, BlendMode::Normal), (1.0, BlendMode::Multiply), (0.35, BlendMode::Screen)] {
+            let mut doc = Document::new(4, 2, Rgba::opaque(30, 160, 200));
+            doc.add_layer();
+            for y in 0..2 {
+                for x in 0..4 {
+                    doc.active_layer_mut().raster.set(x, y, Rgba::new(220, 40, 90, 40 + (x as u8) * 60));
+                }
+            }
+            // A mask with every interesting kind of pixel in it: white,
+            // black, mid grey and a half-transparent one.
+            let mut mask = Raster::filled(4, 2, Rgba::WHITE);
+            mask.set(1, 0, Rgba::BLACK);
+            mask.set(2, 0, Rgba::opaque(128, 128, 128));
+            mask.set(3, 0, Rgba::new(0, 0, 0, 128));
+            doc.layer_mut(1).unwrap().mask = Some(mask);
+            doc.layer_mut(1).unwrap().set_opacity(opacity);
+            doc.layer_mut(1).unwrap().blend = blend;
+
+            let now = doc.composite();
+            // The old way: mask the layer into a copy, then composite that.
+            let mut then = Raster::new(4, 2);
+            let all = then.bounds();
+            then.composite_blend(&doc.layers()[0].raster, 1.0, BlendMode::Normal, &all);
+            then.composite_blend(&doc.layers()[1].rendered(), opacity, blend, &all);
+            for y in 0..2 {
+                for x in 0..4 {
+                    let (a, b) = (now.get(x, y), then.get(x, y));
+                    let off = [(a.r, b.r), (a.g, b.g), (a.b, b.b), (a.a, b.a)].map(|(l, r)| i32::from(l) - i32::from(r));
+                    assert!(off.iter().all(|d| d.abs() <= 1), "{opacity} {blend:?} at ({x},{y}): {a} vs {b}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn applying_a_mask_bakes_it_and_merge_down_bakes_both() {
         let mut doc = Document::new(2, 1, Rgba::WHITE);
@@ -862,7 +1018,7 @@ mod tests {
     #[test]
     fn an_adjustment_layer_adjusts_everything_below_through_its_mask() {
         let mut doc = Document::new(2, 1, Rgba::WHITE);
-        let i = doc.add_adjustment_layer(Adjustment::Invert, None);
+        let i = doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         assert_eq!(i, 1);
         assert_eq!(doc.layer(1).unwrap().name, "Invert 2");
         assert!(doc.active_layer().editing_mask());
@@ -900,7 +1056,7 @@ mod tests {
     #[test]
     fn an_adjustment_layer_made_with_a_selection_takes_it_as_its_mask() {
         let mut doc = Document::new(2, 1, Rgba::WHITE);
-        doc.add_adjustment_layer(Adjustment::Invert, Some(white_mask_with_black_at(2, 1, 1, 0)));
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), Some(white_mask_with_black_at(2, 1, 1, 0)));
         assert_eq!(doc.composite().get(0, 0), Rgba::BLACK);
         assert_eq!(doc.composite().get(1, 0), Rgba::WHITE);
         let levels = Adjustment::from_params("levels", &[0.0, 255.0, 1.0]).unwrap();
@@ -912,12 +1068,12 @@ mod tests {
     #[test]
     fn merging_an_adjustment_layer_down_bakes_it_and_nothing_merges_into_one() {
         let mut doc = Document::new(1, 1, Rgba::WHITE);
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         doc.merge_down(1).unwrap();
         assert_eq!(names(&doc), vec!["Background"]);
         assert_eq!(doc.layer(0).unwrap().raster.get(0, 0), Rgba::BLACK);
 
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         doc.add_layer();
         assert_eq!(doc.merge_down(2), Err(DocumentError::CannotMergeInto));
         doc.set_active(0).unwrap();
@@ -949,7 +1105,7 @@ mod tests {
         assert!(!doc.active_layer().is_smart());
         assert_eq!(doc.rasterize_layer(0), Err(DocumentError::WrongKind));
         assert_eq!(doc.replace_smart_contents(0, Raster::new(1, 1)), Err(DocumentError::WrongKind));
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         assert_eq!(doc.convert_to_smart_object(1), Err(DocumentError::WrongKind));
     }
 
@@ -994,7 +1150,7 @@ mod tests {
     #[test]
     fn duplicating_keeps_the_kind_and_the_mask() {
         let mut doc = Document::new(2, 2, Rgba::WHITE);
-        doc.add_adjustment_layer(Adjustment::Invert, None);
+        doc.add_adjustment_layer(Adjustment::from(Kind::Invert), None);
         doc.active_layer_mut().set_opacity(0.5);
         let copy = doc.duplicate_layer(1).unwrap();
         let layer = doc.layer(copy).unwrap();

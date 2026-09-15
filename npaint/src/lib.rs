@@ -19,6 +19,7 @@ pub mod autoselect;
 pub mod blend;
 pub mod checker;
 pub mod color;
+pub mod dither;
 pub mod document;
 pub mod editor;
 pub mod file;

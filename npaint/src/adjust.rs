@@ -5,13 +5,76 @@
 //! built from a name and a flat list of parameters so the page can describe
 //! an adjustment dialog as data and the engine can stay the only place that
 //! knows what the numbers mean.
+//!
+//! [`Adjustment::Dither`] is the one that is not a function of the colour
+//! alone: where the pixel is decides the threshold, and an error-diffused
+//! dither depends on its neighbours besides. It goes through the same
+//! [`Adjustment::apply`] funnel — and so gets the dialog, the preview, the
+//! undo step, the selection and the adjustment layer's mask for free — but
+//! [`Adjustment::map`], which has only a colour to work with, answers with
+//! the plain rounding. See [`crate::dither`].
 
 use crate::color::Rgba;
+use crate::dither::{Dither, DitherMethod, MAX_LEVELS, MAX_SCALE, MIN_LEVELS};
 use crate::geometry::Rect;
 use crate::raster::Raster;
 
+/// Which of the colour's channels an adjustment is allowed to change.
+///
+/// The per-channel adjustments — the ones that are a lookup table, and so do
+/// the same thing to red as to green — can be pointed at one channel alone,
+/// which is how a colour cast is corrected: pull the blue channel's white
+/// point down and the picture warms up. The other channels are left as they
+/// were.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    #[default]
+    All,
+    Red,
+    Green,
+    Blue,
+}
+
+impl Channel {
+    /// In the order the page's dropdown lists them; the index is what
+    /// travels as the adjustment's first parameter.
+    pub const ALL: &'static [Channel] = &[Channel::All, Channel::Red, Channel::Green, Channel::Blue];
+
+    /// The channel at `index`, clamped to the list.
+    pub fn from_index(index: f32) -> Channel {
+        let i = if index.is_finite() { index.round().clamp(0.0, (Self::ALL.len() - 1) as f32) as usize } else { 0 };
+        Self::ALL[i]
+    }
+
+    pub fn index(self) -> f32 {
+        Self::ALL.iter().position(|c| *c == self).unwrap_or(0) as f32
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Channel::All => "RGB",
+            Channel::Red => "Red",
+            Channel::Green => "Green",
+            Channel::Blue => "Blue",
+        }
+    }
+
+    /// `new` in the channel this targets, `old` in the rest. Alpha comes
+    /// from `old` either way: no adjustment touches it.
+    pub fn pick(self, new: Rgba, old: Rgba) -> Rgba {
+        match self {
+            Channel::All => new,
+            Channel::Red => Rgba::new(new.r, old.g, old.b, old.a),
+            Channel::Green => Rgba::new(old.r, new.g, old.b, old.a),
+            Channel::Blue => Rgba::new(old.r, old.g, new.b, old.a),
+        }
+    }
+}
+
+/// What an adjustment does. Which channels it does it to is
+/// [`Adjustment::channel`], not part of the operation itself.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Adjustment {
+pub enum Kind {
     /// `brightness` and `contrast` in `-100..=100`.
     BrightnessContrast { brightness: f32, contrast: f32 },
     /// `hue` in degrees `-180..=180`; `saturation` and `lightness` in
@@ -32,6 +95,26 @@ pub enum Adjustment {
     Posterize { levels: f32 },
     /// Luminance threshold, `0..=255`.
     Threshold { level: f32 },
+    /// Quantise to `levels` per channel and hide the error with a dither
+    /// pattern. `strength` and `scale` are the pattern's amount and cell
+    /// size; `mono` greys the picture first. See [`crate::dither`].
+    Dither { method: DitherMethod, levels: f32, strength: f32, scale: f32, mono: bool },
+}
+
+
+/// An adjustment: what to do, and which channels to do it to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Adjustment {
+    pub kind: Kind,
+    pub channel: Channel,
+}
+
+impl From<Kind> for Adjustment {
+    /// The whole colour, which is what every adjustment did before there was
+    /// a choice.
+    fn from(kind: Kind) -> Adjustment {
+        Adjustment { kind, channel: Channel::All }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,108 +139,235 @@ impl Adjustment {
         "desaturate",
         "posterize",
         "threshold",
+        "dither",
     ];
 
-    /// Builds an adjustment from its name and parameters, in the order the
-    /// variant's fields are declared. Missing parameters take their neutral
-    /// value; extra ones are ignored.
+    /// Builds an adjustment from its name and parameters.
+    ///
+    /// The channel rides one past the kind's own parameters, which is both
+    /// where the curve's variable-length list of points has ended and where
+    /// a file written before there was a choice has nothing at all — so an
+    /// older document simply comes back on RGB.
     pub fn from_params(name: &str, params: &[f32]) -> Result<Adjustment, AdjustmentError> {
-        let p = |i: usize, default: f32| params.get(i).copied().unwrap_or(default);
-        Ok(match name {
-            "brightness-contrast" => Adjustment::BrightnessContrast {
-                brightness: p(0, 0.0).clamp(-100.0, 100.0),
-                contrast: p(1, 0.0).clamp(-100.0, 100.0),
-            },
-            "hue-saturation" => Adjustment::HueSaturation {
-                hue: p(0, 0.0).clamp(-180.0, 180.0),
-                saturation: p(1, 0.0).clamp(-100.0, 100.0),
-                lightness: p(2, 0.0).clamp(-100.0, 100.0),
-            },
-            "levels" => Adjustment::Levels {
-                black: p(0, 0.0).clamp(0.0, 254.0),
-                white: p(1, 255.0).clamp(1.0, 255.0),
-                gamma: p(2, 1.0).clamp(0.1, 10.0),
-            },
-            "curves" => Adjustment::Curves { points: curve_points(params) },
-            "color-balance" => {
-                let c = |i: usize| p(i, 0.0).clamp(-100.0, 100.0);
-                Adjustment::ColorBalance {
-                    shadows: [c(0), c(1), c(2)],
-                    midtones: [c(3), c(4), c(5)],
-                    highlights: [c(6), c(7), c(8)],
-                }
-            }
-            "invert" => Adjustment::Invert,
-            "desaturate" => Adjustment::Desaturate,
-            "posterize" => Adjustment::Posterize { levels: p(0, 4.0).clamp(2.0, 255.0) },
-            "threshold" => Adjustment::Threshold { level: p(0, 128.0).clamp(0.0, 255.0) },
-            other => return Err(AdjustmentError(format!("unknown adjustment: {other}"))),
-        })
+        let kind = Kind::from_params(name, params)?;
+        if !kind.takes_channel() {
+            return Ok(kind.into());
+        }
+        let at = kind.params().len();
+        Ok(Adjustment { kind, channel: Channel::from_index(params.get(at).copied().unwrap_or(0.0)) })
     }
 
     pub fn name(&self) -> &'static str {
-        match self {
-            Adjustment::BrightnessContrast { .. } => "brightness-contrast",
-            Adjustment::HueSaturation { .. } => "hue-saturation",
-            Adjustment::Levels { .. } => "levels",
-            Adjustment::Curves { .. } => "curves",
-            Adjustment::ColorBalance { .. } => "color-balance",
-            Adjustment::Invert => "invert",
-            Adjustment::Desaturate => "desaturate",
-            Adjustment::Posterize { .. } => "posterize",
-            Adjustment::Threshold { .. } => "threshold",
-        }
+        self.kind.name()
     }
 
-    /// The name the layers panel shows an adjustment layer under.
-    pub fn label(&self) -> &'static str {
-        match self {
-            Adjustment::BrightnessContrast { .. } => "Brightness/Contrast",
-            Adjustment::HueSaturation { .. } => "Hue/Saturation",
-            Adjustment::Levels { .. } => "Levels",
-            Adjustment::Curves { .. } => "Curves",
-            Adjustment::ColorBalance { .. } => "Colour Balance",
-            Adjustment::Invert => "Invert",
-            Adjustment::Desaturate => "Desaturate",
-            Adjustment::Posterize { .. } => "Posterize",
-            Adjustment::Threshold { .. } => "Threshold",
+    /// What to call it: the name an adjustment layer is created under, and
+    /// the history step's name for the ones applied in one go. It says the
+    /// channel when there is one to say.
+    pub fn label(&self) -> String {
+        match self.channel {
+            Channel::All => self.kind.label().to_owned(),
+            c => format!("{} ({})", self.kind.label(), c.label()),
         }
     }
 
     /// The parameters in the order [`Adjustment::from_params`] takes them,
     /// so an adjustment layer's dialog can open showing what it has.
     pub fn params(&self) -> Vec<f32> {
-        match self {
-            Adjustment::BrightnessContrast { brightness, contrast } => vec![*brightness, *contrast],
-            Adjustment::HueSaturation { hue, saturation, lightness } => vec![*hue, *saturation, *lightness],
-            Adjustment::Levels { black, white, gamma } => vec![*black, *white, *gamma],
-            Adjustment::Curves { points } => points.iter().flat_map(|(x, y)| [*x, *y]).collect(),
-            Adjustment::ColorBalance { shadows, midtones, highlights } => {
-                shadows.iter().chain(midtones).chain(highlights).copied().collect()
-            }
-            Adjustment::Invert | Adjustment::Desaturate => Vec::new(),
-            Adjustment::Posterize { levels } => vec![*levels],
-            Adjustment::Threshold { level } => vec![*level],
+        let mut params = self.kind.params();
+        if self.kind.takes_channel() {
+            params.push(self.channel.index());
         }
+        params
     }
 
-    /// Whether the adjustment has parameters worth a dialog.
+    /// Whether the adjustment has anything worth a dialog.
     pub fn has_params(&self) -> bool {
-        !matches!(self, Adjustment::Invert | Adjustment::Desaturate)
+        self.kind.has_params()
     }
 
-    /// Applies the adjustment to every pixel of `raster` inside `clip`.
+    /// Applies the adjustment to every pixel of `raster` inside `clip`,
+    /// leaving the channels it is not aimed at as they were.
     pub fn apply(&self, raster: &mut Raster, clip: &Rect) {
-        match self.lut() {
-            Some(lut) => raster.map_in(clip, |p| Rgba::new(lut[p.r as usize], lut[p.g as usize], lut[p.b as usize], p.a)),
-            None => raster.map_in(clip, |p| self.map(p)),
+        match self.pixel_map() {
+            Some(f) => raster.map_in(clip, |p| f.map(p)),
+            None => {
+                // A dither is decided by where the pixel is and by its
+                // neighbours, so it cannot be written as a function of one
+                // colour: it runs over a copy, and the targeted channel is
+                // taken back out of it.
+                let dither = self.kind.dither();
+                if self.channel == Channel::All {
+                    dither.apply(raster, clip);
+                } else {
+                    let mut dithered = raster.clone();
+                    dither.apply(&mut dithered, clip);
+                    let channel = self.channel;
+                    raster.map_at(clip, |p, x, y| channel.pick(dithered.get(x, y), p));
+                }
+            }
         }
     }
 
     /// The adjustment applied to one colour.
     pub fn map(&self, p: Rgba) -> Rgba {
+        self.channel.pick(self.kind.map(p), p)
+    }
+
+    /// The adjustment as a function of one colour, with everything it can
+    /// work out in advance — the lookup table — worked out once.
+    ///
+    /// A loop over a whole document wants this rather than
+    /// [`Adjustment::map`], which rebuilds the table for every pixel it is
+    /// handed: at 4K that is eight million tables. `None` for an adjustment
+    /// that needs more than the colour to answer, which is the dither.
+    pub fn pixel_map(&self) -> Option<PixelMap<'_>> {
+        if matches!(self.kind, Kind::Dither { .. }) {
+            return None;
+        }
+        Some(PixelMap { kind: &self.kind, channel: self.channel, lut: self.kind.lut() })
+    }
+}
+
+/// One adjustment, ready to be applied a pixel at a time. From
+/// [`Adjustment::pixel_map`].
+pub struct PixelMap<'a> {
+    kind: &'a Kind,
+    channel: Channel,
+    lut: Option<[u8; 256]>,
+}
+
+impl PixelMap<'_> {
+    pub fn map(&self, p: Rgba) -> Rgba {
+        let new = match &self.lut {
+            Some(lut) => Rgba::new(lut[p.r as usize], lut[p.g as usize], lut[p.b as usize], p.a),
+            None => self.kind.map(p),
+        };
+        self.channel.pick(new, p)
+    }
+}
+
+impl Kind {
+    /// Builds a kind from its name and parameters, in the order the
+    /// variant's fields are declared. Missing parameters take their neutral
+    /// value; extra ones are ignored. The channel is not among them:
+    /// [`Adjustment::from_params`] takes it off the front first.
+    pub fn from_params(name: &str, params: &[f32]) -> Result<Kind, AdjustmentError> {
+        let p = |i: usize, default: f32| params.get(i).copied().unwrap_or(default);
+        Ok(match name {
+            "brightness-contrast" => Kind::BrightnessContrast {
+                brightness: p(0, 0.0).clamp(-100.0, 100.0),
+                contrast: p(1, 0.0).clamp(-100.0, 100.0),
+            },
+            "hue-saturation" => Kind::HueSaturation {
+                hue: p(0, 0.0).clamp(-180.0, 180.0),
+                saturation: p(1, 0.0).clamp(-100.0, 100.0),
+                lightness: p(2, 0.0).clamp(-100.0, 100.0),
+            },
+            "levels" => Kind::Levels {
+                black: p(0, 0.0).clamp(0.0, 254.0),
+                white: p(1, 255.0).clamp(1.0, 255.0),
+                gamma: p(2, 1.0).clamp(0.1, 10.0),
+            },
+            "curves" => Kind::Curves { points: curve_points(params) },
+            "color-balance" => {
+                let c = |i: usize| p(i, 0.0).clamp(-100.0, 100.0);
+                Kind::ColorBalance {
+                    shadows: [c(0), c(1), c(2)],
+                    midtones: [c(3), c(4), c(5)],
+                    highlights: [c(6), c(7), c(8)],
+                }
+            }
+            "invert" => Kind::Invert,
+            "desaturate" => Kind::Desaturate,
+            "posterize" => Kind::Posterize { levels: p(0, 4.0).clamp(2.0, 255.0) },
+            "threshold" => Kind::Threshold { level: p(0, 128.0).clamp(0.0, 255.0) },
+            "dither" => Kind::Dither {
+                // Floyd–Steinberg by default, as the page's dialog opens,
+                // so a dither layer made with no parameters at all is the
+                // one most people mean by the word.
+                method: DitherMethod::from_index(p(0, DitherMethod::FloydSteinberg.index())),
+                levels: p(1, 2.0).round().clamp(MIN_LEVELS, MAX_LEVELS),
+                strength: p(2, 100.0).clamp(0.0, 100.0),
+                scale: p(3, 1.0).round().clamp(1.0, MAX_SCALE),
+                mono: p(4, 0.0) >= 0.5,
+            },
+            other => return Err(AdjustmentError(format!("unknown adjustment: {other}"))),
+        })
+    }
+
+    pub fn name(&self) -> &'static str {
         match self {
-            Adjustment::HueSaturation { hue, saturation, lightness } => {
+            Kind::BrightnessContrast { .. } => "brightness-contrast",
+            Kind::HueSaturation { .. } => "hue-saturation",
+            Kind::Levels { .. } => "levels",
+            Kind::Curves { .. } => "curves",
+            Kind::ColorBalance { .. } => "color-balance",
+            Kind::Invert => "invert",
+            Kind::Desaturate => "desaturate",
+            Kind::Posterize { .. } => "posterize",
+            Kind::Threshold { .. } => "threshold",
+            Kind::Dither { .. } => "dither",
+        }
+    }
+
+    /// The name the layers panel shows an adjustment layer under.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Kind::BrightnessContrast { .. } => "Brightness/Contrast",
+            Kind::HueSaturation { .. } => "Hue/Saturation",
+            Kind::Levels { .. } => "Levels",
+            Kind::Curves { .. } => "Curves",
+            Kind::ColorBalance { .. } => "Colour Balance",
+            Kind::Invert => "Invert",
+            Kind::Desaturate => "Desaturate",
+            Kind::Posterize { .. } => "Posterize",
+            Kind::Threshold { .. } => "Threshold",
+            Kind::Dither { .. } => "Dither",
+        }
+    }
+
+    /// The parameters in the order [`Kind::from_params`] takes them.
+    pub fn params(&self) -> Vec<f32> {
+        match self {
+            Kind::BrightnessContrast { brightness, contrast } => vec![*brightness, *contrast],
+            Kind::HueSaturation { hue, saturation, lightness } => vec![*hue, *saturation, *lightness],
+            Kind::Levels { black, white, gamma } => vec![*black, *white, *gamma],
+            Kind::Curves { points } => points.iter().flat_map(|(x, y)| [*x, *y]).collect(),
+            Kind::ColorBalance { shadows, midtones, highlights } => {
+                shadows.iter().chain(midtones).chain(highlights).copied().collect()
+            }
+            Kind::Invert | Kind::Desaturate => Vec::new(),
+            Kind::Posterize { levels } => vec![*levels],
+            Kind::Threshold { level } => vec![*level],
+            Kind::Dither { method, levels, strength, scale, mono } => {
+                vec![method.index(), *levels, *strength, *scale, if *mono { 1.0 } else { 0.0 }]
+            }
+        }
+    }
+
+    /// Whether the adjustment has parameters worth a dialog.
+    pub fn has_params(&self) -> bool {
+        !matches!(self, Kind::Invert | Kind::Desaturate)
+    }
+
+    /// Whether this adjustment can be pointed at a single colour channel.
+    /// The per-channel family can: what they do to red they do to green the
+    /// same way, so doing it to one alone means something. The ones that
+    /// read the whole colour (hue, colour balance, threshold) or the picture
+    /// around it (dither) cannot, and nor can the two that have no dialog to
+    /// put the choice in.
+    pub fn takes_channel(&self) -> bool {
+        matches!(self, Kind::BrightnessContrast { .. } | Kind::Levels { .. } | Kind::Curves { .. } | Kind::Posterize { .. })
+    }
+
+    /// The kind applied to one colour, every channel of it. A dither has no
+    /// neighbours and no position here, so it answers with the rounding it
+    /// would have dithered around; [`Adjustment::apply`] is the real thing.
+    pub fn map(&self, p: Rgba) -> Rgba {
+        match self {
+            Kind::Dither { .. } => self.dither().quantize(p),
+            Kind::HueSaturation { hue, saturation, lightness } => {
                 let (h, s, l) = rgb_to_hsl(p);
                 let h = (h + hue).rem_euclid(360.0);
                 let s = if *saturation >= 0.0 {
@@ -172,7 +382,7 @@ impl Adjustment {
                 };
                 hsl_to_rgb(h, s.clamp(0.0, 1.0), l.clamp(0.0, 1.0)).with_alpha(p.a)
             }
-            Adjustment::ColorBalance { shadows, midtones, highlights } => {
+            Kind::ColorBalance { shadows, midtones, highlights } => {
                 // How much each tonal range has a say, from the pixel's
                 // brightness: the shadows own the dark end, the highlights
                 // the bright end, the midtones the middle.
@@ -184,11 +394,11 @@ impl Adjustment {
                 let ch = |v: u8, i: usize| (f32::from(v) + shift(i)).round().clamp(0.0, 255.0) as u8;
                 Rgba::new(ch(p.r, 0), ch(p.g, 1), ch(p.b, 2), p.a)
             }
-            Adjustment::Desaturate => {
+            Kind::Desaturate => {
                 let y = luminance(p);
                 Rgba::new(y, y, y, p.a)
             }
-            Adjustment::Threshold { level } => {
+            Kind::Threshold { level } => {
                 let v = if f32::from(luminance(p)) >= *level { 255 } else { 0 };
                 Rgba::new(v, v, v, p.a)
             }
@@ -199,29 +409,44 @@ impl Adjustment {
         }
     }
 
+    /// The dither this adjustment describes, with the dialog's `0..=100`
+    /// strength as a fraction.
+    fn dither(&self) -> Dither {
+        match self {
+            Kind::Dither { method, levels, strength, scale, mono } => Dither {
+                method: *method,
+                levels: *levels,
+                strength: strength / 100.0,
+                scale: *scale,
+                mono: *mono,
+            },
+            _ => unreachable!("only a dither asks for one"),
+        }
+    }
+
     /// A per-channel lookup table, for the adjustments that treat each
     /// channel independently. `None` for the ones that need the whole colour.
     fn lut(&self) -> Option<[u8; 256]> {
         let f: Box<dyn Fn(f32) -> f32> = match self {
-            Adjustment::BrightnessContrast { brightness, contrast } => {
+            Kind::BrightnessContrast { brightness, contrast } => {
                 let b = brightness / 100.0;
                 // Contrast as a slope about mid-grey; +100 is a slope of 3,
                 // -100 flattens to grey.
                 let c = if *contrast >= 0.0 { 1.0 + contrast / 50.0 } else { 1.0 + contrast / 100.0 };
                 Box::new(move |v| (v - 0.5) * c + 0.5 + b)
             }
-            Adjustment::Levels { black, white, gamma } => {
+            Kind::Levels { black, white, gamma } => {
                 let lo = black / 255.0;
                 let hi = (white / 255.0).max(lo + 1.0 / 255.0);
                 let gamma = *gamma;
                 Box::new(move |v| ((v - lo) / (hi - lo)).clamp(0.0, 1.0).powf(1.0 / gamma))
             }
-            Adjustment::Curves { points } => {
+            Kind::Curves { points } => {
                 let curve = curve_lut(points);
                 return Some(curve);
             }
-            Adjustment::Invert => Box::new(|v| 1.0 - v),
-            Adjustment::Posterize { levels } => {
+            Kind::Invert => Box::new(|v| 1.0 - v),
+            Kind::Posterize { levels } => {
                 let n = levels.round().max(2.0);
                 Box::new(move |v| ((v * n).floor().min(n - 1.0)) / (n - 1.0))
             }
@@ -449,7 +674,10 @@ mod tests {
         for name in Adjustment::NAMES {
             let adj = Adjustment::from_params(name, &[]).unwrap();
             assert_eq!(adj.name(), *name);
-            if matches!(adj, Adjustment::Invert | Adjustment::Desaturate | Adjustment::Posterize { .. } | Adjustment::Threshold { .. }) {
+            if matches!(
+                adj.kind,
+                Kind::Invert | Kind::Desaturate | Kind::Posterize { .. } | Kind::Threshold { .. } | Kind::Dither { .. }
+            ) {
                 continue;
             }
             let out = adj.map(Rgba::opaque(200, 100, 50));
@@ -478,8 +706,8 @@ mod tests {
 
     #[test]
     fn invert_and_desaturate() {
-        assert_eq!(Adjustment::Invert.map(RED), Rgba::opaque(0, 255, 255));
-        let d = Adjustment::Desaturate.map(RED);
+        assert_eq!(Adjustment::from(Kind::Invert).map(RED), Rgba::opaque(0, 255, 255));
+        let d = Adjustment::from(Kind::Desaturate).map(RED);
         assert_eq!((d.r, d.g, d.b), (76, 76, 76));
     }
 
@@ -519,8 +747,8 @@ mod tests {
         assert!(lut.windows(2).all(|w| w[0] <= w[1]), "never dips");
         // Points come in any order and land sorted; a lone point is ignored.
         let backwards = Adjustment::from_params("curves", &[255.0, 200.0, 0.0, 10.0]).unwrap();
-        assert_eq!(backwards.params(), vec![0.0, 10.0, 255.0, 200.0]);
-        assert_eq!(Adjustment::from_params("curves", &[9.0, 9.0]).unwrap().params(), vec![0.0, 0.0, 255.0, 255.0]);
+        assert_eq!(backwards.params(), vec![0.0, 10.0, 255.0, 200.0, 0.0], "the channel rides at the end");
+        assert_eq!(Adjustment::from_params("curves", &[9.0, 9.0]).unwrap().params(), vec![0.0, 0.0, 255.0, 255.0, 0.0]);
         // A curve held flat past its last point does not wrap.
         let clipped = Adjustment::from_params("curves", &[0.0, 0.0, 128.0, 255.0]).unwrap();
         assert_eq!(clipped.map(Rgba::opaque(200, 200, 200)).r, 255);
@@ -562,6 +790,131 @@ mod tests {
     }
 
     #[test]
+    fn dither_quantises_through_the_adjustment_and_reads_its_numbers_back() {
+        // The dialog's numbers: ordered 4x4, four levels, full strength,
+        // two-pixel cells, in colour.
+        let adj = Adjustment::from_params("dither", &[1.0, 4.0, 100.0, 2.0, 0.0]).unwrap();
+        assert_eq!(adj.label(), "Dither");
+        assert_eq!(adj.params(), vec![1.0, 4.0, 100.0, 2.0, 0.0]);
+        let mut r = Raster::filled(8, 8, GREY);
+        let all = r.bounds();
+        adj.apply(&mut r, &all);
+        assert!(r.pixels().iter().all(|p| matches!(p.r, 0 | 85 | 170 | 255)), "off the four-level ramp");
+        assert!(r.pixels().iter().any(|p| p.r != r.get(0, 0).r), "a flat grey came out flat");
+        // With no position to go on, `map` gives the rounding it would have
+        // dithered around.
+        assert_eq!(adj.map(GREY), Rgba::opaque(170, 170, 170), "mid-grey is nearest the third of four levels");
+        assert_eq!(adj.map(Rgba::new(10, 10, 10, 40)), Rgba::new(0, 0, 0, 40));
+        // Defaults are the ones the dialog opens with.
+        let default = Adjustment::from_params("dither", &[]).unwrap();
+        assert_eq!(default.params(), vec![4.0, 2.0, 100.0, 1.0, 0.0]);
+        // Greyscale throws the colour away; the strength at zero is a plain
+        // posterize.
+        let mono = Adjustment::from_params("dither", &[1.0, 2.0, 100.0, 1.0, 1.0]).unwrap();
+        let mut colour = Raster::filled(8, 8, Rgba::opaque(200, 40, 40));
+        let all = colour.bounds();
+        mono.apply(&mut colour, &all);
+        assert!(colour.pixels().iter().all(|p| p.r == p.g && p.g == p.b));
+        let flat = Adjustment::from_params("dither", &[1.0, 2.0, 0.0, 1.0, 0.0]).unwrap();
+        let mut plain = Raster::filled(4, 4, Rgba::opaque(100, 200, 100));
+        let all = plain.bounds();
+        flat.apply(&mut plain, &all);
+        assert!(plain.pixels().iter().all(|p| *p == Rgba::opaque(0, 255, 0)));
+    }
+
+    #[test]
+    fn an_adjustment_can_be_pointed_at_one_channel() {
+        // Levels on blue alone: the blue channel is stretched, the other two
+        // and the alpha are left exactly as they were.
+        let blue_only = Adjustment::from_params("levels", &[0.0, 128.0, 1.0, Channel::Blue.index()]).unwrap();
+        assert_eq!(blue_only.channel, Channel::Blue);
+        assert_eq!(blue_only.label(), "Levels (Blue)");
+        let p = Rgba::new(40, 80, 128, 90);
+        assert_eq!(blue_only.map(p), Rgba::new(40, 80, 255, 90));
+        // The same numbers on RGB move all three.
+        let all = Adjustment::from_params("levels", &[0.0, 128.0, 1.0]).unwrap();
+        assert_eq!(all.channel, Channel::All);
+        assert_eq!(all.label(), "Levels");
+        assert_eq!(all.map(p), Rgba::new(80, 159, 255, 90));
+        // And through a raster, which is the path the dialog takes.
+        let mut r = Raster::filled(2, 1, p);
+        let bounds = r.bounds();
+        blue_only.apply(&mut r, &bounds);
+        assert_eq!(r.get(0, 0), Rgba::new(40, 80, 255, 90));
+    }
+
+    #[test]
+    fn the_channel_rides_at_the_end_and_is_rgb_when_it_is_not_there() {
+        for name in Adjustment::NAMES {
+            let plain = Adjustment::from_params(name, &[30.0, 200.0, 2.0, 40.0]).unwrap();
+            // What an older file holds: the kind's parameters and nothing
+            // after them.
+            let older: Vec<f32> = plain.kind.params();
+            let reread = Adjustment::from_params(name, &older).unwrap();
+            assert_eq!(reread.channel, Channel::All, "{name} did not default to RGB");
+            assert_eq!(reread.kind, plain.kind, "{name} lost its settings");
+            if !plain.kind.takes_channel() {
+                // A trailing number means nothing to the rest, and none of
+                // them grows one in `params`.
+                assert_eq!(plain.params(), plain.kind.params(), "{name}");
+                continue;
+            }
+            for channel in Channel::ALL {
+                let mut params = plain.kind.params();
+                params.push(channel.index());
+                let adj = Adjustment::from_params(name, &params).unwrap();
+                assert_eq!(adj.channel, *channel, "{name}");
+                assert_eq!(adj.kind, plain.kind, "{name} lost its settings to the channel");
+                assert_eq!(adj.params(), params, "{name} does not round-trip");
+                assert_eq!(Adjustment::from_params(name, &adj.params()).unwrap(), adj, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_curve_finds_its_channel_after_its_points() {
+        // Three points and then the channel, which is what the dialog sends.
+        let params = vec![0.0, 0.0, 128.0, 200.0, 255.0, 255.0, Channel::Green.index()];
+        let adj = Adjustment::from_params("curves", &params).unwrap();
+        assert_eq!(adj.channel, Channel::Green);
+        assert_eq!(adj.params(), params);
+        let lifted = adj.map(Rgba::opaque(128, 128, 128));
+        assert_eq!(lifted, Rgba::opaque(128, 200, 128));
+    }
+
+    #[test]
+    fn only_the_per_channel_family_takes_a_channel() {
+        let takes: Vec<&str> = Adjustment::NAMES
+            .iter()
+            .filter(|n| Adjustment::from_params(n, &[]).unwrap().kind.takes_channel())
+            .copied()
+            .collect();
+        assert_eq!(takes, vec!["brightness-contrast", "levels", "curves", "posterize"]);
+        // The ones that read the whole colour stay on RGB whatever is passed.
+        for name in ["hue-saturation", "color-balance", "threshold", "invert", "desaturate", "dither"] {
+            let adj = Adjustment::from_params(name, &[3.0, 3.0, 3.0, 3.0, 3.0, 3.0]).unwrap();
+            assert_eq!(adj.channel, Channel::All, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_channel_keeps_the_other_channels_and_the_alpha() {
+        let new = Rgba::new(1, 2, 3, 4);
+        let old = Rgba::new(10, 20, 30, 40);
+        assert_eq!(Channel::All.pick(new, old), new);
+        assert_eq!(Channel::Red.pick(new, old), Rgba::new(1, 20, 30, 40));
+        assert_eq!(Channel::Green.pick(new, old), Rgba::new(10, 2, 30, 40));
+        assert_eq!(Channel::Blue.pick(new, old), Rgba::new(10, 20, 3, 40));
+        for channel in Channel::ALL {
+            assert_eq!(Channel::from_index(channel.index()), *channel);
+            assert!(!channel.label().is_empty());
+        }
+        assert_eq!(Channel::from_index(-1.0), Channel::All);
+        assert_eq!(Channel::from_index(99.0), Channel::Blue);
+        assert_eq!(Channel::from_index(f32::NAN), Channel::All);
+    }
+
+    #[test]
     fn hsl_round_trips() {
         for p in [RED, GREY, Rgba::WHITE, Rgba::BLACK, Rgba::opaque(12, 200, 99), Rgba::opaque(250, 30, 180)] {
             let (h, s, l) = rgb_to_hsl(p);
@@ -574,7 +927,7 @@ mod tests {
     #[test]
     fn apply_is_clipped() {
         let mut r = Raster::filled(3, 1, Rgba::WHITE);
-        Adjustment::Invert.apply(&mut r, &Rect::new(1, 0, 1, 1));
+        Adjustment::from(Kind::Invert).apply(&mut r, &Rect::new(1, 0, 1, 1));
         assert_eq!(r.get(0, 0), Rgba::WHITE);
         assert_eq!(r.get(1, 0), Rgba::BLACK);
         assert_eq!(r.get(2, 0), Rgba::WHITE);

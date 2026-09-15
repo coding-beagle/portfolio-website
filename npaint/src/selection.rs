@@ -193,12 +193,37 @@ impl Selection {
         }
     }
 
-    /// Puts back what the gesture should not have touched: `base` is the
-    /// layer as it was before, `edited` is what the tool produced. Only a
-    /// mask needs this — a rectangle is enforced exactly by the clip.
-    pub fn apply(&self, edited: &mut Raster, base: &Raster) {
+    /// Puts back what the gesture should not have touched, inside `clip`:
+    /// `base` is the layer as it was before, `edited` is what the tool
+    /// produced. Only a mask needs this — a rectangle is enforced exactly by
+    /// the clip. `clip` is what the gesture may have changed; a stroke that
+    /// names its own rectangle spares this a pass over the whole document.
+    pub fn apply(&self, edited: &mut Raster, base: &Raster, clip: &Rect) {
         if let Selection::Mask(m) = self {
-            m.apply(edited, base);
+            m.apply(edited, base, clip);
+        }
+    }
+
+    /// The same selection on a document reduced `step`-to-one, for
+    /// previewing at the resolution the screen is showing. A mask is
+    /// sampled rather than averaged: a preview's edge does not have to be
+    /// exact, and averaging would soften a hard selection into a fringe.
+    pub fn downscaled(&self, step: u32) -> Selection {
+        let step = step.max(1) as i32;
+        if step == 1 {
+            return self.clone();
+        }
+        match self {
+            Selection::None => Selection::None,
+            Selection::Rect(r) => {
+                let up = |v: i32| (v + step - 1).div_euclid(step);
+                let (x, y) = (r.x.div_euclid(step), r.y.div_euclid(step));
+                Selection::Rect(Rect::new(x, y, up(r.right()) - x, up(r.bottom()) - y))
+            }
+            Selection::Mask(m) => {
+                let (w, h) = (m.width().div_ceil(step as u32), m.height().div_ceil(step as u32));
+                Selection::Mask(Mask::from_fn(w, h, |x, y| m.cover(x * step, y * step)))
+            }
         }
     }
 
@@ -376,7 +401,8 @@ mod tests {
         // A stair step, so it cannot collapse back into a rectangle.
         s.set_mask(Mask::from_fn(4, 2, |x, y| if x < 2 || y > 0 { 255 } else { 0 }));
         assert!(s.needs_base(), "a mask is enforced by putting pixels back");
-        s.apply(&mut edited, &base);
+        let all = edited.bounds();
+        s.apply(&mut edited, &base, &all);
         assert_eq!(edited.get(0, 0), Rgba::BLACK, "inside: the paint stands");
         assert_eq!(edited.get(3, 0), Rgba::WHITE, "outside: the original comes back");
         assert_eq!(edited.get(3, 1), Rgba::BLACK);

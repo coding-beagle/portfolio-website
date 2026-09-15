@@ -20,6 +20,7 @@ use std::borrow::Cow;
 
 use crate::adjust::Adjustment;
 use crate::color::Rgba;
+use crate::geometry::{Point, Rect};
 use crate::mask::Mask;
 use crate::raster::Raster;
 use crate::transform::Affine;
@@ -44,6 +45,28 @@ impl SmartObject {
     /// The object as it lands on a document of the given size.
     pub fn render(&self, width: u32, height: u32) -> Raster {
         self.source.transformed_into(&self.transform, width, height)
+    }
+
+    /// Where the source lands in the document, as whole pixels: the
+    /// bounding box of its four transformed corners. It may reach outside
+    /// the canvas, which is how Reveal All knows there is more to show.
+    pub fn extent(&self) -> Rect {
+        let (w, h) = (f64::from(self.source.width()), f64::from(self.source.height()));
+        let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)];
+        let mut xs = corners.iter().map(|&(x, y)| self.transform.apply(Point::new(x, y)));
+        let first = xs.next().unwrap_or_default();
+        let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x, first.y);
+        for p in xs {
+            x0 = x0.min(p.x);
+            y0 = y0.min(p.y);
+            x1 = x1.max(p.x);
+            y1 = y1.max(p.y);
+        }
+        // The transformed corners are pixel *boundaries*, so the right and
+        // bottom ones are exclusive: no +1, unlike `Rect::from_corners`.
+        let (x0, y0) = (x0.floor() as i32, y0.floor() as i32);
+        let (x1, y1) = (x1.ceil() as i32, y1.ceil() as i32);
+        Rect::new(x0, y0, (x1 - x0).max(1), (y1 - y0).max(1))
     }
 
     /// The placement that fits `source` inside a `width` x `height` document
@@ -141,6 +164,15 @@ pub struct Layer {
 /// reveals everything, and erasing on a mask reveals rather than leaving a
 /// hole.
 pub fn mask_cover(p: Rgba) -> u8 {
+    // This runs once per pixel per masked layer on every frame, and a mask
+    // is almost always opaque grey — often plain white — so the two cases
+    // that need no arithmetic are taken first.
+    if p.a == 0 {
+        return 255;
+    }
+    if p.a == 255 {
+        return if p.r == p.g && p.g == p.b { p.r } else { crate::adjust::luminance(p) };
+    }
     let lum = f32::from(crate::adjust::luminance(p));
     let a = f32::from(p.a) / 255.0;
     (lum * a + 255.0 * (1.0 - a)).round().clamp(0.0, 255.0) as u8
@@ -289,6 +321,16 @@ impl Layer {
 
     /// How much of the pixel at `(x, y)` the mask lets through, `0..=255`.
     /// Everything, when there is no mask or it is switched off.
+    /// The mask to composite through, if there is one in force. Callers
+    /// that draw the layer take this rather than [`Layer::rendered`], which
+    /// has to build a whole masked copy to hand back.
+    pub fn render_mask(&self) -> Option<&Raster> {
+        match &self.mask {
+            Some(mask) if self.mask_enabled => Some(mask),
+            _ => None,
+        }
+    }
+
     pub fn mask_cover(&self, x: i32, y: i32) -> u8 {
         match &self.mask {
             Some(mask) if self.mask_enabled => mask_cover(mask.get(x, y)),
@@ -381,21 +423,23 @@ impl Layer {
 /// Gives every pixel of `edited` the alpha it has in `base` — what painting
 /// on a layer with locked transparency comes to. A pixel that was empty
 /// stays empty, colour and all.
-pub fn keep_alpha(edited: &mut Raster, base: &Raster) {
-    for y in 0..edited.height() as i32 {
-        for x in 0..edited.width() as i32 {
-            let was = base.get(x, y);
-            let now = edited.get(x, y);
-            if now.a != was.a {
-                edited.set(x, y, if was.a == 0 { was } else { now.with_alpha(was.a) });
-            }
+pub fn keep_alpha(edited: &mut Raster, base: &Raster, clip: &Rect) {
+    edited.map_at(clip, |now, x, y| {
+        let was = base.get(x, y);
+        if now.a == was.a {
+            now
+        } else if was.a == 0 {
+            was
+        } else {
+            now.with_alpha(was.a)
         }
-    }
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
 
@@ -484,7 +528,7 @@ mod tests {
         let pixels = Layer::new(LayerId(1), "a", Raster::new(2, 2));
         assert_eq!(pixels.edit_refusal(), None);
 
-        let adjustment = Layer::new_adjustment(LayerId(2), "levels", Adjustment::Invert, Raster::new(2, 2));
+        let adjustment = Layer::new_adjustment(LayerId(2), "levels", Adjustment::from(Kind::Invert), Raster::new(2, 2));
         assert!(adjustment.editing_mask(), "an adjustment layer starts on its mask");
         assert_eq!(adjustment.edit_refusal(), None);
         let mut on_pixels = adjustment.clone();
@@ -519,7 +563,8 @@ mod tests {
         let mut base = Raster::new(2, 1);
         base.set(0, 0, Rgba::new(255, 0, 0, 128));
         let mut edited = Raster::filled(2, 1, Rgba::BLACK);
-        keep_alpha(&mut edited, &base);
+        let all = edited.bounds();
+        keep_alpha(&mut edited, &base, &all);
         assert_eq!(edited.get(0, 0), Rgba::new(0, 0, 0, 128), "painted, at the alpha it had");
         assert_eq!(edited.get(1, 0), Rgba::TRANSPARENT, "an empty pixel stays empty");
     }

@@ -290,6 +290,17 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * `[width, height]` the canvas would need to hold everything, which is
+     * the canvas it has when nothing hangs outside it.
+     * @returns {Uint32Array}
+     */
+    content_size() {
+        const ret = wasm.npaint_content_size(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @param {number} index
      */
     convert_to_smart_object(index) {
@@ -1070,6 +1081,20 @@ export class NPaint {
         }
     }
     /**
+     * @returns {number}
+     */
+    preview_len() {
+        const ret = wasm.npaint_preview_len(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    preview_ptr() {
+        const ret = wasm.npaint_preview_ptr(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {number} index
      */
     rasterize_layer(index) {
@@ -1125,13 +1150,39 @@ export class NPaint {
         }
     }
     /**
-     * Recomposites if anything changed since the last call. Returns whether
-     * it did, so the page can skip the `putImageData`.
-     * @returns {boolean}
+     * Recomposites whatever has changed since the last call and says what
+     * that was, as `[x, y, w, h]` in document pixels — empty when nothing
+     * has, so the page can skip the upload entirely.
+     *
+     * Only the rectangle is redrawn, in the frame and in the bytes behind
+     * it; the rest of both is left as the last call made it. The page must
+     * therefore upload the same rectangle, and must not assume the frame it
+     * holds was built in one go.
+     * @returns {Int32Array}
      */
     render() {
         const ret = wasm.npaint_render(this.__wbg_ptr);
-        return ret !== 0;
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Composites the reduced preview a dialog is running, and says what
+     * size it came out as: `[width, height, step]`, or empty when there is
+     * no reduced preview — no session, or the canvas is zoomed in far
+     * enough that there is nothing to save.
+     *
+     * The page draws this stretched over the canvas in place of the frame,
+     * and goes back to [`NPaint::render`] when the session ends. The frame
+     * itself is left alone while a preview runs, so the page must not mix
+     * the two.
+     * @returns {Int32Array}
+     */
+    render_preview() {
+        const ret = wasm.npaint_render_preview(this.__wbg_ptr);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * Swaps a smart object's picture for another, keeping its place.
@@ -1171,6 +1222,16 @@ export class NPaint {
      */
     resize_image(width, height) {
         const ret = wasm.npaint_resize_image(this.__wbg_ptr, width, height);
+        return ret !== 0;
+    }
+    /**
+     * Grows the canvas to hold everything the layers have, including the
+     * parts of a smart object hanging outside it — Image > Reveal All.
+     * False when there is nothing outside to reveal.
+     * @returns {boolean}
+     */
+    reveal_all() {
+        const ret = wasm.npaint_reveal_all(this.__wbg_ptr);
         return ret !== 0;
     }
     /**

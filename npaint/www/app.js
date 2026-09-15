@@ -130,7 +130,9 @@ const octx = offscreen.getContext("2d");
  * is both quicker and less shimmery than bilinear straight from full size.
  */
 const mips = [];
-let mipsDirty = true;
+/** The reduced frame a dialog previews into, and whether it is what to draw. */
+let previewCanvas = null;
+let previewing = false;
 const checker = makeChecker();
 
 let tool = "brush";
@@ -262,17 +264,53 @@ function frame(now) {
 }
 
 function step(now) {
-  if (np.render()) {
+  // While a dialog previews and the canvas is zoomed out, the engine
+  // composites at the size the screen is showing rather than at the
+  // document's — a sixteenth of the pixels at a quarter zoom — and the page
+  // draws that stretched over the canvas. The frame is left as the last
+  // full render made it, and the session's commit brings it back.
+  const shown = np.render_preview();
+  if (shown.length) {
+    const [pw, ph, redrawn] = shown;
+    if (redrawn) {
+      if (!previewCanvas) previewCanvas = document.createElement("canvas");
+      if (previewCanvas.width !== pw || previewCanvas.height !== ph) {
+        previewCanvas.width = pw;
+        previewCanvas.height = ph;
+      }
+      const preview = new Uint8ClampedArray(memory.buffer, np.preview_ptr(), np.preview_len());
+      previewCanvas.getContext("2d").putImageData(new ImageData(preview, pw, ph), 0, 0);
+      needsDraw = true;
+    }
+    previewing = true;
+  } else if (previewing) {
+    // The session ended: back to the frame, which the engine has marked
+    // whole so that the render below fills it.
+    previewing = false;
+    needsDraw = true;
+  }
+
+  // The engine recomposites only what changed and says what that was; a
+  // brush dab on a 4K canvas is a few hundred pixels, not eight million.
+  const changed = np.render();
+  if (changed.length) {
     // The frame is a view into wasm memory: no copy until putImageData.
     const w = np.width();
     const h = np.height();
-    if (offscreen.width !== w || offscreen.height !== h) {
+    const resized = offscreen.width !== w || offscreen.height !== h;
+    if (resized) {
       offscreen.width = w;
       offscreen.height = h;
+      // The levels were built for the old size; there is nothing in them to
+      // patch, so `sourceFor` builds them again as the zoom asks for them.
+      mips.length = 0;
     }
+    // A canvas that just changed size is blank, so the engine's rectangle
+    // is not enough to fill it — take the lot.
+    const rect = resized ? [0, 0, w, h] : changed;
     const bytes = new Uint8ClampedArray(memory.buffer, np.frame_ptr(), np.frame_len());
-    octx.putImageData(new ImageData(bytes, w, h), 0, 0);
-    mipsDirty = true;
+    octx.putImageData(new ImageData(bytes, w, h), 0, 0, ...rect);
+    patchMips(rect);
     needsDraw = true;
     layersDirty = true;
     antsDirty = true;
@@ -340,7 +378,7 @@ function draw(now, ants, transforming) {
   // Nearest-neighbour when zoomed in so pixels are pixels; smoothed when
   // zoomed out so the downsample is not a moiré, from a level near the zoom.
   vctx.imageSmoothingEnabled = zoom < 1;
-  vctx.drawImage(sourceFor(zoom), px, py, w, h);
+  vctx.drawImage(previewing ? previewCanvas : sourceFor(zoom), px, py, w, h);
 
   vctx.strokeStyle = "rgba(0,0,0,0.6)";
   vctx.lineWidth = 1;
@@ -377,10 +415,6 @@ function sourceFor(zoom) {
   let level = 0;
   while (level < 4 && zoom <= 0.5 / 2 ** level) level++;
   if (level === 0) return offscreen;
-  if (mipsDirty) {
-    mips.length = 0;
-    mipsDirty = false;
-  }
   for (let i = mips.length; i < level; i++) {
     const src = i === 0 ? offscreen : mips[i - 1];
     const c = document.createElement("canvas");
@@ -389,11 +423,50 @@ function sourceFor(zoom) {
     const ctx = c.getContext("2d");
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(src, 0, 0, c.width, c.height);
+    // Exactly the call `patchMips` makes over the whole level, down to the
+    // even source rectangle, so that a level built from scratch and one
+    // patched in place agree to the pixel and nothing shimmers when a
+    // redraw switches between them.
+    ctx.drawImage(src, 0, 0, c.width * 2, c.height * 2, 0, 0, c.width, c.height);
     mips.push(c);
   }
   return mips[level - 1];
 }
+
+/**
+ * Redraws `[x, y, w, h]` of the document through the levels that already
+ * exist, rather than throwing them away and downsampling the whole 4K frame
+ * again for the next stroke. Each level is half the one above, so the
+ * rectangle halves as it goes down; it is grown by a pixel first so the
+ * smoothing at its edge still has the neighbours it would have had, and
+ * cleared before it is redrawn because drawImage composites.
+ */
+function patchMips(rect) {
+  let [x, y, w, h] = rect;
+  for (let i = 0; i < mips.length; i++) {
+    const src = i === 0 ? offscreen : mips[i - 1];
+    const level = mips[i];
+    // Grow by a pixel so the filter at the edge has its neighbours, then
+    // out to even edges so that halving lands exactly on this level's grid.
+    const x0 = even(Math.max(0, x - 1));
+    const y0 = even(Math.max(0, y - 1));
+    const x1 = Math.min(level.width * 2, even(x + w + 2));
+    const y1 = Math.min(level.height * 2, even(y + h + 2));
+    if (x1 <= x0 || y1 <= y0) return;
+    const [dx, dy, dw, dh] = [x0 / 2, y0 / 2, (x1 - x0) / 2, (y1 - y0) / 2];
+    const ctx = level.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    // drawImage composites, so what is there has to go first.
+    ctx.clearRect(dx, dy, dw, dh);
+    ctx.drawImage(src, x0, y0, x1 - x0, y1 - y0, dx, dy, dw, dh);
+    [x, y, w, h] = [dx, dy, dw, dh];
+  }
+}
+
+/** `v` rounded down to an even number. */
+const even = (v) => v - (v % 2);
+
 
 /**
  * The marching ants: the outline of the selection, whatever shape it is.
@@ -1717,7 +1790,6 @@ async function selectSubjectWithModel(box, mods) {
       rgba = np.frame_crop(...box);
       [, , width, height] = box;
     } else {
-      np.render();
       rgba = np.frame_copy();
       width = np.width();
       height = np.height();
@@ -1795,6 +1867,7 @@ function buildMenus() {
         { label: "Image Size…", shortcut: "Ctrl+Alt+I", action: showImageSizeDialog },
         { label: "Canvas Size…", shortcut: "Ctrl+Alt+C", action: showCanvasDialog },
         { label: "Crop to Selection", enabled: hasSelection, action: cropToSelection },
+        { label: "Reveal All", enabled: hasHiddenContent, action: revealAll },
         { sep: true },
         { label: "Rotate Canvas 90° Clockwise", action: () => act(() => np.rotate_canvas(1)) },
         { label: "Rotate Canvas 90° Anticlockwise", action: () => act(() => np.rotate_canvas(-1)) },
@@ -1846,8 +1919,150 @@ function beginTransform() {
 
 // ---- Dialogs --------------------------------------------------------------------
 
+/**
+ * The sizes New offers, so the common ones need no typing. Two more join
+ * them when there is something to join with: whatever is on the clipboard,
+ * and the document that is already open.
+ */
+const NEW_PRESETS = [
+  { label: "720p", w: 1280, h: 720 },
+  { label: "1080p", w: 1920, h: 1080 },
+  { label: "1440p", w: 2560, h: 1440 },
+  { label: "4K UHD", w: 3840, h: 2160 },
+  { label: "Square", w: 1080, h: 1080 },
+  { label: "Portrait", w: 1080, h: 1350 },
+  { label: "A4 at 300 dpi", w: 2480, h: 3508 },
+  { label: "US Letter at 300 dpi", w: 2550, h: 3300 },
+];
+
+/** The size of the image on the clipboard, if one is known to be there. */
+let clipboardImageSize = null;
+
+/** Says where the size in the dialog came from, or why the clipboard could
+ *  not be read. Empty until there is something to say. */
+function setNewNote(text) {
+  $("new-note").textContent = text;
+}
+
+/** Fills the preset dropdown, clipboard entry and all, and picks `chosen`. */
+function fillNewPresets(chosen) {
+  const select = $("new-preset");
+  const options = [];
+  if (clipboardImageSize) options.push({ key: "clipboard", label: "Clipboard", w: clipboardImageSize[0], h: clipboardImageSize[1] });
+  options.push({ key: "document", label: "This document", w: np.width(), h: np.height() });
+  for (const p of NEW_PRESETS) options.push({ key: `${p.w}x${p.h}`, ...p });
+  select.replaceChildren();
+  for (const o of options) {
+    const option = document.createElement("option");
+    option.value = `${o.w}x${o.h}`;
+    option.dataset.key = o.key;
+    option.textContent = `${o.label} — ${o.w} × ${o.h}`;
+    select.appendChild(option);
+  }
+  const custom = document.createElement("option");
+  custom.value = "";
+  custom.dataset.key = "custom";
+  custom.textContent = "Custom";
+  select.appendChild(custom);
+  const pick = options.find((o) => o.key === chosen) || options[0];
+  select.value = `${pick.w}x${pick.h}`;
+  $("new-width").value = pick.w;
+  $("new-height").value = pick.h;
+}
+
+/** Keeps the dropdown honest when the width or height is typed over. */
+function syncNewPreset() {
+  const size = `${$("new-width").value}x${$("new-height").value}`;
+  const select = $("new-preset");
+  select.value = [...select.options].some((o) => o.value === size) ? size : "";
+}
+
+/** Whether the preset in the dialog is still one the page chose, rather
+ *  than something the person picked or typed. */
+function newPresetUntouched() {
+  const key = $("new-preset").selectedOptions[0]?.dataset.key;
+  return key === "clipboard" || key === "document";
+}
+
+/** The hint for the route that always works, whatever the browser thinks of
+ *  a page reading the clipboard by itself. */
+const PASTE_HINT = "Press Ctrl+V here to take the size from an image on the clipboard.";
+
+/**
+ * Takes the size from an image the person pasted into the dialog. A paste
+ * carries the clipboard with it, so this needs no permission and works in
+ * every browser — it is the way out when `readClipboardSize` is refused.
+ */
+async function takeSizeFromPaste(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (e) {
+    setNewNote(`Could not read that image: ${e.message || e}`);
+    return;
+  }
+  clipboardImageSize = [bitmap.width, bitmap.height];
+  bitmap.close();
+  if (!$("dlg-new").open) return;
+  fillNewPresets("clipboard");
+  setNewNote(`Pasted: a ${clipboardImageSize[0]} × ${clipboardImageSize[1]} px image.`);
+}
+
+/**
+ * Looks in the system clipboard for an image, so New can offer its size.
+ * Every browser guards this and most refuse outright — Firefox does not
+ * allow it from a page at all, and Chrome stops allowing it once the
+ * permission has been refused — so the attempt is quiet, and a refusal says
+ * nothing: the paste route above is what the dialog tells people to use.
+ */
+async function readClipboardSize() {
+  if (!navigator.clipboard?.read) return;
+  let items;
+  try {
+    items = await navigator.clipboard.read();
+  } catch {
+    return;
+  }
+  let found = null;
+  for (const item of items) {
+    const type = item.types.find((t) => t.startsWith("image/"));
+    if (!type) continue;
+    const bitmap = await createImageBitmap(await item.getType(type));
+    found = [bitmap.width, bitmap.height];
+    bitmap.close();
+    break;
+  }
+  if (!found) return;
+  clipboardImageSize = found;
+  // The answer arrives after the dialog is up: step in only while it is
+  // still showing a size the page chose, never over a typed one.
+  if (!$("dlg-new").open || !newPresetUntouched()) return;
+  fillNewPresets("clipboard");
+  setNewNote(`The clipboard holds a ${found[0]} × ${found[1]} px image.`);
+}
+
 function bindDialogs() {
   const dlg = $("dlg-new");
+  // A paste into the dialog sets the size instead of pasting into the
+  // document; the window's own paste handler already leaves dialogs alone.
+  dlg.addEventListener("paste", (e) => {
+    const items = Array.from(e.clipboardData?.items ?? []);
+    const image = items.find((i) => i.kind === "file" && i.type.startsWith("image/"));
+    e.preventDefault();
+    e.stopPropagation();
+    if (!image) {
+      setNewNote("There was no image in that paste.");
+      return;
+    }
+    takeSizeFromPaste(image.getAsFile());
+  });
+  $("new-preset").addEventListener("change", () => {
+    const [w, h] = $("new-preset").value.split("x");
+    if (!w) return;
+    $("new-width").value = w;
+    $("new-height").value = h;
+  });
+  for (const id of ["new-width", "new-height"]) $(id).addEventListener("input", syncNewPreset);
   dlg.addEventListener("close", () => {
     if (dlg.returnValue !== "ok") return;
     const w = clampInt($("new-width").value, 1, 8192, 1024);
@@ -1872,9 +2087,16 @@ function bindUnload() {
 
 function showNewDialog() {
   if (np.is_modified() && !window.confirm("Start a new document and lose the unsaved changes to this one?")) return;
-  $("new-width").value = np.width();
-  $("new-height").value = np.height();
+  // What is on the clipboard is the likeliest size to want; the engine's own
+  // clipboard answers at once, and the system one is asked in the background.
+  const [cw, ch] = np.clipboard_size();
+  if (cw) clipboardImageSize = [cw, ch];
+  fillNewPresets(clipboardImageSize ? "clipboard" : "document");
+  if (cw) setNewNote(`Copied in NPaint: ${cw} × ${ch} px.`);
+  else if (clipboardImageSize) setNewNote(`Last pasted: ${clipboardImageSize[0]} × ${clipboardImageSize[1]} px. ${PASTE_HINT}`);
+  else setNewNote(PASTE_HINT);
   $("dlg-new").showModal();
+  readClipboardSize();
 }
 
 function clampInt(text, min, max, fallback) {
@@ -1940,10 +2162,11 @@ async function decodeImage(file) {
 
 /**
  * Opens a file: an NPaint document replaces the document whatever the mode;
- * an image goes in as a new document (`open`), as a layer at its own size
- * (`layer`), as a smart object fitted to the document (`place`), or as the
- * new contents of the active smart object (`replace`). The engine works out
- * the placement, so a placed picture keeps every pixel it came with however
+ * an image goes in as a new document the size of the picture, with the
+ * picture as a smart object (`open`), as a layer at its own size (`layer`),
+ * as a smart object fitted to the document (`place`), or as the new contents
+ * of the active smart object (`replace`). The engine works out the
+ * placement, so a placed picture keeps every pixel it came with however
  * small it is shown.
  */
 async function loadFile(file, mode) {
@@ -1967,6 +2190,7 @@ async function loadFile(file, mode) {
     docName = name;
     clearGuides();
     fit();
+    message(`Opened ${file.name} as a smart object: transform it freely, or rasterize it to paint on it.`);
   } else if (mode === "layer") {
     act(() => np.add_layer_centred(name, width, height, bytes));
     message(`Added ${file.name} as a layer.`);
@@ -2145,6 +2369,25 @@ function showCanvasDialog() {
   $("canvas-height").value = np.height();
   syncCanvasNote();
   $("dlg-canvas").showModal();
+}
+
+/** Whether any layer reaches outside the canvas — a smart object placed or
+ *  transformed past the edge, whose source still has those pixels. */
+function hasHiddenContent() {
+  const [w, h] = np.content_size();
+  return w > np.width() || h > np.height();
+}
+
+/** Image > Reveal All: grows the canvas until nothing is hanging outside. */
+function revealAll() {
+  act(() => {
+    if (np.reveal_all()) {
+      fit();
+      message(`Canvas ${np.width()} × ${np.height()} px: everything is inside it now.`);
+    } else {
+      message("Nothing is hanging outside the canvas.");
+    }
+  });
 }
 
 /** Says what the chosen size will do to the picture. */
@@ -2511,6 +2754,15 @@ function renderLayers() {
         });
       }
     });
+
+    // The gesture the badge's tooltip promises: double-clicking an
+    // adjustment layer's mark opens its settings, as the name does.
+    if (kind === "adjustment") {
+      pixels.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        withActive(i, () => editAdjustmentLayer(i));
+      });
+    }
 
     const thumbs = document.createElement("span");
     thumbs.className = "thumbs";

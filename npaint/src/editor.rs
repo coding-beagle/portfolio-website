@@ -15,7 +15,7 @@ use crate::document::{Document, DocumentError};
 use crate::file::{self, FileError};
 use crate::geometry::{Point, Rect};
 use crate::history::{Aside, History, Snapshot};
-use crate::layer::{keep_alpha, EditRefusal, Layer, Target};
+use crate::layer::{keep_alpha, EditRefusal, Layer, Target, LayerId};
 use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
@@ -27,13 +27,69 @@ use crate::viewport::Viewport;
 /// How close to a transform handle counts as grabbing it, in screen pixels.
 pub const HANDLE_GRAB_PX: f64 = 8.0;
 
+/// The most a preview may be shrunk, however far out the canvas is zoomed.
+const MAX_PREVIEW_STEP: u32 = 16;
+
+/// The composite of everything below the layer a session is changing, kept
+/// for as long as the session lasts. See [`Editor::preview_base`].
+struct PreviewBase {
+    /// The layer the composite stops below. Layers from here up are still
+    /// composited on every preview.
+    index: usize,
+    below: Raster,
+    /// The same thing at a fraction of the size, when the canvas is zoomed
+    /// far enough out that the screen cannot tell.
+    small: Option<SmallPreview>,
+}
+
+impl PreviewBase {
+    /// Whether this still describes the document. A session is cancelled by
+    /// anything that could make it stale, so this is a belt-and-braces
+    /// check rather than the thing keeping it honest.
+    fn fits(&self, document: &Document) -> bool {
+        self.index <= document.layers().len()
+            && self.below.width() == document.width()
+            && self.below.height() == document.height()
+    }
+}
+
+/// The document reduced `step`-to-one, so that a dialog's slider composites
+/// the pixels the screen is actually showing rather than sixteen times as
+/// many.
+///
+/// It is built once when the session opens (and again if the zoom changes
+/// under it), and holds everything below the edited layer flattened into
+/// one, then the edited layer and whatever is above it, all reduced. The
+/// edited layer is therefore always at index 1.
+///
+/// What you see is the adjustment applied to a reduced picture, which is not
+/// quite a reduction of the adjusted picture — for a curve or a levels pull
+/// the difference is invisible, for a threshold it is not. The full-size
+/// pass on commit is what the document keeps.
+struct SmallPreview {
+    step: u32,
+    document: Document,
+    /// The selection at the same scale, for the adjustments that are held
+    /// to one.
+    selection: Selection,
+    /// The edited surface before the adjustment, at the same scale.
+    base: Raster,
+}
+
+/// Where the edited layer sits in a [`SmallPreview`]: above the one layer
+/// everything below it was flattened into.
+const SMALL_EDITED: usize = 1;
+
 /// A live edit that the page previews and then commits or cancels: an
 /// adjustment dialog, an adjustment layer's dialog, a free transform of the
 /// active layer, or a free transform of the selection outline. Only one can
 /// be open, and it takes over the pointer while it is.
 enum Session {
-    /// An adjustment baked into the active surface — the pixels, or the mask.
-    Adjust { base: Raster, clip: Rect },
+    /// An adjustment baked into the active surface — the pixels, or the
+    /// mask. `last` is what was previewed most recently: while the preview
+    /// is running at a reduced size the full-size surface is not touched at
+    /// all, so commit works it out from here.
+    Adjust { base: Raster, clip: Rect, last: Option<Adjustment> },
     /// The adjustment *of an adjustment layer* being changed in place.
     AdjustmentLayer { before: Adjustment },
     Transform(TransformSession),
@@ -111,6 +167,16 @@ pub struct Editor {
     /// Set while a pointer gesture is in progress.
     gesture: Option<Gesture>,
     session: Option<Session>,
+    /// What the layers below the one a session is changing composite to.
+    ///
+    /// Dragging a slider changes one layer over and over while nothing
+    /// under it can move — any layer operation, undo or new document
+    /// cancels the session first — so those layers are composited once and
+    /// every tick starts from the answer. On a 3840x2160 document with two
+    /// layers under a levels adjustment layer that is 54 ms a tick down to
+    /// 25 ms, and it is the whole canvas every tick: an adjustment has no
+    /// dirty rectangle to save it.
+    preview_base: Option<PreviewBase>,
     /// The active layer before a transform began, restored on cancel and
     /// used as the undo snapshot on commit. The whole layer, because a
     /// smart object's transform changes its placement as well as its pixels.
@@ -127,7 +193,12 @@ pub struct Editor {
     /// can be carried into a new one.
     clipboard: Option<Clip>,
     /// Whether the composite the page last rendered is stale.
-    dirty: bool,
+/// The part of the composite that has changed since the page last drew,
+    /// or `None` when nothing has. A rectangle rather than a flag because a
+    /// brush dab on a 4K canvas changes a few hundred pixels and there is no
+    /// reason to recomposite and re-upload eight million: see
+    /// [`Document::composite_into`].
+    dirty: Option<Rect>,
 }
 
 impl Editor {
@@ -141,11 +212,12 @@ impl Editor {
             tool: ToolKind::Brush.instantiate(),
             gesture: None,
             session: None,
+            preview_base: None,
             transform_base: None,
             gesture_base: None,
             gesture_aside: None,
             clipboard: None,
-            dirty: true,
+            dirty: Some(Rect::new(0, 0, width as i32, height as i32)),
         }
     }
 
@@ -156,9 +228,11 @@ impl Editor {
     }
 
     /// Replaces the document with an opened image, as [`Editor::new_document`]
-    /// does with a blank one.
+    /// does with a blank one. The picture arrives as a smart object, so
+    /// scaling and rotating it never grinds away its own pixels; Layer >
+    /// Rasterize Layer turns it into plain pixels to paint on.
     pub fn open_image(&mut self, name: &str, raster: Raster) {
-        self.replace_document(Document::from_raster(name, raster));
+        self.replace_document(Document::from_smart_object(name, raster));
     }
 
     fn replace_document(&mut self, document: Document) {
@@ -167,7 +241,7 @@ impl Editor {
         self.document = document;
         self.selection = Selection::None;
         self.history.clear();
-        self.dirty = true;
+        self.touch_all();
     }
 
     // ---- Files ------------------------------------------------------------------
@@ -241,17 +315,142 @@ impl Editor {
 
     /// Whether the document has changed since the last [`Editor::take_dirty`].
     pub fn is_dirty(&self) -> bool {
-        self.dirty
+        self.dirty.is_some()
     }
 
-    /// Reports and clears the dirty flag: the page calls this once per frame
+    /// Notes that `rect` of the composite has changed. Reporting more than
+    /// actually changed only costs time; reporting less leaves stale pixels
+    /// on screen, so anything unsure says [`Editor::touch_all`].
+    fn touch(&mut self, rect: Rect) {
+        let rect = rect.intersect(&self.document.bounds());
+        if rect.is_empty() {
+            return;
+        }
+        self.dirty = Some(match self.dirty {
+            Some(had) => had.union(&rect),
+            None => rect,
+        });
+    }
+
+    /// The whole composite has changed — a layer came or went, the stack was
+    /// reordered, an undo landed.
+    fn touch_all(&mut self) {
+        self.dirty = Some(self.document.bounds());
+    }
+
+    /// Composites everything below `index` and keeps it for the session, so
+    /// that the previews to come start from there. Only worth it when there
+    /// is something below to save.
+    fn hold_preview_base(&mut self, index: usize) {
+        let mut below = Raster::new(self.document.width(), self.document.height());
+        let all = self.document.bounds();
+        self.document.composite_below(index, &mut below, &all);
+        self.preview_base = Some(PreviewBase { index, below, small: None });
+        self.refresh_small_preview();
+    }
+
+    /// How much a preview may be shrunk at the current zoom without the
+    /// screen being able to tell: the largest power of two that still puts
+    /// at least one preview pixel behind every screen pixel. This is the
+    /// same ladder the page's half-size copies of the frame go down, so a
+    /// preview lands exactly on one of their sizes.
+    pub fn preview_step(&self) -> u32 {
+        let zoom = self.viewport.zoom();
+        let mut step = 1;
+        while step < MAX_PREVIEW_STEP && zoom <= 0.5 / f64::from(step) {
+            step *= 2;
+        }
+        step
+    }
+
+    /// Builds (or rebuilds) the reduced document the previews composite,
+    /// when the zoom asks for one. Returns whether it built one just now —
+    /// a rebuild starts from the document's own pixels, so a session that
+    /// has been previewing into the reduced copy has to put its work back.
+    /// Cheap to call: it does nothing if the step has not changed.
+    fn refresh_small_preview(&mut self) -> bool {
+        let step = self.preview_step();
+        let Some(base) = self.preview_base.as_ref() else { return false };
+        if base.small.as_ref().is_some_and(|s| s.step == step) {
+            return false;
+        }
+        if step == 1 {
+            if let Some(base) = self.preview_base.as_mut() {
+                base.small = None;
+            }
+            return false;
+        }
+        let index = base.index;
+        let (w, h) = (self.document.width().div_ceil(step), self.document.height().div_ceil(step));
+        // Everything below the edited layer, already flattened, as one
+        // layer; then the edited layer and anything above it.
+        // Ids are handed out from 1, so 0 is free for the synthetic layer
+        // everything below has been flattened into.
+        let mut layers = vec![Layer::new(LayerId(0), "below", base.below.downscaled(step))];
+        layers.extend(self.document.layers()[index..].iter().map(|l| {
+            let mut small = l.clone();
+            small.raster = l.raster.downscaled(step);
+            small.mask = l.mask.as_ref().map(|m| m.downscaled(step));
+            small
+        }));
+        let Some(mut document) = Document::from_parts(w, h, layers, SMALL_EDITED) else { return false };
+        document.set_active(SMALL_EDITED).expect("the edited layer is there");
+        let selection = self.selection.downscaled(step);
+        let base_surface = document.active_surface().clone();
+        if let Some(base) = self.preview_base.as_mut() {
+            base.small = Some(SmallPreview { step, document, selection, base: base_surface });
+        }
+        true
+    }
+
+    /// The size of the reduced preview, as `[width, height, step]`, when one
+    /// is in force. The page draws it stretched over the canvas.
+    pub fn preview_size(&self) -> Option<[u32; 3]> {
+        let small = self.preview_base.as_ref()?.small.as_ref()?;
+        Some([small.document.width(), small.document.height(), small.step])
+    }
+
+    /// Composites the reduced preview into `out` if there is one and
+    /// anything has changed, and says whether a reduced preview is in force
+    /// at all — which is what the page needs to know to keep drawing it.
+    pub fn preview_into(&mut self, out: &mut Raster) -> Option<bool> {
+        if self.refresh_small_preview() {
+            // The rebuild took the document's own pixels, so an adjustment
+            // that has only ever been previewed into the reduced copy is
+            // not in it. Put it back.
+            if let Some(Session::Adjust { last: Some(adjustment), .. }) = &self.session {
+                let adjustment = adjustment.clone();
+                self.preview_small(&adjustment, false);
+            }
+            self.touch_all();
+        }
+        let dirty = self.is_dirty();
+        let small = self.preview_base.as_ref()?.small.as_ref()?;
+        if !dirty && out.width() == small.document.width() && out.height() == small.document.height() {
+            return Some(false);
+        }
+        let all = small.document.bounds();
+        if out.width() != small.document.width() || out.height() != small.document.height() {
+            *out = Raster::new(small.document.width(), small.document.height());
+        }
+        small.document.composite_into(out, &all);
+        Some(true)
+    }
+
+    /// Reports and clears the dirty rectangle: the page calls this once per frame
     /// and recomposites only when it says so.
-    pub fn take_dirty(&mut self) -> bool {
-        std::mem::replace(&mut self.dirty, false)
+    pub fn take_dirty(&mut self) -> Option<Rect> {
+        self.dirty.take()
     }
 
-    pub fn composite_into(&self, out: &mut Raster) {
-        self.document.composite_into(out);
+    pub fn composite_into(&self, out: &mut Raster, clip: &Rect) {
+        match &self.preview_base {
+            Some(base) if base.fits(&self.document) => {
+                out.copy_from(&base.below, clip);
+                self.document.composite_from(base.index, out, clip);
+            }
+            _ => self.document.composite_into(out, clip),
+        }
     }
 
     // ---- Tools and gestures -----------------------------------------------
@@ -344,9 +543,10 @@ impl Editor {
             settings: &mut self.settings,
         };
         let gesture = self.tool.begin(&mut ctx, ev);
+        let touched = self.tool_dirtied();
         if gesture == Gesture::EditsActiveLayer {
             self.record(snapshot, self.tool.kind().label());
-            self.enforce_limits();
+            self.enforce_limits(touched);
         } else {
             self.gesture_aside = before;
         }
@@ -355,7 +555,9 @@ impl Editor {
         // view gesture is drawn by the page from what it already has, and on
         // a big document a needless recomposite here is the difference
         // between a pan that glides and one that stutters.
-        self.dirty |= gesture == Gesture::EditsActiveLayer;
+        if gesture == Gesture::EditsActiveLayer {
+            self.touch(touched);
+        }
         true
     }
 
@@ -380,9 +582,12 @@ impl Editor {
         };
         let changed = self.tool.update(&mut ctx, ev);
         if changed {
-            self.enforce_limits();
+            let touched = self.tool_dirtied();
+            self.enforce_limits(touched);
+            if self.gesture == Some(Gesture::EditsActiveLayer) {
+                self.touch(touched);
+            }
         }
-        self.dirty |= changed && self.gesture == Some(Gesture::EditsActiveLayer);
         changed
     }
 
@@ -402,8 +607,9 @@ impl Editor {
             settings: &mut self.settings,
         };
         let changed = self.tool.finish(&mut ctx, ev);
+        let touched = self.tool_dirtied();
         if changed {
-            self.enforce_limits();
+            self.enforce_limits(touched);
         }
         if let Some(before) = self.gesture_aside.take() {
             if before.selection != self.selection {
@@ -412,22 +618,30 @@ impl Editor {
         }
         self.gesture_base = None;
         let edits = self.gesture.take() == Some(Gesture::EditsActiveLayer);
-        self.dirty |= changed && edits;
+        if changed && edits {
+            self.touch(touched);
+        }
         changed
     }
 
-    /// Puts back the pixels the gesture was not allowed to touch: outside a
-    /// mask selection, and the transparency of an alpha-locked layer. Does
-    /// nothing unless a base was kept.
-    fn enforce_limits(&mut self) {
+    /// Puts back the pixels the gesture was not allowed to touch inside
+    /// `within`: outside a mask selection, and the transparency of an
+    /// alpha-locked layer. Does nothing unless a base was kept.
+    fn enforce_limits(&mut self, within: Rect) {
         if let Some(base) = self.gesture_base.as_ref() {
             let keeps_alpha = self.document.active_layer().keeps_alpha();
             let raster = self.document.active_surface_mut();
-            self.selection.apply(raster, base);
+            self.selection.apply(raster, base, &within);
             if keeps_alpha {
-                keep_alpha(raster, base);
+                keep_alpha(raster, base, &within);
             }
         }
+    }
+
+    /// What the tool says its last call changed, or the whole document when
+    /// it does not say. Correctness never depends on a tool answering.
+    fn tool_dirtied(&self) -> Rect {
+        self.tool.dirtied().unwrap_or_else(|| self.document.bounds())
     }
 
     /// Abandons the gesture in progress and the undo step it opened.
@@ -450,7 +664,7 @@ impl Editor {
             // The tool has put the pixels back, so the step recorded for this
             // gesture would be an undo that does nothing. Drop it.
             self.history.discard_last();
-            self.dirty = true;
+            self.touch_all();
         }
         true
     }
@@ -485,7 +699,7 @@ impl Editor {
         let changed = op(self);
         if changed {
             self.history.push(Snapshot::Nothing, before, label);
-            self.dirty = true;
+            self.touch_all();
         }
         changed
     }
@@ -500,7 +714,7 @@ impl Editor {
             self.selection = aside.selection;
             self.settings.guides.h = aside.guides_h;
             self.settings.guides.v = aside.guides_v;
-            self.dirty = true;
+            self.touch_all();
         }
         done
     }
@@ -562,7 +776,7 @@ impl Editor {
         let snapshot = Snapshot::of_structure(&self.document);
         let result = op(&mut self.document)?;
         self.record(snapshot, label);
-        self.dirty = true;
+        self.touch_all();
         Ok(result)
     }
 
@@ -700,7 +914,7 @@ impl Editor {
         let snapshot = Snapshot::of_structure(&self.document);
         self.document.layer_mut(index).ok_or(DocumentError::NoSuchLayer)?.set_opacity(opacity);
         self.record_coalescing(snapshot, "Layer Opacity", format!("opacity:{index}"));
-        self.dirty = true;
+        self.touch_all();
         Ok(())
     }
 
@@ -757,12 +971,13 @@ impl Editor {
         op(self.document.active_surface_mut(), clip);
         if let Some(base) = base {
             let raster = self.document.active_surface_mut();
-            self.selection.apply(raster, &base);
+            self.selection.apply(raster, &base, &clip);
             if keeps_alpha {
-                keep_alpha(raster, &base);
+                keep_alpha(raster, &base, &clip);
             }
         }
-        self.dirty = true;
+        // A fill or an adjustment reaches no further than the selection.
+        self.touch(clip);
         true
     }
 
@@ -816,11 +1031,11 @@ impl Editor {
         let base = surface.clone();
         let area = band.bounds();
         surface.fill_rect(area, color, &area);
-        band.apply(surface, &base);
+        band.apply(surface, &base, &area);
         if keeps_alpha {
-            keep_alpha(surface, &base);
+            keep_alpha(surface, &base, &area);
         }
-        self.dirty = true;
+        self.touch(area);
         true
     }
 
@@ -837,7 +1052,7 @@ impl Editor {
     /// step, for the adjustments without parameters.
     pub fn apply_adjustment(&mut self, adjustment: Adjustment) -> bool {
         let label = adjustment.label();
-        self.pixel_edit(label, |raster, clip| adjustment.apply(raster, &clip))
+        self.pixel_edit(&label, |raster, clip| adjustment.apply(raster, &clip))
     }
 
     /// Stretches the selected pixels' tones to the full range: Auto Levels
@@ -933,7 +1148,7 @@ impl Editor {
         self.record(Snapshot::of_whole_layer(&self.document, index).expect("the active layer exists"), label);
         let (w, h) = (self.document.width(), self.document.height());
         self.document.active_layer_mut().map_rasters(pixels, place, w, h);
-        self.dirty = true;
+        self.touch_all();
         true
     }
 
@@ -978,7 +1193,7 @@ impl Editor {
         *self.document.active_surface_mut() = out;
         let bounds = self.document.bounds();
         self.selection = self.selection.translated(dx, dy, bounds);
-        self.dirty = true;
+        self.touch_all();
         true
     }
 
@@ -991,7 +1206,7 @@ impl Editor {
         self.record_coalescing(Snapshot::Nothing, "Move Selection", "nudge-selection");
         let bounds = self.document.bounds();
         self.selection = self.selection.translated(dx, dy, bounds);
-        self.dirty = true;
+        self.touch_all();
         true
     }
 
@@ -1029,6 +1244,19 @@ impl Editor {
         .expect("resizing cannot fail");
         self.selection = Selection::None;
         true
+    }
+
+    /// Grows the canvas until everything the layers hold is inside it —
+    /// chiefly a smart object placed or transformed past the edge, whose
+    /// source still has the pixels. False when nothing is hiding out there,
+    /// or when the canvas it would need is too big.
+    pub fn reveal_all(&mut self) -> bool {
+        let all = self.document.content_bounds();
+        let bounds = self.document.bounds();
+        if all == bounds {
+            return false;
+        }
+        self.resize_canvas_as("Reveal All", all.w as u32, all.h as u32, -all.x, -all.y)
     }
 
     /// Crops the canvas to the selection's bounding box. False when nothing
@@ -1093,7 +1321,7 @@ impl Editor {
         if self.selection.needs_base() {
             let blank = Raster::new(self.document.width(), self.document.height());
             if let Some(layer) = self.document.layer_mut(index) {
-                self.selection.apply(&mut layer.raster, &blank);
+                self.selection.apply(&mut layer.raster, &blank, &clip);
             }
         }
         index
@@ -1138,7 +1366,8 @@ impl Editor {
             return Err(SessionError::Uneditable(why));
         }
         let clip = self.selection.clip(self.document.bounds());
-        self.session = Some(Session::Adjust { base: self.document.active_surface().clone(), clip });
+        self.session = Some(Session::Adjust { base: self.document.active_surface().clone(), clip, last: None });
+        self.hold_preview_base(self.document.active_index());
         Ok(())
     }
 
@@ -1153,6 +1382,7 @@ impl Editor {
         self.set_active_layer(index).map_err(|_| SessionError::NotAdjustmentLayer)?;
         self.open_session()?;
         self.session = Some(Session::AdjustmentLayer { before });
+        self.hold_preview_base(index);
         Ok(())
     }
 
@@ -1166,12 +1396,22 @@ impl Editor {
     /// be open.
     pub fn preview_adjustment(&mut self, name: &str, params: &[f32]) -> Result<(), AdjustmentError> {
         let adjustment = Adjustment::from_params(name, params)?;
-        match &self.session {
-            Some(Session::Adjust { base, clip }) => {
-                let mut out = base.clone();
-                adjustment.apply(&mut out, clip);
-                self.selection.apply(&mut out, base);
-                *self.document.active_surface_mut() = out;
+        self.refresh_small_preview();
+        let is_layer = matches!(self.session, Some(Session::AdjustmentLayer { .. }));
+        // With a reduced preview running, the page is not looking at the
+        // full-size surface, so there is no reason to compute it — that is
+        // where the saving is. Commit works it out once, from `last`.
+        let reduced = self.preview_small(&adjustment, is_layer);
+        match &mut self.session {
+            Some(Session::Adjust { base, clip, last }) => {
+                *last = Some(adjustment.clone());
+                if !reduced {
+                    let (base, clip) = (base.clone(), *clip);
+                    let mut out = base.clone();
+                    adjustment.apply(&mut out, &clip);
+                    self.selection.apply(&mut out, &base, &clip);
+                    *self.document.active_surface_mut() = out;
+                }
             }
             Some(Session::AdjustmentLayer { .. }) => {
                 let index = self.document.active_index();
@@ -1179,15 +1419,42 @@ impl Editor {
             }
             _ => return Err(AdjustmentError("no adjustment in progress".to_owned())),
         }
-        self.dirty = true;
+        self.touch_all();
         Ok(())
+    }
+
+    /// Puts `adjustment` into the reduced preview. Returns whether there was
+    /// one, which is also whether the full-size pass can be skipped.
+    fn preview_small(&mut self, adjustment: &Adjustment, is_layer: bool) -> bool {
+        let Some(small) = self.preview_base.as_mut().and_then(|b| b.small.as_mut()) else {
+            return false;
+        };
+        if is_layer {
+            let _ = small.document.set_adjustment(SMALL_EDITED, adjustment.clone());
+        } else {
+            let clip = small.selection.clip(small.document.bounds());
+            let mut out = small.base.clone();
+            adjustment.apply(&mut out, &clip);
+            small.selection.apply(&mut out, &small.base, &clip);
+            *small.document.active_surface_mut() = out;
+        }
+        true
     }
 
     /// Keeps whatever is currently previewed as one undo step.
     pub fn commit_session(&mut self) -> bool {
+        self.preview_base = None;
         let Some(session) = self.session.take() else { return false };
         match session {
-            Session::Adjust { base, .. } => {
+            Session::Adjust { base, clip, last } => {
+                // The full-size pass, once, whether or not the previews ran
+                // at a reduced size. What the document keeps is always this.
+                if let Some(adjustment) = last {
+                    let mut out = base.clone();
+                    adjustment.apply(&mut out, &clip);
+                    self.selection.apply(&mut out, &base, &clip);
+                    *self.document.active_surface_mut() = out;
+                }
                 let now = std::mem::replace(self.document.active_surface_mut(), base);
                 self.record(Snapshot::of_active_layer(&self.document), "Adjustment");
                 *self.document.active_surface_mut() = now;
@@ -1225,12 +1492,13 @@ impl Editor {
                 self.history.push(Snapshot::Nothing, aside, "Transform Selection");
             }
         }
-        self.dirty = true;
+        self.touch_all();
         true
     }
 
     /// Puts the layer back the way it was before the session.
     pub fn cancel_session(&mut self) -> bool {
+        self.preview_base = None;
         let Some(session) = self.session.take() else { return false };
         match session {
             Session::Adjust { base, .. } => *self.document.active_surface_mut() = base,
@@ -1245,7 +1513,7 @@ impl Editor {
             }
             Session::TransformSelection { before, .. } => self.selection = before,
         }
-        self.dirty = true;
+        self.touch_all();
         true
     }
 
@@ -1327,7 +1595,7 @@ impl Editor {
             }
             _ => return,
         }
-        self.dirty = true;
+        self.touch_all();
     }
 
     fn with_transform(&mut self, op: impl FnOnce(&mut TransformSession)) -> bool {
@@ -1559,7 +1827,7 @@ impl Editor {
 
     pub fn clear_subject_box(&mut self) {
         if self.settings.subject_box.take().is_some() {
-            self.dirty = true;
+            self.touch_all();
         }
     }
 
@@ -1584,7 +1852,7 @@ impl Editor {
     /// matte the model made of that part alone. Clears the box either way.
     pub fn select_subject_in_box(&mut self, rect: Rect, matte: &[u8], matte_w: u32, matte_h: u32, mode: SelectMode) -> bool {
         self.settings.subject_box = None;
-        self.dirty = true;
+        self.touch_all();
         let rect = rect.intersect(&self.document.bounds());
         if rect.is_empty() {
             return false;
@@ -1605,7 +1873,7 @@ impl Editor {
     /// when the model is not available. Clears the box either way.
     pub fn select_subject_builtin_in_box(&mut self, rect: Rect, mode: SelectMode) -> bool {
         self.settings.subject_box = None;
-        self.dirty = true;
+        self.touch_all();
         let rect = rect.intersect(&self.document.bounds());
         if rect.is_empty() {
             return false;
@@ -1716,6 +1984,7 @@ fn selection_raster(selection: &Selection, bounds: Rect) -> Raster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
 
@@ -1744,12 +2013,12 @@ mod tests {
     #[test]
     fn a_stroke_paints_and_undoes() {
         let mut e = editor();
-        assert!(e.take_dirty(), "a new editor needs a first render");
-        assert!(!e.take_dirty());
+        assert!(e.take_dirty().is_some(), "a new editor needs a first render");
+        assert!(e.take_dirty().is_none());
 
         click(&mut e, 3.0, 3.0);
         assert_eq!(px(&e, 3, 3), RED);
-        assert!(e.take_dirty());
+        assert!(e.take_dirty().is_some());
         assert!(e.can_undo());
 
         assert!(e.undo());
@@ -2067,6 +2336,7 @@ mod tests {
         e.open_image("cat.png", Raster::filled(7, 5, RED));
         assert_eq!((e.document().width(), e.document().height()), (7, 5));
         assert_eq!(e.document().layer(0).unwrap().name, "cat.png");
+        assert!(e.document().layer(0).unwrap().is_smart(), "an opened picture keeps its own pixels");
         assert!(!e.can_undo());
     }
 
@@ -2194,7 +2464,7 @@ mod tests {
         assert_eq!(px(&e, 10, 10), Rgba::WHITE);
         assert!(!e.pointer_down(Point::new(10.0, 10.0), false, false), "painting waits for the dialog");
         e.commit_session();
-        assert!(e.apply_adjustment(Adjustment::Invert));
+        assert!(e.apply_adjustment(Adjustment::from(Kind::Invert)));
         assert_eq!(px(&e, 2, 2), Rgba::WHITE);
     }
 
@@ -2469,7 +2739,7 @@ mod tests {
         e.preview_adjustment("brightness-contrast", &[-100.0, 0.0]).unwrap();
         assert_eq!(px(&e, 0, 0).r, 0, "previews replace");
         assert!(e.commit_session());
-        assert_eq!(e.layer_adjustment(1).unwrap().params(), vec![-100.0, 0.0]);
+        assert_eq!(e.layer_adjustment(1).unwrap().params(), vec![-100.0, 0.0, 0.0], "brightness, contrast, and the channel");
         assert!(e.undo());
         assert_eq!(px(&e, 0, 0), Rgba::WHITE, "the whole dialog is one step");
         assert!(e.undo(), "then the layer itself");
@@ -2925,20 +3195,214 @@ mod tests {
     #[test]
     fn selection_and_view_gestures_do_not_dirty_the_composite() {
         let mut e = editor();
-        assert!(e.take_dirty());
+        assert!(e.take_dirty().is_some());
         e.set_tool(ToolKind::Select);
         e.pointer_down(Point::new(0.0, 0.0), false, false);
         e.pointer_move(Point::new(3.0, 3.0), false, false);
         e.pointer_up(Point::new(5.0, 5.0), false, false);
-        assert!(!e.take_dirty(), "a marquee changes no pixels");
+        assert!(e.take_dirty().is_none(), "a marquee changes no pixels");
         e.set_tool(ToolKind::Hand);
         e.pointer_down(Point::new(0.0, 0.0), false, false);
         e.pointer_move(Point::new(30.0, 30.0), false, false);
         e.pointer_up(Point::new(30.0, 30.0), false, false);
-        assert!(!e.take_dirty(), "nor does a pan");
+        assert!(e.take_dirty().is_none(), "nor does a pan");
         e.set_tool(ToolKind::Pencil);
-        click(&mut e, 1.0, 1.0);
-        assert!(e.take_dirty(), "painting does");
+        // The pan moved the view, so the click has to aim at a screen point
+        // that is still over the document: a stroke that lands nowhere
+        // changes no pixels and rightly dirties nothing.
+        click(&mut e, 31.0, 31.0);
+        assert!(e.take_dirty().is_some(), "painting does");
+    }
+
+    /// The invariant the session's cached base rests on: starting from the
+    /// composite of the layers below gives the same picture as compositing
+    /// the lot, and the cache never outlives the session that built it.
+    #[test]
+    fn a_session_composites_from_its_cached_base_and_gets_the_same_picture() {
+        let mut e = Editor::new(30, 20, Rgba::opaque(40, 90, 160));
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 6;
+        e.add_layer();
+        e.set_tool(ToolKind::Brush);
+        click(&mut e, 10.0, 10.0);
+        e.set_layer_opacity(1, 0.7).unwrap();
+        e.set_layer_blend(1, crate::blend::BlendMode::Screen).unwrap();
+        let index = e.add_adjustment_layer("levels", &[0.0, 200.0, 1.0]).unwrap();
+        // A layer above the adjustment, so the cache is not simply the end.
+        e.add_layer();
+        click(&mut e, 22.0, 6.0);
+
+        let all = e.document().bounds();
+        let mut frame = Raster::new(30, 20);
+        e.begin_adjustment_layer(index).unwrap();
+        assert!(e.preview_base.is_some(), "there is something below to keep");
+        for white in [120.0, 200.0, 255.0] {
+            e.preview_adjustment("levels", &[0.0, white, 1.0]).unwrap();
+            e.composite_into(&mut frame, &all);
+            assert_eq!(frame, e.document().composite(), "white point {white} came out wrong");
+        }
+        e.commit_session();
+        assert!(e.preview_base.is_none(), "the cache goes with the session");
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame, e.document().composite());
+
+        // Undo cancels the session, so the cache cannot outlive what it was
+        // built from.
+        e.begin_adjustment_layer(index).unwrap();
+        assert!(e.preview_base.is_some());
+        assert!(e.undo());
+        assert!(e.preview_base.is_none(), "undo dropped it");
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame, e.document().composite());
+
+        // The bottom layer has nothing below it, so the kept composite is
+        // empty — and the answer is still right.
+        e.set_active_layer(0).unwrap();
+        e.begin_adjustment().unwrap();
+        e.preview_adjustment("invert", &[]).unwrap();
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame, e.document().composite());
+        e.cancel_session();
+        assert!(e.preview_base.is_none());
+    }
+
+    /// The reduced preview: the same picture at a fraction of the size while
+    /// the canvas is zoomed out, and the full-size answer on commit however
+    /// the previews ran.
+    #[test]
+    fn a_zoomed_out_preview_composites_at_the_size_the_screen_shows() {
+        let mut e = Editor::new(64, 32, Rgba::opaque(200, 120, 60));
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 8;
+        e.add_layer();
+        e.set_tool(ToolKind::Brush);
+        click(&mut e, 20.0, 16.0);
+        let index = e.add_adjustment_layer("levels", &[0.0, 180.0, 1.0]).unwrap();
+
+        // At a zoom that fills the screen there is nothing to save.
+        e.set_zoom_about(1.0, Point::new(0.0, 0.0));
+        e.begin_adjustment_layer(index).unwrap();
+        assert_eq!(e.preview_step(), 1);
+        assert_eq!(e.preview_size(), None, "no reduction at 1:1");
+        e.cancel_session();
+
+        // Zoomed out to a quarter, the preview is a quarter the size.
+        e.set_zoom_about(0.25, Point::new(0.0, 0.0));
+        assert_eq!(e.preview_step(), 4);
+        e.begin_adjustment_layer(index).unwrap();
+        assert_eq!(e.preview_size(), Some([16, 8, 4]));
+        let mut small = Raster::new(1, 1);
+        assert_eq!(e.preview_into(&mut small), Some(true));
+        assert_eq!((small.width(), small.height()), (16, 8));
+
+        // A neutral adjustment previews as the picture below it, reduced:
+        // that is the whole stack, correctly placed and masked.
+        e.preview_adjustment("levels", &[0.0, 255.0, 1.0]).unwrap();
+        assert_eq!(e.preview_into(&mut small), Some(true));
+        assert_eq!(small, e.document().composite().downscaled(4), "the plumbing is off");
+
+        // A real one is close to the reduction of the full answer, but not
+        // identical: the adjustment runs on reduced pixels. That is the
+        // trade, and it is why commit does the full-size pass.
+        e.preview_adjustment("levels", &[40.0, 160.0, 1.0]).unwrap();
+        assert_eq!(e.preview_into(&mut small), Some(true));
+        let want = e.document().composite().downscaled(4);
+        let offsets: Vec<i32> = small
+            .pixels()
+            .iter()
+            .zip(want.pixels())
+            .flat_map(|(a, b)| [(a.r, b.r), (a.g, b.g), (a.b, b.b)].map(|(l, r)| (i32::from(l) - i32::from(r)).abs()))
+            .collect();
+        let mean = offsets.iter().sum::<i32>() / offsets.len() as i32;
+        // Over the picture the two agree closely; the pixels that do not are
+        // the edges, where a steep curve amplifies whatever the reduction
+        // averaged away. That is the trade, and it is why commit is a
+        // full-size pass.
+        assert!(mean <= 8, "the preview is not close to the answer: {mean} on average");
+        e.commit_session();
+        assert_eq!(e.preview_size(), None, "the preview goes with the session");
+
+        // The pixel-adjustment dialog skips the full-size pass while it
+        // previews reduced, so commit has to work it out — exactly.
+        e.set_active_layer(1).unwrap();
+        let before = e.document().active_surface().clone();
+        e.begin_adjustment().unwrap();
+        assert!(e.preview_size().is_some(), "reduced here too");
+        e.preview_adjustment("invert", &[]).unwrap();
+        assert_eq!(e.document().active_surface(), &before, "the full-size pixels are left alone");
+        e.commit_session();
+        let mut want = before.clone();
+        let all = want.bounds();
+        Adjustment::from(Kind::Invert).apply(&mut want, &all);
+        assert_eq!(e.document().active_surface(), &want, "commit is the full-size answer");
+    }
+
+    /// The invariant the dirty rectangle rests on: redrawing only what the
+    /// engine said changed leaves exactly the frame that redrawing all of it
+    /// would have — through a mask, an adjustment layer and a blend mode.
+    #[test]
+    fn compositing_only_the_dirty_rectangle_gives_the_whole_picture() {
+        let mut e = Editor::new(60, 40, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 5;
+        e.add_layer();
+        e.set_tool(ToolKind::Brush);
+        click(&mut e, 12.0, 12.0);
+        e.add_layer_mask(1, false).unwrap();
+        e.set_layer_opacity(1, 0.6).unwrap();
+        e.set_layer_blend(1, crate::blend::BlendMode::Multiply).unwrap();
+        e.add_adjustment_layer("levels", &[0.0, 180.0, 1.0]).unwrap();
+        e.set_active_layer(1).unwrap();
+
+        // Start the buffer in sync, the way the page's first render does.
+        let mut frame = Raster::new(60, 40);
+        let all = e.document().bounds();
+        e.take_dirty();
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame, e.document().composite(), "a full pass is the reference");
+
+        // Now paint, and redraw only what the engine says changed.
+        e.pointer_down(Point::new(20.0, 10.0), false, false);
+        e.pointer_move(Point::new(40.0, 30.0), false, false);
+        let rect = e.take_dirty().expect("the drag changed something");
+        assert!(rect.w < 60 || rect.h < 40, "not the whole canvas: {rect:?}");
+        e.composite_into(&mut frame, &rect);
+        assert_eq!(frame, e.document().composite(), "the rectangle was not enough");
+
+        e.pointer_up(Point::new(40.0, 30.0), false, false);
+        if let Some(rect) = e.take_dirty() {
+            e.composite_into(&mut frame, &rect);
+        }
+        assert_eq!(frame, e.document().composite());
+    }
+
+    /// The point of the dirty rectangle: a dab costs a dab, not a canvas.
+    #[test]
+    fn painting_dirties_only_the_part_it_painted() {
+        let mut e = Editor::new(400, 400, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 4;
+        e.set_tool(ToolKind::Pencil);
+        e.take_dirty();
+        click(&mut e, 100.0, 100.0);
+        let rect = e.take_dirty().expect("a dab changes something");
+        assert!(rect.contains(100, 100), "{rect:?} misses the dab");
+        assert!(rect.w <= 16 && rect.h <= 16, "a 4 px dab dirtied {rect:?}");
+        // A drag dirties the segment it just drew, not the whole stroke.
+        e.pointer_down(Point::new(10.0, 10.0), false, false);
+        e.take_dirty();
+        e.pointer_move(Point::new(300.0, 10.0), false, false);
+        let long = e.take_dirty().expect("the drag changes something");
+        assert!(long.w >= 290, "the whole segment: {long:?}");
+        assert!(long.h <= 16, "but only the segment: {long:?}");
+        e.pointer_move(Point::new(300.0, 12.0), false, false);
+        let short = e.take_dirty().expect("and so does the next move");
+        assert!(short.w <= 16, "the second segment is short: {short:?}");
+        e.pointer_up(Point::new(300.0, 12.0), false, false);
+        // Anything structural gives up and redraws everything.
+        e.take_dirty();
+        assert!(e.undo());
+        assert_eq!(e.take_dirty(), Some(Rect::new(0, 0, 400, 400)));
     }
 
     #[test]

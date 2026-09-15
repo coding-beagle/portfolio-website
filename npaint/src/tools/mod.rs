@@ -178,7 +178,7 @@ impl ToolKind {
             ToolKind::Brush => Box::new(StrokeTool::new(StrokeMode::Brush)),
             ToolKind::Pencil => Box::new(StrokeTool::new(StrokeMode::Pencil)),
             ToolKind::Eraser => Box::new(StrokeTool::new(StrokeMode::Eraser)),
-            ToolKind::Bucket => Box::new(BucketTool),
+            ToolKind::Bucket => Box::new(BucketTool::default()),
             ToolKind::Eyedropper => Box::new(EyedropperTool),
             ToolKind::Line => Box::new(ShapeTool::new(Shape::Line)),
             ToolKind::Rectangle => Box::new(ShapeTool::new(Shape::Rectangle)),
@@ -316,6 +316,20 @@ pub trait Tool {
     /// The gesture was abandoned (Escape, or the pointer left the window).
     /// The tool should put the document back the way it was.
     fn cancel(&mut self, ctx: &mut ToolContext);
+
+    /// What the call that just returned changed, in document pixels, or
+    /// `None` for "assume the worst".
+    ///
+    /// The editor uses this to recomposite and re-upload only the part of
+    /// the picture that moved: on a 4K canvas a brush dab is a few hundred
+    /// pixels out of eight million. It accumulates the answers until the
+    /// page draws, so a tool reports only its latest stamp, not the whole
+    /// gesture. Saying nothing is always correct and always slow; saying
+    /// *less* than was touched leaves stale pixels on screen, so grow the
+    /// rectangle by whatever the brush's edge or the antialiasing may reach.
+    fn dirtied(&self) -> Option<Rect> {
+        None
+    }
 
     /// A rubber band the page should draw over the canvas while the gesture
     /// runs, as `[x, y, w, h]` in screen pixels. Only for gestures that show

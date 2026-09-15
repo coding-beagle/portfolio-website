@@ -27,6 +27,11 @@ impl Raster {
         self.pixels.fill(Rgba::TRANSPARENT);
     }
 
+    /// [`Raster::clear`], inside `clip` only.
+    pub fn clear_in(&mut self, clip: &Rect) {
+        self.for_each_row(clip, |row, _| row.fill(Rgba::TRANSPARENT));
+    }
+
     pub fn filled(width: u32, height: u32, color: Rgba) -> Raster {
         Raster {
             width,
@@ -114,6 +119,88 @@ impl Raster {
         }
     }
 
+    /// [`Raster::write_rgba_bytes`] for one rectangle of the buffer, leaving
+    /// the rest of `out` as it was — the other half of a redraw that only
+    /// touched part of the frame.
+    pub fn write_rgba_bytes_in(&self, out: &mut [u8], clip: &Rect) {
+        debug_assert_eq!(out.len(), self.pixels.len() * 4);
+        let r = clip.intersect(&self.bounds());
+        let stride = self.width as usize;
+        for y in r.y..r.bottom() {
+            let start = y as usize * stride + r.x as usize;
+            let row = &self.pixels[start..start + r.w as usize];
+            let (chunks, _) = out[start * 4..(start + r.w as usize) * 4].as_chunks_mut::<4>();
+            for (dst, px) in chunks.iter_mut().zip(row) {
+                *dst = [px.r, px.g, px.b, px.a];
+            }
+        }
+    }
+
+    /// Applies `f` to every pixel of `clip`, handing it the matching pixel
+    /// of `other` (the same size as `self`) as well. The paired version of
+    /// [`Raster::map_in`], for a pass that reads a second buffer — a layer
+    /// mask — a row at a time rather than a bounds-checked pixel at a time.
+    pub fn map_with(&mut self, other: &Raster, clip: &Rect, mut f: impl FnMut(Rgba, Rgba) -> Rgba) {
+        debug_assert_eq!((self.width, self.height), (other.width, other.height));
+        self.for_each_row(clip, |row, y| {
+            for (p, o) in row.iter_mut().zip(other.row(clip, y)) {
+                *p = f(*p, *o);
+            }
+        });
+    }
+
+    /// The buffer reduced `step`-to-one: each output pixel is the average
+    /// of the `step` x `step` block behind it, on premultiplied colour so
+    /// that a transparent pixel's colour does not bleed into its neighbours.
+    ///
+    /// What a preview is composited into while the canvas is zoomed out —
+    /// at a quarter scale that is a sixteenth of the pixels, and the screen
+    /// cannot tell. A `step` of 1 is a copy.
+    pub fn downscaled(&self, step: u32) -> Raster {
+        let step = step.max(1);
+        if step == 1 {
+            return self.clone();
+        }
+        let (w, h) = (self.width.div_ceil(step), self.height.div_ceil(step));
+        let mut out = Raster::new(w, h);
+        if w == 0 || h == 0 {
+            return out;
+        }
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+                let mut n = 0u32;
+                for sy in y * step as i32..((y + 1) * step as i32).min(self.height as i32) {
+                    for sx in x * step as i32..((x + 1) * step as i32).min(self.width as i32) {
+                        let p = self.pixels[sy as usize * self.width as usize + sx as usize];
+                        let pa = u32::from(p.a);
+                        r += u32::from(p.r) * pa;
+                        g += u32::from(p.g) * pa;
+                        b += u32::from(p.b) * pa;
+                        a += pa;
+                        n += 1;
+                    }
+                }
+                // With no alpha anywhere in the block there is no colour to
+                // average, and the pixel stays as it was made: empty.
+                let (Some(alpha), Some(weight)) = (a.checked_div(n), std::num::NonZeroU32::new(a)) else {
+                    continue;
+                };
+                let w = weight.get();
+                out.set(x, y, Rgba::new((r / w) as u8, (g / w) as u8, (b / w) as u8, alpha as u8));
+            }
+        }
+        out
+    }
+
+    /// Copies `clip` of `src` over the same place in `self`, which must be
+    /// the same size. Puts back part of a buffer from a copy of it without
+    /// touching — or reallocating — the rest.
+    pub fn copy_from(&mut self, src: &Raster, clip: &Rect) {
+        debug_assert_eq!((self.width, self.height), (src.width, src.height));
+        self.for_each_row(clip, |row, y| row.copy_from_slice(src.row(clip, y)));
+    }
+
     /// The pixels inside `rect`, clipped to the buffer, as a new raster.
     pub fn crop(&self, rect: &Rect) -> Raster {
         let r = rect.intersect(&self.bounds());
@@ -132,25 +219,78 @@ impl Raster {
         out
     }
 
+    /// Hands `f` each row of `clip` as a slice, with the row's y. The
+    /// clipped passes over a whole buffer are built on this: a row at a time
+    /// costs one bounds check rather than one per pixel, and lets the
+    /// compiler see a straight run of memory.
+    fn for_each_row(&mut self, clip: &Rect, mut f: impl FnMut(&mut [Rgba], i32)) {
+        let r = clip.intersect(&self.bounds());
+        let stride = self.width as usize;
+        for y in r.y..r.bottom() {
+            let start = y as usize * stride + r.x as usize;
+            f(&mut self.pixels[start..start + r.w as usize], y);
+        }
+    }
+
+    /// The same row of another buffer of the same size, for the passes that
+    /// read one buffer while writing another.
+    fn row(&self, clip: &Rect, y: i32) -> &[Rgba] {
+        let r = clip.intersect(&self.bounds());
+        let start = y as usize * self.width as usize + r.x as usize;
+        &self.pixels[start..start + r.w as usize]
+    }
+
     /// Composites every pixel of `src` over `self`, with `src` scaled by
     /// `opacity`. The two must be the same size.
     pub fn composite_over(&mut self, src: &Raster, opacity: f32) {
-        self.composite_blend(src, opacity, BlendMode::Normal);
+        let all = self.bounds();
+        self.composite_blend(src, opacity, BlendMode::Normal, &all);
     }
 
-    /// [`Raster::composite_over`] through a blend mode.
-    pub fn composite_blend(&mut self, src: &Raster, opacity: f32, mode: BlendMode) {
+    /// [`Raster::composite_blend`], with every source pixel's alpha scaled
+    /// by what `cover` makes of the matching pixel of `mask`.
+    ///
+    /// This is a layer's mask, applied as the layer is composited rather
+    /// than by building the masked copy first: at 4K that copy is 33 MB
+    /// allocated, filled and thrown away on every frame the picture changes.
+    /// `cover` is passed in because what a mask pixel *means* is the layer's
+    /// business, not the buffer's.
+    pub fn composite_blend_masked(&mut self, src: &Raster, mask: &Raster, opacity: f32, mode: BlendMode, cover: impl Fn(Rgba) -> u8, clip: &Rect) {
+        debug_assert_eq!((self.width, self.height), (src.width, src.height));
+        debug_assert_eq!((self.width, self.height), (mask.width, mask.height));
+        if opacity <= 0.0 {
+            return;
+        }
+        self.for_each_row(clip, |row, y| {
+            for ((dst, s), m) in row.iter_mut().zip(src.row(clip, y)).zip(mask.row(clip, y)) {
+                if s.a == 0 {
+                    continue;
+                }
+                let t = opacity * f32::from(cover(*m)) / 255.0;
+                if t <= 0.0 {
+                    continue;
+                }
+                let s = if t >= 1.0 { *s } else { s.scaled_alpha(t) };
+                *dst = s.blend_over(*dst, mode);
+            }
+        });
+    }
+
+    /// [`Raster::composite_over`] through a blend mode, inside `clip`.
+    pub fn composite_blend(&mut self, src: &Raster, opacity: f32, mode: BlendMode, clip: &Rect) {
         debug_assert_eq!((self.width, self.height), (src.width, src.height));
         if opacity <= 0.0 {
             return;
         }
-        for (dst, s) in self.pixels.iter_mut().zip(&src.pixels) {
-            if s.a == 0 {
-                continue;
+        self.for_each_row(clip, |row, y| {
+            for (dst, s) in row.iter_mut().zip(src.row(clip, y)) {
+                if s.a == 0 {
+                    continue;
+                }
+                let s = if opacity >= 1.0 { *s } else { s.scaled_alpha(opacity) };
+                *dst = s.blend_over(*dst, mode);
             }
-            let s = if opacity >= 1.0 { *s } else { s.scaled_alpha(opacity) };
-            *dst = s.blend_over(*dst, mode);
-        }
+        });
     }
 
     // ---- Primitives -------------------------------------------------------
@@ -329,6 +469,21 @@ impl Raster {
             for x in r.x..r.right() {
                 let i = row + x as usize;
                 self.pixels[i] = f(self.pixels[i]);
+            }
+        }
+    }
+
+    /// Like [`Raster::map_in`], but `f` is also told where the pixel is, in
+    /// document coordinates — what a position-dependent effect (a dither
+    /// pattern, a gradient) needs so that its result does not move when the
+    /// clip does.
+    pub fn map_at(&mut self, clip: &Rect, mut f: impl FnMut(Rgba, i32, i32) -> Rgba) {
+        let r = clip.intersect(&self.bounds());
+        for y in r.y..r.bottom() {
+            let row = y as usize * self.width as usize;
+            for x in r.x..r.right() {
+                let i = row + x as usize;
+                self.pixels[i] = f(self.pixels[i], x, y);
             }
         }
     }

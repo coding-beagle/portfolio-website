@@ -14,6 +14,21 @@
 //! understand it can leave. After the layers comes a trailer with the
 //! guides; a file without one (the first files written) simply has none,
 //! and a reader from before the trailer stops after the layers.
+//!
+//! # The version
+//!
+//! [`VERSION`] is written into every file and checked on the way back in: a
+//! file from a *newer* NPaint is refused with [`FileError::Version`] rather
+//! than misread. Older files are read by this build, so anything that
+//! changes what the bytes mean bumps the number and says so here, and
+//! [`load`] branches on the version it read.
+//!
+//! * **1** — the original: magic, version, size, the layers, the guides
+//!   trailer.
+//! * **2** — an adjustment layer's parameters may carry the colour channel
+//!   it is aimed at, after the ones belonging to the adjustment itself. A
+//!   format-1 adjustment has no such value and comes back aimed at RGB,
+//!   which is what it always did, so nothing else changed on the wire.
 
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
@@ -24,7 +39,8 @@ use crate::snap::Guides;
 use crate::transform::Affine;
 
 const MAGIC: &[u8; 6] = b"NPAINT";
-const VERSION: u16 = 1;
+/// The format this build writes. See the module's version history.
+pub const VERSION: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileError {
@@ -328,7 +344,8 @@ mod tests {
         doc.active_layer_mut().locked = true;
         doc.add_mask(1, Some(Mask::from_rect(6, 4, Rect::new(0, 0, 3, 4))), false).unwrap();
         doc.set_mask_enabled(1, false).unwrap();
-        doc.add_adjustment_layer(Adjustment::from_params("curves", &[0.0, 0.0, 100.0, 150.0, 255.0, 255.0]).unwrap(), None);
+        // A curve aimed at one channel: the points and then the channel.
+        doc.add_adjustment_layer(Adjustment::from_params("curves", &[0.0, 0.0, 100.0, 150.0, 255.0, 255.0, 2.0]).unwrap(), None);
         doc.place_smart_object("photo", Raster::filled(2, 2, Rgba::BLACK));
         doc.set_smart_transform(3, Affine::translation(3.0, 1.0)).unwrap();
         doc.set_active(1).unwrap();
@@ -343,6 +360,8 @@ mod tests {
         assert_eq!(&bytes[..6], b"NPAINT");
         let (back, back_guides) = load(&bytes).unwrap();
         assert_eq!(back, doc);
+        let adjustment = back.layers()[2].adjustment().expect("the adjustment layer");
+        assert_eq!(adjustment.channel, crate::adjust::Channel::Green, "the channel came back with it");
         assert_eq!((back_guides.h, back_guides.v), (guides.h, guides.v));
         // And it keeps working as a document: new ids do not collide.
         let mut back = back;
@@ -372,6 +391,21 @@ mod tests {
         let older = &bytes[..bytes.len() - 8];
         let (_, guides) = load(older).unwrap();
         assert!(guides.h.is_empty() && guides.v.is_empty());
+    }
+
+    #[test]
+    fn a_file_from_an_older_format_still_opens() {
+        let mut bytes = save(&document(), &Guides::default());
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), VERSION, "the version is written where the reader looks");
+        // Every format up to this one is still read. The bytes are the same
+        // shape throughout; what changed between 1 and 2 is only what an
+        // adjustment's parameters may say, and an older one that says
+        // nothing about a channel comes back on RGB (see `adjust`).
+        for older in 1..VERSION {
+            bytes[6..8].copy_from_slice(&older.to_le_bytes());
+            let (doc, _) = load(&bytes).expect("an older file still opens");
+            assert_eq!(doc.layers().len(), document().layers().len(), "format {older}");
+        }
     }
 
     #[test]

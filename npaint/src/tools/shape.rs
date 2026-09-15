@@ -1,9 +1,11 @@
 //! Rubber-band shapes: line, rectangle, ellipse.
 //!
 //! Dragging shows the shape live. Rather than a separate preview layer, the
-//! tool keeps the layer as it was when the drag began and redraws the shape
-//! onto a fresh copy of it on every move — simple, and the composite the page
-//! renders is always the real document.
+//! tool keeps the layer as it was when the drag began, puts back whatever
+//! the last preview drew, and draws the shape again — simple, and the
+//! composite the page renders is always the real document. Only the two
+//! rectangles are touched, so dragging a small shape on a big canvas costs
+//! the shape, not the canvas.
 
 use super::{constrain_angle, constrain_square, Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::geometry::{Point, Rect};
@@ -20,11 +22,16 @@ pub enum Shape {
 pub struct ShapeTool {
     shape: Shape,
     gesture: Option<(Point, Raster)>,
+    /// What the last preview drew, which is what the next one has to put
+    /// back, and what [`Tool::dirtied`] reports together with the new shape.
+    drawn: Option<Rect>,
+    /// The two of those together: what the last call changed.
+    touched: Rect,
 }
 
 impl ShapeTool {
     pub fn new(shape: Shape) -> ShapeTool {
-        ShapeTool { shape, gesture: None }
+        ShapeTool { shape, gesture: None, drawn: None, touched: Rect::default() }
     }
 
     /// The rectangle a rectangle/ellipse drag describes, after the modifiers.
@@ -45,8 +52,23 @@ impl ShapeTool {
         let clip = ctx.clip();
         let settings = ctx.settings.clone();
         let size = settings.size.max(1);
+        // A stroked shape's line is `size` wide and the ends are round, so
+        // the mark reaches this far outside the rectangle that describes it.
+        let reach = (size as i32) / 2 + 1;
+        let shape = match self.shape {
+            Shape::Line => {
+                let end = if ev.shift { constrain_angle(start, ev.pos) } else { ev.pos };
+                Rect::from_corners(start.round(), end.round()).inflate(reach)
+            }
+            _ => Self::drag_rect(start, ev).inflate(reach),
+        };
+        let area = shape.intersect(&clip);
         let raster = ctx.document.active_surface_mut();
-        *raster = base.clone();
+        // Put back what the last preview drew, then draw this one. The two
+        // together are what changed.
+        if let Some(drawn) = self.drawn {
+            raster.copy_from(base, &drawn);
+        }
         match self.shape {
             Shape::Line => {
                 let end = if ev.shift { constrain_angle(start, ev.pos) } else { ev.pos };
@@ -69,6 +91,8 @@ impl ShapeTool {
                 }
             }
         }
+        self.touched = self.drawn.unwrap_or(area).union(&area);
+        self.drawn = Some(area);
     }
 }
 
@@ -83,6 +107,8 @@ impl Tool for ShapeTool {
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
         self.gesture = Some((ev.pos, ctx.document.active_surface().clone()));
+        self.drawn = None;
+        self.touched = Rect::default();
         Gesture::EditsActiveLayer
     }
 
@@ -97,6 +123,7 @@ impl Tool for ShapeTool {
     fn finish(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
         let changed = self.update(ctx, ev);
         self.gesture = None;
+        self.drawn = None;
         changed
     }
 
@@ -104,6 +131,11 @@ impl Tool for ShapeTool {
         if let Some((_, base)) = self.gesture.take() {
             *ctx.document.active_surface_mut() = base;
         }
+        self.drawn = None;
+    }
+
+    fn dirtied(&self) -> Option<Rect> {
+        Some(self.touched)
     }
 }
 

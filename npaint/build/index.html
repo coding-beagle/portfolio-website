@@ -110,7 +110,7 @@
         <div class="viewport" id="viewport">
           <canvas id="view"></canvas>
           <div class="drop-hint" id="drop-hint" hidden>
-            Drop to open · Shift to add as a layer · Alt to place as a smart object
+            Drop to open · Shift to add as a layer · Alt to place in this document
           </div>
           <div class="working" id="working" hidden role="status" aria-live="polite">
             <span class="throb-slot"></span>
@@ -179,6 +179,10 @@
     <dialog id="dlg-new">
       <form method="dialog" class="dialog-form">
         <h2>New document</h2>
+        <label>Preset
+          <select id="new-preset"></select>
+        </label>
+        <p class="field-note" id="new-note"></p>
         <label>Width <input id="new-width" type="number" min="1" max="8192" value="1024" /> px</label>
         <label>Height <input id="new-height" type="number" min="1" max="8192" value="768" /> px</label>
         <label>Background

@@ -28,6 +28,11 @@ pub struct NPaint {
     editor: Editor,
     frame: Raster,
     frame_bytes: Vec<u8>,
+    /// The reduced frame a dialog previews into while the canvas is zoomed
+    /// out. Kept apart from the frame, which is left as the last full
+    /// render made it.
+    preview_frame: Raster,
+    preview_bytes: Vec<u8>,
 }
 
 /// Errors cross the boundary as plain strings, which JavaScript receives as a
@@ -48,6 +53,8 @@ impl NPaint {
             editor: Editor::new(width, height, bg),
             frame: Raster::new(width, height),
             frame_bytes: vec![0; (width as usize) * (height as usize) * 4],
+            preview_frame: Raster::new(0, 0),
+            preview_bytes: Vec::new(),
         })
     }
 
@@ -78,15 +85,27 @@ impl NPaint {
 
     // ---- Rendering -----------------------------------------------------------
 
-    /// Recomposites if anything changed since the last call. Returns whether
-    /// it did, so the page can skip the `putImageData`.
-    pub fn render(&mut self) -> bool {
-        if !self.editor.take_dirty() {
-            return false;
+    /// Recomposites whatever has changed since the last call and says what
+    /// that was, as `[x, y, w, h]` in document pixels — empty when nothing
+    /// has, so the page can skip the upload entirely.
+    ///
+    /// Only the rectangle is redrawn, in the frame and in the bytes behind
+    /// it; the rest of both is left as the last call made it. The page must
+    /// therefore upload the same rectangle, and must not assume the frame it
+    /// holds was built in one go.
+    pub fn render(&mut self) -> Vec<i32> {
+        let Some(mut rect) = self.editor.take_dirty() else {
+            return Vec::new();
+        };
+        // A frame that has just been resized is blank, so whatever the
+        // engine says changed is not enough to fill it.
+        if (self.frame.width(), self.frame.height()) != (self.width(), self.height()) {
+            self.resize_frame();
+            rect = self.editor.document().bounds();
         }
-        self.editor.composite_into(&mut self.frame);
-        self.frame.write_rgba_bytes(&mut self.frame_bytes);
-        true
+        self.editor.composite_into(&mut self.frame, &rect);
+        self.frame.write_rgba_bytes_in(&mut self.frame_bytes, &rect);
+        vec![rect.x, rect.y, rect.w, rect.h]
     }
 
     /// Pointer to the current frame's RGBA bytes. Only valid until the next
@@ -100,10 +119,46 @@ impl NPaint {
         self.frame_bytes.len()
     }
 
+    /// Composites the reduced preview a dialog is running, and says what
+    /// size it came out as: `[width, height, step]`, or empty when there is
+    /// no reduced preview — no session, or the canvas is zoomed in far
+    /// enough that there is nothing to save.
+    ///
+    /// The page draws this stretched over the canvas in place of the frame,
+    /// and goes back to [`NPaint::render`] when the session ends. The frame
+    /// itself is left alone while a preview runs, so the page must not mix
+    /// the two.
+    pub fn render_preview(&mut self) -> Vec<i32> {
+        let Some(redrawn) = self.editor.preview_into(&mut self.preview_frame) else {
+            return Vec::new();
+        };
+        let (w, h) = (self.preview_frame.width(), self.preview_frame.height());
+        if !redrawn {
+            return vec![w as i32, h as i32, 0];
+        }
+        // The frame itself is deliberately left behind while this runs, so
+        // the dirty rectangle it would have used is cleared here.
+        self.editor.take_dirty();
+        if self.preview_bytes.len() != (w as usize) * (h as usize) * 4 {
+            self.preview_bytes = vec![0; (w as usize) * (h as usize) * 4];
+        }
+        self.preview_frame.write_rgba_bytes(&mut self.preview_bytes);
+        vec![w as i32, h as i32, 1]
+    }
+
+    pub fn preview_ptr(&self) -> *const u8 {
+        self.preview_bytes.as_ptr()
+    }
+
+    pub fn preview_len(&self) -> usize {
+        self.preview_bytes.len()
+    }
+
     /// The composite as a fresh byte array, for export.
     pub fn frame_copy(&mut self) -> Vec<u8> {
         self.editor.take_dirty();
-        self.editor.composite_into(&mut self.frame);
+        let all = self.editor.document().bounds();
+        self.editor.composite_into(&mut self.frame, &all);
         self.frame.to_rgba_bytes()
     }
 
@@ -723,6 +778,22 @@ impl NPaint {
         done
     }
 
+    /// Grows the canvas to hold everything the layers have, including the
+    /// parts of a smart object hanging outside it — Image > Reveal All.
+    /// False when there is nothing outside to reveal.
+    pub fn reveal_all(&mut self) -> bool {
+        let done = self.editor.reveal_all();
+        self.resize_frame();
+        done
+    }
+
+    /// `[width, height]` the canvas would need to hold everything, which is
+    /// the canvas it has when nothing hangs outside it.
+    pub fn content_size(&self) -> Vec<u32> {
+        let all = self.editor.document().content_bounds();
+        vec![all.w as u32, all.h as u32]
+    }
+
     /// Crops the canvas to the selection's bounding box.
     pub fn crop_to_selection(&mut self) -> bool {
         let done = self.editor.crop_to_selection();
@@ -1098,8 +1169,8 @@ mod tests {
     #[test]
     fn frame_bytes_track_the_document() {
         let mut np = NPaint::new(2, 2, "#ff0000").unwrap();
-        assert!(np.render());
-        assert!(!np.render(), "nothing changed");
+        assert!(!np.render().is_empty());
+        assert!(np.render().is_empty(), "nothing changed");
         assert_eq!(np.frame_len(), 16);
         assert_eq!(np.frame_copy()[..4], [255, 0, 0, 255]);
         np.set_tool("pencil").unwrap();
@@ -1107,7 +1178,7 @@ mod tests {
         np.set_size(1);
         np.pointer_down(0.0, 0.0, false, false);
         np.pointer_up(0.0, 0.0, false, false);
-        assert!(np.render());
+        assert!(!np.render().is_empty());
         assert_eq!(np.frame_copy()[..4], [0, 0, 255, 255]);
     }
 
@@ -1131,7 +1202,7 @@ mod tests {
         let mut np = NPaint::new(3, 2, "#ffffff").unwrap();
         np.rotate_canvas(1);
         assert_eq!((np.width(), np.height()), (2, 3));
-        assert!(np.render());
+        assert!(!np.render().is_empty());
         assert_eq!(np.frame_len(), 24);
         np.undo();
         assert_eq!(np.frame_len(), 24);
@@ -1160,7 +1231,7 @@ mod tests {
     #[test]
     fn adjustment_surface() {
         let mut np = NPaint::new(1, 1, "#ffffff").unwrap();
-        assert_eq!(NPaint::adjustment_names().len(), 9);
+        assert_eq!(NPaint::adjustment_names().len(), 10);
         np.begin_adjustment().unwrap();
         np.preview_adjustment("invert", &[]).unwrap();
         assert!(np.preview_adjustment("nope", &[]).is_err());
@@ -1412,7 +1483,7 @@ mod tests {
         let i = np.add_adjustment_layer("levels", &[]).unwrap();
         assert_eq!(np.layer_kind(i).unwrap(), "adjustment");
         assert_eq!(np.layer_adjustment_name(i).unwrap(), "levels");
-        assert_eq!(np.layer_adjustment_params(i).unwrap(), vec![0.0, 255.0, 1.0]);
+        assert_eq!(np.layer_adjustment_params(i).unwrap(), vec![0.0, 255.0, 1.0, 0.0], "black, white, gamma, and the channel");
         assert!(np.layer_thumbnail(i, 2, 2).unwrap().iter().all(|b| *b == 0), "no pixels to show");
         np.begin_adjustment_layer(i).unwrap();
         assert!(np.is_adjusting());
@@ -1449,6 +1520,31 @@ mod tests {
         assert_eq!(np.edit_refusal(), "");
         np.convert_to_smart_object(i).unwrap();
         assert_eq!(np.layer_kind(i).unwrap(), "smart");
+    }
+
+    #[test]
+    fn reveal_all_grows_the_canvas_to_the_smart_object() {
+        let mut np = NPaint::new(4, 4, "").unwrap();
+        let red = [255u8, 0, 0, 255].repeat(4);
+        np.place_smart_object("photo", 2, 2, &red).unwrap();
+        assert!(!np.reveal_all(), "it starts wholly inside the canvas");
+        np.begin_transform().unwrap();
+        assert!(np.transform_nudge(3.0, 0.0));
+        assert!(np.commit_session());
+        assert_eq!(np.content_size(), vec![6, 4], "two columns of it hang off the right");
+        assert!(np.reveal_all());
+        assert_eq!((np.width(), np.height()), (6, 4));
+        assert_eq!(np.frame_copy().len(), 6 * 4 * 4, "the frame follows the document");
+        assert!(!np.reveal_all(), "nothing left outside");
+    }
+
+    #[test]
+    fn opening_an_image_keeps_it_as_a_smart_object() {
+        let mut np = NPaint::new(2, 2, "").unwrap();
+        np.open_image("cat", 3, 2, &[255u8, 0, 0, 255].repeat(6)).unwrap();
+        assert_eq!((np.width(), np.height()), (3, 2));
+        assert_eq!(np.layer_kind(0).unwrap(), "smart");
+        assert_eq!(np.frame_copy().len(), 3 * 2 * 4);
     }
 
     #[test]

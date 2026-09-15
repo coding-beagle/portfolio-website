@@ -17,7 +17,9 @@ npaint/
   src/
     lib.rs         crate root and module map
     adjust.rs      image adjustments (brightness/contrast, hue/sat, levels,
-                   curves, colour balance, ...) and the automatic levels
+                   curves, colour balance, dither, ...) and the automatic
+                   levels. An `Adjustment` is a `Kind` — what to do — and a
+                   `Channel` — which of R, G, B to do it to, or all three
     checker.rs     finds a transparency checkerboard painted into a picture
                    (two colours, cell, phase, from the edges) and unmixes it
                    to real alpha — Image > Remove Checkerboard Background
@@ -28,6 +30,11 @@ npaint/
       quick.rs     quick select: brush-driven region growing
       subject.rs   Select Subject: saliency, Otsu, colour models, ICM
     color.rs       Rgba, hex parsing, source-over compositing
+    dither.rs      the dither patterns behind the Dither adjustment: the
+                   Bayer matrices and a coordinate hash (decided per pixel,
+                   so a `scale` gives chunky cells) and the error-diffusion
+                   kernels (Floyd-Steinberg, Jarvis, Stucki, Atkinson,
+                   Sierra), with levels/strength/greyscale in front of both
     file.rs        NPaint's own file: the whole document as a binary stream
     geometry.rs    Point, Rect
     raster.rs      the pixel buffer and every drawing primitive
@@ -116,7 +123,16 @@ the page strokes it. The zoom marquee is the only one so far.
 make test_npaint      # cargo test + clippy with warnings denied; no browser needed
 make build_npaint     # wasm-pack → build/pkg, then copies www/ into build/
 make run_npaint       # serves build/ on :8790
+
+cargo run --release --example bench    # times the composite at 4K
 ```
+
+`examples/bench.rs` is where the numbers quoted below come from. Time a pass
+there rather than in the browser: a headless Chromium's canvas is GPU-backed
+and its `requestAnimationFrame` ticks at a fixed 16.7 ms whatever the
+callback costs, so `drawImage` and `putImageData` of even a 6000x4500 canvas
+measure as nothing. Run it before and after anything that touches the
+compositing path.
 
 The wasm target and wasm-pack are needed once:
 
@@ -135,7 +151,12 @@ folder; there is no build step on the server.
 
 ## Files, the clipboard, and what the page keeps
 
-**The file.** `src/file.rs` writes the document as a little-endian stream —
+**The file.** Every file carries `file::VERSION`, and a file from a *newer*
+NPaint is refused (`FileError::Version`) rather than misread; older ones are
+read by this build. Anything that changes what the bytes mean bumps the
+number and adds a line to the version history at the top of `src/file.rs`,
+which is the one place that says what each version was. `src/file.rs` writes
+the document as a little-endian stream —
 magic, version, size, then every layer with its rasters, mask, kind, blend
 mode and locks — and reads it back into a `Document`. It is deliberately
 not JSON or a zip: the engine has no parser for either, and the pixels are
@@ -156,7 +177,14 @@ the pixels can go elsewhere. Paste comes in through the browser's `paste`
 event — the one route that needs no permission — and takes the engine's
 copy when the system holds the same picture, otherwise whatever image the
 system has, as a new layer at its own size. Edit > Paste asks
-`navigator.clipboard` instead, which may prompt.
+`navigator.clipboard` instead, which may prompt. File > New wants the
+clipboard's size for its default, and asks the same two ways: a paste into
+the dialog sets it (the dialog says so, and it is the only route that can be
+relied on), and `navigator.clipboard.read()` is tried quietly on opening in
+case the browser allows it — most refuse, so that failure is silent and
+nothing in the dialog offers it. The last size found is remembered for the
+next New, and a size that has been typed over is never replaced by a late
+answer.
 
 **The view furniture.** Rulers, guides, the grid and the pixel grid are
 drawn by the page over the composite and are not in the document; the
@@ -169,14 +197,39 @@ on a move, the handle on a scale) onto guides, canvas edges and the canvas centr
 lines within `SNAP_PX` on screen; a guide being dragged snaps to the centre.
 Guides are saved in the `.npaint` file, as a trailer after the layers.
 
-**What "dirty" means.** `Editor::dirty` says the *composite* changed, and
-`NPaint::render` recomposites and re-uploads the whole frame when it is set —
-at 6000x4500 that is a 108 MB pass, so only gestures that edit pixels set it.
-Selection and view gestures do not: the page redraws from the frame it has,
-and retraces the ants itself for the tools in `SELECTION_TOOLS`. The page
-also keeps half-size copies of the frame (`sourceFor`) for zoomed-out
-drawing, rebuilt lazily when the frame changes, and caches the selection's
-status line and the ants' path between frames.
+**What "dirty" means.** `Editor::dirty` is the *rectangle* of the composite
+that has changed, or `None` for nothing. `NPaint::render` recomposites and
+re-uploads that rectangle and hands it back as `[x, y, w, h]`, and the page
+`putImageData`s the same rectangle. Only gestures that edit pixels set it at
+all: selection and view gestures do not, since the page redraws from the
+frame it has and retraces the ants itself for the tools in `SELECTION_TOOLS`.
+
+The rectangle is the difference between a brush dab costing a dab and a dab
+costing a canvas. At 3840x2160 with a background, a masked layer and a levels
+adjustment layer, a full composite is ~54 ms; the same stack over a 64x64
+rectangle is 0.03 ms. Every layer composites a pixel at a time, so redrawing
+a rectangle of the frame gives exactly what redrawing all of it would have —
+there is a test that says so
+(`compositing_only_the_dirty_rectangle_gives_the_whole_picture`).
+
+Where the rectangle comes from: `Tool::dirtied` reports what the call that
+just returned changed, and `Editor::touch` accumulates the answers until the
+page draws. A tool that says nothing gets the whole document, so correctness
+never depends on a tool answering — but a tool that reports *less* than it
+touched leaves stale pixels on screen, which is the one way to get this
+wrong. Grow the rectangle by whatever the brush rim or the antialiasing may
+reach. Everything structural — a layer added, reordered, hidden, an undo, a
+transform — calls `Editor::touch_all` and redraws the lot.
+
+`Editor::enforce_limits`, `Selection::apply` and `layer::keep_alpha` take
+the same rectangle, so the selection is enforced over the dab rather than
+over the document.
+
+The page also keeps half-size copies of the frame (`sourceFor`) for
+zoomed-out drawing. They are *patched* with the same rectangle (`patchMips`)
+rather than thrown away, since rebuilding four levels of a 4K frame on every
+stroke update is most of the cost of a zoomed-out edit. It caches the
+selection's status line and the ants' path between frames.
 
 **The subject box.** The subject tool (`tools/subjectbox.rs`) only draws a
 rectangle into `ToolSettings::subject_box`; the selection is untouched. When
@@ -293,6 +346,54 @@ re-render from that snapshot, `commit_session` records one undo step and
 the pointer while it is, and any layer operation, undo or new document cancels
 it first. The page shows a dialog or a handle box, nothing more.
 
+**What a session keeps.** An adjustment has no dirty rectangle to save it:
+moving a Levels slider changes every pixel, and the dialog asks for that on
+every tick. What does not change is everything *below* the layer being
+edited — a session is cancelled by any layer operation, undo or new document,
+so nothing under it can move while it is open. `Editor::preview_base`
+composites those layers once when the session opens and every preview starts
+from a copy of the answer (`Document::composite_below` and
+`composite_from`). At 3840x2160 with two layers under a levels adjustment
+layer that is 54 ms a tick down to 23 ms.
+
+The cache lives and dies with the session; `commit_session` and
+`cancel_session` drop it, and `PreviewBase::fits` is a second line of defence
+rather than the thing keeping it honest.
+(`a_session_composites_from_its_cached_base_and_gets_the_same_picture`.)
+
+**The reduced preview.** The other half: a 4K document fitted to a window is
+drawn at about a quarter, so fifteen of every sixteen composited pixels are
+thrown away by the downscale before anyone sees them. While a session runs,
+`Editor::preview_step` reads the zoom and `SmallPreview` holds the document
+reduced to match — everything below the edited layer flattened into one
+layer, then the edited layer (always at `SMALL_EDITED`) and whatever is above
+it, all shrunk by `Raster::downscaled`, with the selection shrunk by
+`Selection::downscaled` beside them. `NPaint::render_preview` composites that
+and the page draws it stretched over the canvas in place of the frame, which
+is left exactly as the last full render made it. A slider tick on the stack
+above: 54 ms before any of this, 25 ms at 1:1, **3.1 ms at a quarter zoom**.
+
+The step is the same power-of-two ladder the page's half-size copies go down,
+so a preview always lands on a size the screen is already showing. Changing
+the zoom mid-dialog rebuilds it — and a rebuild takes the document's own
+pixels, so a `Session::Adjust` that has only ever previewed into the reduced
+copy puts its adjustment back (`preview_into`).
+
+`Session::Adjust` does not touch the full-size surface at all while a reduced
+preview runs; that is where its saving comes from. `commit_session` works the
+full-size answer out from `Session::Adjust::last`, so what the document keeps
+is always the full-resolution pass however the previews ran, and the layers
+panel's thumbnails lag a dialog rather than showing something reduced.
+
+**What you give up.** A reduced preview is the adjustment applied to a
+reduced picture, which is not quite a reduction of the adjusted picture. For
+a curve, a levels pull or a hue shift the difference is at most a level or
+two — measured in a browser at 50%: at most 1/255, over 0.7% of the pixels.
+For a threshold or a hard posterize it is visible, and the picture changes
+when the dialog is accepted. That is the trade every editor of this kind
+makes; `a_zoomed_out_preview_composites_at_the_size_the_screen_shows` pins
+both halves of it.
+
 Select > Transform Selection is the same `TransformSession` over a raster
 whose alpha is the selection's coverage (`Session::TransformSelection`):
 every change re-reads the rendered alpha into the selection, commit keeps
@@ -309,7 +410,8 @@ cursor.
 ## Adding things
 
 **A tool.** Add a file under `src/tools/`, implement `Tool` (`begin`,
-`update`, `finish`, `cancel`), add a `ToolKind` variant with a name and a
+`update`, `finish`, `cancel`, and `dirtied` if it can say what it touched —
+see "What dirty means"), add a `ToolKind` variant with a name and a
 history label, and an arm in `ToolKind::instantiate`. In `app.js`, add an
 entry to `TOOLS` (name, label, shortcut key, icon path, hint); tools that
 share a key cycle when it is pressed. Say in `begin` whether the gesture
@@ -320,7 +422,10 @@ needs to *set* something — the eyedropper sets the colours — has
 `ctx.settings` mutably.
 
 **A drawing primitive.** `raster.rs`. Take a `clip: &Rect` and never write
-outside it. Test against a small raster with exact pixel counts.
+outside it. Test against a small raster with exact pixel counts. A pass over
+a whole buffer wants `for_each_row`/`row`, which hand out one row of the clip
+at a time: one bounds check a row rather than one a pixel, and a straight run
+of memory for the compiler to work with.
 
 **A selection shape.** Build a [`Mask`] and hand it to
 `Selection::combine` with the mode the modifiers asked for; everything else —
@@ -339,7 +444,38 @@ it is a command).
 **An adjustment.** A variant in `adjust.rs` with an arm in `from_params`,
 `name` and either `lut` (per-channel) or `map` (whole colour), plus a row in
 `ADJUSTMENTS` in `www/adjust.js` describing its sliders. The dialog, preview,
-undo and menu entries come for free.
+undo and menu entries come for free — including its life as an adjustment
+layer, which is where it gets a mask.
+
+If the adjustment is per-channel — a `lut`, so what it does to red it does
+to green the same way — say so in `Kind::takes_channel` and it can be
+pointed at one channel: `Adjustment::apply` computes the new colour as
+always and `Channel::pick` keeps it only where it was aimed. Add
+`channelParam()` to the front of its row in `ADJUSTMENTS` to match. The ones
+that read the whole colour (hue, colour balance, threshold) or the picture
+around it (dither) are not per-channel and do not offer it.
+
+The channel rides at the *end* of the flat parameter list, one past the
+kind's own — which is both where the curve's variable-length points have
+stopped and where a file written before the choice existed has nothing, so
+an older document comes back on RGB. It shows at the *top* of the dialog,
+where a channel belongs; `channel: true` on the row is what tells
+`www/adjust.js` to keep those two orders apart.
+
+An adjustment that is *not* a function of the colour alone takes over
+`apply` instead, as `Dither` does: the raster and the clip are all it needs,
+and `Raster::map_at` hands it the document position of each pixel (index the
+effect by that, never by the clip, or a preview through a selection will not
+line up with the same settings applied to the whole layer). `map` still has
+to answer something sensible for one colour on its own — the dither gives
+the rounding it would have dithered around.
+
+Besides sliders and the curve, a parameter row may be `kind: "choice"` (a
+dropdown; its value is the option's index) or `kind: "toggle"` (a checkbox;
+0 or 1), and may carry `enabled(values)` to grey itself out when the other
+settings make it meaningless. Everything still crosses as a flat
+`Float32Array`, so `from_params` and `params()` stay the only description of
+what the numbers mean.
 
 **A menu item.** `app.js` builds every menu from item lists; `layerItems`,
 `editItems` and `selectItems` are shared between the menu bar and the
@@ -386,16 +522,21 @@ Every layer is one struct with a `kind`, and the tools do not know which:
   stores the new matrix and re-renders — so nothing degrades however many
   times it is scaled. Layer flips and turns, and every canvas operation, go
   through `Layer::map_rasters`, which changes the placement rather than
-  resampling the rendering. Place puts a file in as a smart object at its
-  own resolution; Convert crops a pixel layer to its content; Rasterize goes
-  back; Replace Contents swaps the source and keeps the box.
+  resampling the rendering. Open makes the file's own layer one, at the size
+  of the picture (`Document::from_smart_object`); Place puts a file in the
+  open document as one, fitted; Convert crops a pixel layer to its content;
+  Rasterize goes back; Replace Contents swaps the source and keeps the box.
+  Because a smart object's placement may reach past the canvas,
+  `Document::content_bounds` is the union of those placements with the
+  canvas, and Image > Reveal All grows the canvas to it.
 * **History.** A pixel edit snapshots the *surface* it touched
   (`Snapshot::LayerPixels` carries the `Target`); a layer flip or a smart
   transform snapshots the whole `Layer`; everything else the stack.
 
 The layers panel shows the mask beside the pixels with the target outlined;
 click either to switch, Shift-click the mask to disable it, Ctrl-click it to
-load it as a selection. Adjustment layers open their dialog on double-click.
+load it as a selection. Adjustment layers open their dialog on double-click,
+on the mark or on the name.
 
 ## Conventions
 
@@ -414,7 +555,9 @@ load it as a selection. Adjustment layers open their dialog on double-click.
 - The only Rust dependency is `wasm-bindgen`. Think twice before adding
   another; the page's whole payload is ~110 KB.
 - Anything that changes the document's *size* must call `resize_frame` in
-  `wasm.rs` before the page next renders. The page builds an `ImageData` of
+  `wasm.rs` before the page next renders; `render` re-checks and redraws
+  everything if the frame was replaced, since a fresh frame is blank and the
+  dirty rectangle would not fill it. The page builds an `ImageData` of
   `width x height` out of exactly `frame_len` bytes, so a frame left at the
   old size throws in the render loop. There is a test that walks every such
   path (`the_frame_always_matches_the_document_size`) — add to it.
@@ -430,12 +573,19 @@ load it as a selection. Adjustment layers open their dialog on double-click.
 ## Known gaps
 
 No lasso or polygon drawn by hand, though the mask machinery is there for
-one; no text, gradients or blur-type filters; no layer
+one; no text, gradients or blur-type filters; the dither's error-diffusion
+patterns are a serial pass over every pixel, so as a live adjustment *layer*
+on a very large canvas they cost noticeably more per composite than the
+ordered ones; no layer
 groups; pixel layers are always document-sized (a transform resamples into
 the canvas, and what leaves it is lost — a smart object keeps what leaves,
 since it re-renders from its source); a mask is not linked to its layer
 (moving or transforming the pixels leaves the mask where it was; the canvas
 operations and the layer flips do carry it along); a smart object's
 contents cannot be opened for editing, only replaced; adjustment layers have
-no clipping to the layer below; curves are a single master curve, not one
-per channel.
+no clipping to the layer below; an adjustment layer's preview is composited at
+full resolution however far out the canvas is zoomed, where a 4K document
+fitted to a window needs a sixteenth of those pixels (1.3 ms rather than
+23 ms — `examples/adjbench.rs` has the measurements); an adjustment is aimed
+at one channel at a time, where Photoshop's Levels and Curves keep a separate set of numbers
+per channel behind one dialog — two adjustment layers is the answer here.

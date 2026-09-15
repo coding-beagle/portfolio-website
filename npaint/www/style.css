@@ -844,6 +844,25 @@ button.primary {
 .adjust-row input[type="range"] {
   width: 180px;
 }
+.adjust-row select,
+.adjust-row input[type="checkbox"] {
+  justify-self: start;
+}
+.adjust-row select {
+  width: 180px;
+}
+/* A row whose setting does not apply to the rest of the dialog's choices. */
+.adjust-row.adjust-off {
+  opacity: 0.45;
+}
+/* The channel being edited tints the dialog. `--adjust-accent` is set on the
+   params root by the dialog and simply absent on RGB. */
+#adjust-params {
+  accent-color: var(--adjust-accent, auto);
+}
+#adjust-params .curve-readout {
+  color: var(--adjust-accent, var(--text-dim));
+}
 
 /* ---- Transform bar ---- */
 .transform-bar {

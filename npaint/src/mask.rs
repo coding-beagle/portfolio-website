@@ -485,19 +485,15 @@ impl Mask {
     /// Blends `edited` back over `base` in proportion to the coverage: where
     /// the selection is solid the edit stands, where it is not the original
     /// pixels come back, and a feathered edge fades between the two.
-    pub fn apply(&self, edited: &mut crate::raster::Raster, base: &crate::raster::Raster) {
-        let area = self.size().intersect(&edited.bounds());
-        for y in area.y..area.bottom() {
-            for x in area.x..area.right() {
-                let cover = self.cover(x, y);
-                if cover == 255 {
-                    continue;
-                }
-                let now = edited.get(x, y);
-                let was = base.get(x, y);
-                edited.set(x, y, was.lerp(now, f32::from(cover) / 255.0));
+    pub fn apply(&self, edited: &mut crate::raster::Raster, base: &crate::raster::Raster, clip: &Rect) {
+        let area = self.size().intersect(&clip.intersect(&edited.bounds()));
+        edited.map_at(&area, |now, x, y| {
+            let cover = self.cover(x, y);
+            if cover == 255 {
+                return now;
             }
-        }
+            base.get(x, y).lerp(now, f32::from(cover) / 255.0)
+        });
     }
 }
 
@@ -746,7 +742,8 @@ mod tests {
             1 => 128,
             _ => 0,
         });
-        mask.apply(&mut edited, &base);
+        let all = edited.bounds();
+        mask.apply(&mut edited, &base, &all);
         assert_eq!(edited.get(0, 0), Rgba::BLACK, "fully selected: the edit stands");
         assert_eq!(edited.get(2, 0), Rgba::WHITE, "outside: the original comes back");
         let half = edited.get(1, 0);

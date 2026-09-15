@@ -5,11 +5,54 @@
 //
 // Most controls are sliders. Curves is the exception: a tone curve drawn by
 // hand on a small graph, which hands the engine its points as a flat list.
+// There are two small ones besides — a dropdown and a checkbox — which hand
+// the engine a number like everything else: the option's index, or 0/1.
+//
+// A parameter may carry an `enabled(values)` predicate; the row greys out
+// when it is false. The dither's cell size uses it, since only the ordered
+// patterns have cells.
+//
+// One row is special: `channel: true` marks the colour channel the
+// adjustment is aimed at. It shows at the top, where a channel belongs, but
+// the engine reads it *after* the adjustment's own parameters (see
+// `Adjustment::params`), so `build` and `values` put it at the end of the
+// flat list. It also tints the dialog, which is how you can tell at a glance
+// that the curve you are dragging is the red one.
 //
 // The same dialog edits an adjustment *layer*: `openLayer` opens it showing
 // the layer's current settings, and the engine's session applies each change
 // to the layer rather than to pixels. The dialog cannot tell the difference,
 // which is the point.
+
+/**
+ * The dither patterns, in the order `dither::DitherMethod::ALL` declares
+ * them: the index is what the engine is handed. The ordered ones come first,
+ * so the index also says which family a choice belongs to.
+ */
+const DITHER_PATTERNS = [
+  "Ordered 2×2",
+  "Ordered 4×4",
+  "Ordered 8×8",
+  "Noise",
+  "Floyd–Steinberg",
+  "Jarvis–Judice–Ninke",
+  "Stucki",
+  "Atkinson",
+  "Sierra",
+];
+/** The first of the error-diffusion patterns, and the default. */
+const DITHER_FLOYD_STEINBERG = 4;
+
+/**
+ * The channels, in the order `adjust::Channel::ALL` declares them: the index
+ * is what the engine is handed. Only the per-channel adjustments offer it —
+ * the ones `Kind::takes_channel` says yes to.
+ */
+const CHANNELS = ["RGB", "Red", "Green", "Blue"];
+/** What each channel tints the dialog with; RGB leaves it alone. */
+const CHANNEL_TINTS = [null, "#e4564a", "#3fa85c", "#4e7ff2"];
+/** The channel row, shared by every adjustment that takes one. */
+const channelParam = () => ({ kind: "choice", label: "Channel", value: 0, options: CHANNELS, channel: true });
 
 export const ADJUSTMENTS = [
   {
@@ -17,6 +60,7 @@ export const ADJUSTMENTS = [
     label: "Brightness / Contrast…",
     shortcut: "",
     params: [
+      channelParam(),
       { label: "Brightness", min: -100, max: 100, value: 0 },
       { label: "Contrast", min: -100, max: 100, value: 0 },
     ],
@@ -26,6 +70,7 @@ export const ADJUSTMENTS = [
     label: "Levels…",
     shortcut: "Ctrl+L",
     params: [
+      channelParam(),
       { label: "Black point", min: 0, max: 254, value: 0 },
       { label: "White point", min: 1, max: 255, value: 255 },
       { label: "Gamma", min: 0.1, max: 4, value: 1, step: 0.01 },
@@ -35,7 +80,7 @@ export const ADJUSTMENTS = [
     name: "curves",
     label: "Curves…",
     shortcut: "Ctrl+M",
-    params: [{ kind: "curve", label: "Curve", value: [0, 0, 255, 255] }],
+    params: [channelParam(), { kind: "curve", label: "Curve", value: [0, 0, 255, 255] }],
   },
   {
     name: "hue-saturation",
@@ -66,7 +111,19 @@ export const ADJUSTMENTS = [
       { label: "Yellow – Blue", min: -100, max: 100, value: 0 },
     ],
   },
-  { name: "posterize", label: "Posterize…", params: [{ label: "Levels", min: 2, max: 32, value: 4 }] },
+  {
+    name: "dither",
+    label: "Dither…",
+    params: [
+      { kind: "choice", label: "Pattern", value: DITHER_FLOYD_STEINBERG, options: DITHER_PATTERNS },
+      { label: "Levels", min: 2, max: 16, value: 2 },
+      { label: "Strength", min: 0, max: 100, value: 100, unit: "%" },
+      // Only the ordered patterns are laid out in cells; diffusion has none.
+      { label: "Cell size", min: 1, max: 16, value: 1, unit: " px", enabled: (v) => v[0] < DITHER_FLOYD_STEINBERG },
+      { kind: "toggle", label: "Greyscale", value: 0 },
+    ],
+  },
+  { name: "posterize", label: "Posterize…", params: [channelParam(), { label: "Levels", min: 2, max: 32, value: 4 }] },
   { name: "threshold", label: "Threshold…", params: [{ label: "Level", min: 0, max: 255, value: 128 }] },
   { name: "invert", label: "Invert", shortcut: "Ctrl+I", params: [] },
   { name: "desaturate", label: "Desaturate", shortcut: "Ctrl+Shift+U", params: [] },
@@ -185,7 +242,7 @@ function createCurveControl(initial, onChange) {
     ctx.lineTo(CURVE_SIZE, 0);
     ctx.stroke();
     const table = curveTable(points);
-    ctx.strokeStyle = "#e6e6e6";
+    ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue("--adjust-accent").trim() || "#e6e6e6";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let x = 0; x < 256; x++) {
@@ -273,6 +330,8 @@ function createCurveControl(initial, onChange) {
     values: () => points.flat(),
     reset: (flat) => set(flat),
     focus: () => canvas.focus(),
+    setEnabled: () => {},
+    restyle: draw,
   };
 }
 
@@ -304,6 +363,67 @@ function createSliderControl(p, value, onChange) {
       show();
     },
     focus: () => range.focus(),
+    setEnabled: (on) => {
+      range.disabled = !on;
+      row.classList.toggle("adjust-off", !on);
+    },
+  };
+}
+
+/** A dropdown; its value is the chosen option's index. */
+function createChoiceControl(p, value, onChange) {
+  const row = document.createElement("div");
+  row.className = "adjust-row";
+  const label = document.createElement("label");
+  label.textContent = p.label;
+  const select = document.createElement("select");
+  p.options.forEach((name, i) => {
+    const option = document.createElement("option");
+    option.value = String(i);
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  select.value = String(Number.isFinite(value) ? Math.round(value) : p.value);
+  label.htmlFor = select.id = `adjust-choice-${p.label.replace(/\W+/g, "-").toLowerCase()}`;
+  select.addEventListener("change", onChange);
+  row.append(label, select);
+  return {
+    element: row,
+    values: () => [Number(select.value)],
+    reset: (v) => {
+      select.value = String(v);
+    },
+    focus: () => select.focus(),
+    setEnabled: (on) => {
+      select.disabled = !on;
+      row.classList.toggle("adjust-off", !on);
+    },
+  };
+}
+
+/** A checkbox; its value is 0 or 1. */
+function createToggleControl(p, value, onChange) {
+  const row = document.createElement("div");
+  row.className = "adjust-row";
+  const label = document.createElement("label");
+  label.textContent = p.label;
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = (Number.isFinite(value) ? value : p.value) >= 0.5;
+  label.htmlFor = box.id = `adjust-toggle-${p.label.replace(/\W+/g, "-").toLowerCase()}`;
+  box.addEventListener("change", onChange);
+  row.append(label, box);
+  return {
+    element: row,
+    values: () => [box.checked ? 1 : 0],
+    reset: (v) => {
+      box.checked = v >= 0.5;
+    },
+    focus: () => box.focus(),
+    setEnabled: (on) => {
+      box.disabled = !on;
+      row.classList.toggle("adjust-off", !on);
+    },
   };
 }
 
@@ -317,12 +437,31 @@ export function createAdjustDialog(np, { onChange, onError }) {
   const paramsRoot = document.getElementById("adjust-params");
   let spec = null;
   let controls = [];
+  let specs = []; // the parameter spec behind each control, in step
 
+  /** The controls' values as the engine reads them: the channel last. */
   function values() {
-    return new Float32Array(controls.flatMap((c) => c.values()));
+    const own = controls.filter((c, k) => !specs[k].channel).flatMap((c) => c.values());
+    const channel = controls.filter((c, k) => specs[k].channel).flatMap((c) => c.values());
+    return new Float32Array([...own, ...channel]);
+  }
+
+  /**
+   * Greys the rows whose `enabled` predicate says they do not apply, and
+   * tints the dialog to the channel being edited.
+   */
+  function refreshRows() {
+    const flat = Array.from(values());
+    specs.forEach((p, k) => p.enabled && controls[k].setEnabled(!!p.enabled(flat)));
+    const channel = specs.findIndex((p) => p.channel);
+    const tint = channel < 0 ? null : CHANNEL_TINTS[controls[channel].values()[0]];
+    if (tint) paramsRoot.style.setProperty("--adjust-accent", tint);
+    else paramsRoot.style.removeProperty("--adjust-accent");
+    controls.forEach((c) => c.restyle && c.restyle());
   }
 
   function preview() {
+    refreshRows();
     try {
       np.preview_adjustment(spec.name, values());
     } catch (e) {
@@ -340,7 +479,12 @@ export function createAdjustDialog(np, { onChange, onError }) {
   function build(flat) {
     paramsRoot.replaceChildren();
     controls = [];
-    let at = 0;
+    specs = [];
+    // The channel rides at the end of the engine's list though it shows at
+    // the top, so the adjustment's own values stop short of it.
+    const end = flat ? flat.length - spec.params.filter((p) => p.channel).length : 0;
+    let at = 0; // the next of the adjustment's own values
+    let tail = end; // the next channel value
     for (const p of spec.params) {
       if (p.heading) {
         const h = document.createElement("div");
@@ -350,19 +494,27 @@ export function createAdjustDialog(np, { onChange, onError }) {
         continue;
       }
       let control;
-      if (p.kind === "curve") {
-        // The curve takes every remaining value: pairs of points.
-        const initial = flat && flat.length - at >= 4 ? Array.from(flat.slice(at)) : p.value;
-        at = flat ? flat.length : at;
+      if (p.channel) {
+        const v = flat && Number.isFinite(flat[tail]) ? flat[tail] : p.value;
+        tail += 1;
+        control = createChoiceControl(p, v, preview);
+      } else if (p.kind === "curve") {
+        // The curve takes every remaining value up to the channel: pairs of
+        // points.
+        const initial = flat && end - at >= 4 ? Array.from(flat.slice(at, end)) : p.value;
+        at = end;
         control = createCurveControl(initial, preview);
       } else {
         const v = flat && Number.isFinite(flat[at]) ? flat[at] : p.value;
         at += 1;
-        control = createSliderControl(p, v, preview);
+        const make = p.kind === "choice" ? createChoiceControl : p.kind === "toggle" ? createToggleControl : createSliderControl;
+        control = make(p, v, preview);
       }
       paramsRoot.appendChild(control.element);
       controls.push(control);
+      specs.push(p);
     }
+    refreshRows();
   }
 
   function finish(commit) {

@@ -10,9 +10,13 @@
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::autoselect::wand;
+use crate::geometry::Rect;
 
 #[derive(Debug, Default)]
-pub struct BucketTool;
+pub struct BucketTool {
+    /// The patch the click filled, for [`Tool::dirtied`].
+    filled: Option<Rect>,
+}
 
 impl Tool for BucketTool {
     fn kind(&self) -> ToolKind {
@@ -20,6 +24,7 @@ impl Tool for BucketTool {
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
+        self.filled = None;
         let source = ctx.sample();
         let (x, y) = ev.pos.round();
         let clip = ctx.clip();
@@ -33,9 +38,15 @@ impl Tool for BucketTool {
         let color = ctx.settings.color.scaled_alpha(ctx.settings.opacity);
         let layer = ctx.document.active_surface_mut();
         let base = layer.clone();
+        let area = patch.bounds().intersect(&clip);
         layer.fill_rect(patch.bounds(), color, &clip);
-        patch.apply(layer, &base);
+        patch.apply(layer, &base, &area);
+        self.filled = Some(area);
         Gesture::EditsActiveLayer
+    }
+
+    fn dirtied(&self) -> Option<Rect> {
+        self.filled
     }
 
     fn update(&mut self, _ctx: &mut ToolContext, _ev: PointerEvent) -> bool {
@@ -73,7 +84,7 @@ mod tests {
         let mut sel = sel;
         let mut settings = settings;
         let mut ctx = ToolContext { document: doc, selection: &mut sel, viewport: &mut Viewport::default(), settings: &mut settings };
-        BucketTool.begin(&mut ctx, PointerEvent::at(at.0, at.1))
+        BucketTool::default().begin(&mut ctx, PointerEvent::at(at.0, at.1))
     }
 
     fn settings() -> ToolSettings {

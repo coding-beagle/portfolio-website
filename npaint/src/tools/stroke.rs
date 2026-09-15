@@ -32,6 +32,8 @@ pub struct StrokeTool {
     gesture: Option<InProgress>,
     /// Where the previous stroke ended, for Shift-click to draw a line from.
     previous_end: Option<Point>,
+    /// What the last stamp changed, for [`Tool::dirtied`].
+    touched: Option<Rect>,
 }
 
 #[derive(Debug)]
@@ -45,13 +47,14 @@ struct InProgress {
 
 impl StrokeTool {
     pub fn new(mode: StrokeMode) -> StrokeTool {
-        StrokeTool { mode, gesture: None, previous_end: None }
+        StrokeTool { mode, gesture: None, previous_end: None, touched: None }
     }
 
     fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point) {
         let size = ctx.settings.size.max(1);
         let hardness = if self.mode == StrokeMode::Pencil { 1.0 } else { ctx.settings.hardness };
         let clip = ctx.clip();
+        self.touched = None;
         let Some(g) = self.gesture.as_mut() else { return };
         let all = g.mask.bounds();
         let from = g.last;
@@ -87,6 +90,7 @@ impl StrokeTool {
                 layer.set(x, y, after);
             }
         }
+        self.touched = Some(region);
     }
 }
 
@@ -153,6 +157,11 @@ impl Tool for StrokeTool {
         if let Some(g) = self.gesture.take() {
             *ctx.document.active_surface_mut() = g.base;
         }
+        self.touched = None;
+    }
+
+    fn dirtied(&self) -> Option<Rect> {
+        self.touched
     }
 }
 
