@@ -203,14 +203,14 @@ mod tests {
 
     #[test]
     fn shift_constrains_to_a_square() {
-        let ev = PointerEvent { pos: Point::new(10.0, 3.0), screen: Point::new(10.0, 3.0), shift: true, alt: false };
+        let ev = PointerEvent { pos: Point::new(10.0, 3.0), screen: Point::new(10.0, 3.0), shift: true, alt: false, pressure: 1.0 };
         let r = run(Shape::Rectangle, settings(), Selection::None, PointerEvent::at(0.0, 0.0), &[ev]);
         assert_eq!(painted(&r), 100);
     }
 
     #[test]
     fn alt_draws_from_the_centre() {
-        let ev = PointerEvent { pos: Point::new(12.0, 12.0), screen: Point::new(12.0, 12.0), shift: false, alt: true };
+        let ev = PointerEvent { pos: Point::new(12.0, 12.0), screen: Point::new(12.0, 12.0), shift: false, alt: true, pressure: 1.0 };
         let r = run(Shape::Rectangle, settings(), Selection::None, PointerEvent::at(10.0, 10.0), &[ev]);
         assert_eq!(r.get(8, 8), RED);
         assert_eq!(r.get(11, 11), RED);
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn shift_snaps_a_line_to_45_degrees() {
-        let ev = PointerEvent { pos: Point::new(10.0, 1.0), screen: Point::new(10.0, 1.0), shift: true, alt: false };
+        let ev = PointerEvent { pos: Point::new(10.0, 1.0), screen: Point::new(10.0, 1.0), shift: true, alt: false, pressure: 1.0 };
         let r = run(Shape::Line, settings(), Selection::None, PointerEvent::at(0.0, 0.0), &[ev]);
         assert_eq!(r.get(10, 0), RED);
         assert_eq!(r.get(10, 1), Rgba::TRANSPARENT);

@@ -143,7 +143,7 @@ mod tests {
     use crate::viewport::Viewport;
 
     fn screen(x: f64, y: f64, alt: bool) -> PointerEvent {
-        PointerEvent { pos: Point::new(x, y), screen: Point::new(x, y), shift: false, alt }
+        PointerEvent { pos: Point::new(x, y), screen: Point::new(x, y), shift: false, alt, pressure: 1.0 }
     }
 
     struct Rig {

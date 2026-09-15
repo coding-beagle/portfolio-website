@@ -399,6 +399,7 @@ function draw(now, ants, transforming) {
   vctx.strokeRect(px - 0.5, py - 0.5, w + 1, h + 1);
 
   if (showGrid) drawGrid(px, py, zoom, w, h);
+  if (BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine") drawSymmetryAxes(px, py, zoom, w, h);
   if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
   if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
   if (tool === "subject") drawSubjectBox(px, py, zoom);
@@ -674,6 +675,38 @@ function drawRulers(px, py, zoom) {
 }
 
 /** The guides, and the one being dragged. */
+/** The mirror axes and the spokes of a radial symmetry, while one is on. */
+function drawSymmetryAxes(px, py, zoom, w, h) {
+  const [mx, my, n] = np.symmetry();
+  if (!mx && !my && n <= 1) return;
+  const cx = px + w / 2;
+  const cy = py + h / 2;
+  vctx.save();
+  vctx.beginPath();
+  vctx.rect(px, py, w, h);
+  vctx.clip();
+  vctx.lineWidth = 1;
+  vctx.setLineDash([6, 4]);
+  vctx.strokeStyle = "rgba(255, 120, 200, 0.75)";
+  vctx.beginPath();
+  if (mx) {
+    vctx.moveTo(Math.round(cx) + 0.5, py);
+    vctx.lineTo(Math.round(cx) + 0.5, py + h);
+  }
+  if (my) {
+    vctx.moveTo(px, Math.round(cy) + 0.5);
+    vctx.lineTo(px + w, Math.round(cy) + 0.5);
+  }
+  const reach = Math.hypot(w, h);
+  for (let k = 0; k < (n > 1 ? n : 0); k++) {
+    const angle = (Math.PI * 2 * k) / n - Math.PI / 2;
+    vctx.moveTo(cx, cy);
+    vctx.lineTo(cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
+  }
+  vctx.stroke();
+  vctx.restore();
+}
+
 function drawGuides(px, py, zoom) {
   const lines = [];
   for (const y of guides.h) lines.push(["h", y, false]);
@@ -1047,6 +1080,16 @@ function syncOptions() {
   $("opt-opacity-wrap").hidden = !hasOpacity;
   $("opt-tip-wrap").hidden = !hasTip;
   $("opt-tip").value = np.brush_tip();
+  $("opt-symmetry-wrap").hidden = !hasTip;
+  $("opt-symmetry").value = np.symmetry().join(",");
+  $("opt-smoothing-wrap").hidden = !hasTip;
+  $("opt-smoothing").value = Math.round(np.smoothing() * 100);
+  $("opt-smoothing-out").value = `${Math.round(np.smoothing() * 100)}%`;
+  $("opt-pressure-wrap").hidden = !hasTip;
+  $("opt-pressure").checked = np.pressure_size();
+  $("opt-character").hidden = !isText;
+  if (!isText) closeCharacterPanel();
+  else syncCharacterPanel();
   $("opt-hardness-wrap").hidden = !hasHardness;
   $("opt-font-wrap").hidden = !isText;
   $("opt-font-size-wrap").hidden = !isText;
@@ -1054,6 +1097,7 @@ function syncOptions() {
   $("opt-align-wrap").hidden = !isText;
   $("text-bar").hidden = !textEdit;
   if (isText) {
+    ensureFontOption(np.text_font());
     $("opt-font").value = np.text_font();
     if (document.activeElement !== $("opt-font-size")) $("opt-font-size").value = np.text_size();
     setPressed($("opt-bold"), np.text_bold());
@@ -1095,6 +1139,39 @@ function toggleSeg(onEl, offEl, first) {
 function setPressed(el, on) {
   el.classList.toggle("seg-on", on);
   el.setAttribute("aria-pressed", String(on));
+}
+
+/** The font list's last entry, which opens a file rather than picking a face. */
+const LOAD_FONT = "__load-font-file__";
+
+function addFontOption(family) {
+  const o = document.createElement("option");
+  o.value = family;
+  o.textContent = family;
+  o.style.fontFamily = `"${family}"`;
+  const font = $("opt-font");
+  const last = [...font.options].find((opt) => opt.value === LOAD_FONT) ?? null;
+  font.insertBefore(o, last);
+  return o;
+}
+
+/** A face the list lacks — a document set on another machine — joins it. */
+function ensureFontOption(family) {
+  if (![...$("opt-font").options].some((o) => o.value === family)) addFontOption(family);
+}
+
+/**
+ * Loads a font file into the page under the file's name and offers it in
+ * the list. The browser has it for the session; the document keeps only
+ * the name.
+ */
+async function loadFontFile(file) {
+  const family = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Loaded font";
+  const face = new FontFace(family, await file.arrayBuffer());
+  await face.load();
+  document.fonts.add(face);
+  ensureFontOption(family);
+  return family;
 }
 
 /**
@@ -1145,21 +1222,50 @@ function bindOptions() {
     np.set_brush_tip(tip.value);
     syncOptions();
   });
+  $("opt-symmetry").addEventListener("change", (e) => {
+    const [mx, my, n] = e.target.value.split(",").map(Number);
+    np.set_symmetry(Boolean(mx), Boolean(my), n);
+    needsDraw = true;
+  });
+  const smoothing = $("opt-smoothing");
+  smoothing.addEventListener("input", () => {
+    np.set_smoothing(Number(smoothing.value) / 100);
+    $("opt-smoothing-out").value = `${smoothing.value}%`;
+  });
+  $("opt-pressure").addEventListener("change", (e) => np.set_pressure_size(e.target.checked));
 
   // The text tool's type settings. A change while a text layer is being
   // typed into sets that layer again at once.
   const font = $("opt-font");
-  for (const family of FONTS) {
-    const o = document.createElement("option");
-    o.value = family;
-    o.textContent = family;
-    o.style.fontFamily = family;
-    font.appendChild(o);
-  }
+  for (const family of FONTS) addFontOption(family);
+  const load = document.createElement("option");
+  load.value = LOAD_FONT;
+  load.textContent = "Load font file…";
+  font.appendChild(load);
   font.addEventListener("change", () => {
+    if (font.value === LOAD_FONT) {
+      font.value = np.text_font();
+      $("font-input").click();
+      return;
+    }
     np.set_text_font(font.value);
     previewText();
   });
+  $("font-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const family = await loadFontFile(file);
+      np.set_text_font(family);
+      syncOptions();
+      previewText();
+      message(`Loaded ${file.name}. The document keeps the font's name; load the file again on another machine.`);
+    } catch (err) {
+      message(`Could not load ${file.name}: ${err.message || err}`);
+    }
+  });
+  bindCharacterPanel();
   const fontSize = $("opt-font-size");
   const applyFontSize = () => {
     np.set_text_size(Number(fontSize.value) || np.text_size());
@@ -1343,8 +1449,18 @@ function bindSwatches() {
   picker = createColorPicker($("color-popover"), {
     onChange: (hex) => {
       if (pickerTarget === "fg") np.set_color(hex);
-      else np.set_background(hex);
+      else if (pickerTarget === "bg") np.set_background(hex);
+      else if (pickerTarget === "outline") {
+        np.set_text_outline_color(hex);
+        syncCharacterPanel();
+        previewText();
+      }
       syncSwatches();
+    },
+    // Picking the outline's colour mid-typing hands the keyboard back to
+    // the text box, so Ctrl+Enter still keeps the text.
+    onClose: () => {
+      if (pickerTarget === "outline") refocusText();
     },
   });
   $("swatch-fg").addEventListener("click", () => openPicker("fg"));
@@ -1354,9 +1470,12 @@ function bindSwatches() {
   syncSwatches();
 }
 
+/** Opens the picker on a swatch: the foreground, the background, or the text outline's colour. */
 function openPicker(target) {
   pickerTarget = target;
-  picker.open($(target === "fg" ? "swatch-fg" : "swatch-bg"), target === "fg" ? np.color() : np.background());
+  const anchors = { fg: "swatch-fg", bg: "swatch-bg", outline: "char-outline-color" };
+  const colors = { fg: () => np.color(), bg: () => np.background(), outline: () => np.text_outline_color() };
+  picker.open($(anchors[target]), colors[target]());
 }
 
 function syncSwatches() {
@@ -2070,15 +2189,61 @@ function beginTransform() {
 /** The text layer being typed into, and the box over it. */
 let textEdit = null;
 
-/** Line pitch as a multiple of the type size, in the box and on the canvas alike. */
-const TEXT_LINE = 1.2;
 /** The most a rendering may measure on a side, which is what browsers allow of a canvas. */
 const MAX_TEXT_CANVAS = 8192;
 const textCanvas = document.createElement("canvas");
 const tctx = textCanvas.getContext("2d", { willReadFrequently: true });
 
 function textFontCss() {
-  return `${np.text_italic() ? "italic " : ""}${np.text_bold() ? "bold " : ""}${np.text_size()}px ${np.text_font()}`;
+  return `${np.text_italic() ? "italic " : ""}${np.text_bold() ? "bold " : ""}${np.text_size()}px "${np.text_font()}"`;
+}
+
+/** The Character panel's settings, read once per rendering. */
+function characterSettings() {
+  const size = np.text_size();
+  return {
+    size,
+    tracking: (np.text_param("tracking") / 1000) * size,
+    leading: np.text_param("leading"),
+    scaleX: np.text_param("scale_x"),
+    scaleY: np.text_param("scale_y"),
+    caps: np.text_param("caps") > 0.5,
+    underline: np.text_param("underline") > 0.5,
+    strike: np.text_param("strike") > 0.5,
+    outline: np.text_param("outline"),
+    outlineColor: np.text_outline_color(),
+    shadow: np.text_param("shadow"),
+  };
+}
+
+/** Whether the canvas spaces letters itself; older browsers get it a glyph at a time. */
+const HAS_LETTER_SPACING = "letterSpacing" in CanvasRenderingContext2D.prototype;
+
+/** Measures one line with tracking, on browsers with and without `letterSpacing`. */
+function lineWidth(ctx, line, tracking) {
+  if (!line) return 0;
+  if (HAS_LETTER_SPACING) {
+    ctx.letterSpacing = `${tracking}px`;
+    // The canvas adds the spacing after every glyph, the last included.
+    return ctx.measureText(line).width - tracking;
+  }
+  const glyphs = [...line];
+  return glyphs.reduce((w, g) => w + ctx.measureText(g).width, 0) + tracking * (glyphs.length - 1);
+}
+
+/** Fills or strokes one line with tracking. */
+function drawLine(ctx, line, x, y, tracking, stroke) {
+  const put = (text, at) => (stroke ? ctx.strokeText(text, at, y) : ctx.fillText(text, at, y));
+  if (HAS_LETTER_SPACING || !tracking) {
+    if (HAS_LETTER_SPACING) ctx.letterSpacing = `${tracking}px`;
+    put(line, x);
+    return;
+  }
+  let at = x;
+  for (const g of line) {
+    put(g, at);
+    at += ctx.measureText(g).width + tracking;
+  }
 }
 
 /** How far across the block the anchored edge is: 0 left, ½ centre, 1 right. */
@@ -2092,14 +2257,16 @@ function textAnchor() {
  * this, so they agree.
  */
 function measureText(text) {
-  const size = np.text_size();
+  const c = characterSettings();
+  const size = c.size;
   tctx.font = textFontCss();
-  const lines = text.split("\n");
-  const widths = lines.map((l) => tctx.measureText(l).width);
+  const lines = text.split("\n").map((l) => (c.caps ? l.toUpperCase() : l));
+  const widths = lines.map((l) => lineWidth(tctx, l, c.tracking));
+  if (HAS_LETTER_SPACING) tctx.letterSpacing = "0px";
   const m = tctx.measureText("Hg");
   const asc = m.fontBoundingBoxAscent ?? size * 0.8;
   const desc = m.fontBoundingBoxDescent ?? size * 0.25;
-  return { lines, widths, width: Math.ceil(Math.max(0, ...widths)), pitch: size * TEXT_LINE, asc, desc, size };
+  return { lines, widths, width: Math.ceil(Math.max(0, ...widths)), pitch: size * c.leading, asc, desc, size, c };
 }
 
 /**
@@ -2109,24 +2276,149 @@ function measureText(text) {
  */
 function rasterizeText(text) {
   const m = measureText(text);
-  const pad = Math.ceil(m.size * 0.5);
-  const w = Math.max(1, Math.min(MAX_TEXT_CANVAS, m.width + 2 * pad));
-  const h = Math.max(1, Math.min(MAX_TEXT_CANVAS, Math.ceil(m.lines.length * m.pitch) + 2 * pad));
+  const c = m.c;
+  // Room for overhangs and antialiasing, and for the outline and the shadow.
+  const pad = Math.ceil(m.size * 0.5 + c.outline + c.shadow * 2);
+  const w = Math.max(1, Math.min(MAX_TEXT_CANVAS, Math.ceil(m.width * c.scaleX) + 2 * pad));
+  const h = Math.max(1, Math.min(MAX_TEXT_CANVAS, Math.ceil(m.lines.length * m.pitch * c.scaleY) + 2 * pad));
   textCanvas.width = w;
   textCanvas.height = h;
+  tctx.save();
+  tctx.translate(pad, pad);
+  tctx.scale(c.scaleX, c.scaleY);
   tctx.font = textFontCss();
-  tctx.fillStyle = np.color();
   tctx.textBaseline = "alphabetic";
+  tctx.lineJoin = "round";
   const k = textAnchor();
+  const thick = Math.max(1, m.size * 0.06);
   // Each line's baseline sits where a CSS line box of the same pitch puts
   // it: half the leading, then the ascent.
-  m.lines.forEach((line, i) => {
-    const x = pad + (m.width - m.widths[i]) * k;
-    const y = pad + i * m.pitch + (m.pitch - (m.asc + m.desc)) / 2 + m.asc;
-    tctx.fillText(line, x, y);
-  });
+  const place = (i) => [(m.width - m.widths[i]) * k, i * m.pitch + (m.pitch - (m.asc + m.desc)) / 2 + m.asc];
+  const pass = (stroke) => {
+    m.lines.forEach((line, i) => {
+      const [x, y] = place(i);
+      drawLine(tctx, line, x, y, c.tracking, stroke);
+      const rule = (ry) => (stroke ? tctx.strokeRect(x, ry, m.widths[i], thick) : tctx.fillRect(x, ry, m.widths[i], thick));
+      if (c.underline) rule(y + m.size * 0.1);
+      if (c.strike) rule(y - m.asc * 0.3);
+    });
+  };
+  if (c.shadow > 0) {
+    tctx.shadowColor = "rgba(0,0,0,0.5)";
+    tctx.shadowOffsetX = c.shadow;
+    tctx.shadowOffsetY = c.shadow;
+    tctx.shadowBlur = c.shadow;
+  }
+  if (c.outline > 0) {
+    // The outline goes under the fill, twice as wide, so half of it shows
+    // outside the glyph; it carries the shadow, so the fill need not.
+    tctx.strokeStyle = c.outlineColor;
+    tctx.lineWidth = c.outline * 2;
+    pass(true);
+    tctx.shadowColor = "transparent";
+  }
+  tctx.fillStyle = np.color();
+  pass(false);
+  tctx.restore();
   const bytes = tctx.getImageData(0, 0, w, h).data;
   return { w, h, pad, bytes: new Uint8Array(bytes.buffer) };
+}
+
+// ---- The Character panel --------------------------------------------------------
+
+/** What the panel calls each of the engine's settings, and how it is shown. */
+const CHARACTER_ROWS = {
+  tracking: { label: "Tracking", step: 10, title: "Space between letters, in thousandths of an em" },
+  leading: { label: "Leading", step: 0.05, title: "Line pitch, as a multiple of the size (1.2 is the usual)" },
+  scale_x: { label: "Horizontal", step: 0.05, title: "Stretch across, as a factor" },
+  scale_y: { label: "Vertical", step: 0.05, title: "Stretch down, as a factor" },
+  caps: { label: "Caps", flag: true },
+  underline: { label: "Underline", flag: true },
+  strike: { label: "Strike", flag: true },
+  outline: { label: "Outline", step: 0.5, title: "An outline round every letter, in pixels, in the outline colour" },
+  shadow: { label: "Shadow", step: 1, title: "A soft shadow, offset down and right by this many pixels" },
+};
+
+function bindCharacterPanel() {
+  const grid = $("char-grid");
+  const names = NPaint.text_param_names();
+  const ranges = NPaint.text_param_ranges();
+  const flags = document.createElement("div");
+  flags.className = "char-flags";
+  names.forEach((name, i) => {
+    const row = CHARACTER_ROWS[name] ?? { label: name, step: 1 };
+    const label = document.createElement("label");
+    label.className = "char-row";
+    label.title = row.title ?? "";
+    const input = document.createElement("input");
+    input.id = `char-${name}`;
+    if (row.flag) {
+      input.type = "checkbox";
+      input.addEventListener("change", () => {
+        setCharacter(name, input.checked ? 1 : 0);
+        refocusText();
+      });
+      label.append(input, document.createTextNode(` ${row.label}`));
+      flags.appendChild(label);
+    } else {
+      input.type = "number";
+      input.min = ranges[2 * i];
+      input.max = ranges[2 * i + 1];
+      input.step = row.step;
+      const apply = () => setCharacter(name, Number(input.value));
+      input.addEventListener("change", apply);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          apply();
+          refocusText() || input.blur();
+        }
+        if (e.key === "Escape") refocusText() || input.blur();
+      });
+      const span = document.createElement("span");
+      span.textContent = row.label;
+      label.append(span, input);
+      grid.appendChild(label);
+    }
+  });
+  grid.appendChild(flags);
+  $("char-outline-color").addEventListener("click", () => openPicker("outline"));
+  $("opt-character").addEventListener("click", () => {
+    if ($("char-panel").hidden) openCharacterPanel();
+    else closeCharacterPanel();
+  });
+  $("char-close").addEventListener("click", closeCharacterPanel);
+}
+
+function setCharacter(name, value) {
+  act(() => np.set_text_param(name, value));
+  syncCharacterPanel();
+  previewText();
+}
+
+function openCharacterPanel() {
+  $("char-panel").hidden = false;
+  setPressed($("opt-character"), true);
+  syncCharacterPanel();
+}
+
+function closeCharacterPanel() {
+  if ($("char-panel").hidden) return;
+  $("char-panel").hidden = true;
+  setPressed($("opt-character"), false);
+  if (pickerTarget === "outline") picker.close();
+}
+
+/** The panel shows the engine's settings — the layer's, while one is being edited. */
+function syncCharacterPanel() {
+  if ($("char-panel").hidden) return;
+  for (const name of NPaint.text_param_names()) {
+    const input = $(`char-${name}`);
+    if (!input || document.activeElement === input) continue;
+    const v = np.text_param(name);
+    if (input.type === "checkbox") input.checked = v > 0.5;
+    else input.value = Number.isInteger(v) ? v : Number(v.toFixed(2));
+  }
+  $("char-outline-color").style.setProperty("--swatch", np.text_outline_color());
 }
 
 /** A click with the text tool: edit the text layer there, or start one. */
@@ -2207,13 +2499,26 @@ function placeTextBox() {
   box.style.width = `${width + 2}px`;
   box.style.height = `${t.lines.length * t.pitch}px`;
   box.style.caretColor = np.color();
+  box.style.letterSpacing = `${t.c.tracking}px`;
+  box.style.textTransform = t.c.caps ? "uppercase" : "none";
   const [a, b, c, d, e, f] = m;
   const px = np.pan_x();
   const py = np.pan_y();
-  box.style.transform = `matrix(${a * zoom}, ${b * zoom}, ${c * zoom}, ${d * zoom}, ${e * zoom + px}, ${f * zoom + py}) translate(${left}px, ${oy}px)`;
+  // The box is laid out unscaled and stretched about the block's corner,
+  // as the rendering was.
+  const sx = t.c.scaleX;
+  const sy = t.c.scaleY;
+  box.style.transform = `matrix(${a * zoom}, ${b * zoom}, ${c * zoom}, ${d * zoom}, ${e * zoom + px}, ${f * zoom + py}) translate(${ox}px, ${oy}px) scale(${sx}, ${sy}) translate(${left - ox}px, 0)`;
 }
 
 /** Keeps the text. Nothing typed takes a new layer away again. */
+/** Puts the keyboard back in the text box after a panel field took it. Returns whether there was one. */
+function refocusText() {
+  if (!textEdit) return false;
+  textEdit.box.focus();
+  return true;
+}
+
 function commitText() {
   if (!textEdit) return;
   act(() => np.commit_session());
@@ -3237,6 +3542,16 @@ function beginRename(nameEl, index) {
 
 // ---- Pointer ------------------------------------------------------------------
 
+/**
+ * A pen's pressure, for the stroke's size. Anything else is 1: a mouse
+ * reports 0.5 while its button is down, which is not pressure.
+ */
+function pressureOf(e) {
+  if (e.pointerType !== "pen") return 1;
+  const p = Number(e.pressure);
+  return Number.isFinite(p) && p > 0 ? Math.min(1, Math.max(0.05, p)) : 1;
+}
+
 function canvasPoint(e) {
   const r = view.getBoundingClientRect();
   return [e.clientX - r.left, e.clientY - r.top];
@@ -3415,7 +3730,7 @@ function bindPointer() {
       // With the zoom tool, the options-bar "zoom out" acts like Alt.
       const alt = e.altKey || (tool === "zoom" && zoomOutMode);
       if (tool === "subject") subjectMods = { shift: e.shiftKey, alt: e.altKey };
-      if (!np.pointer_down(x, y, e.shiftKey, alt)) {
+      if (!np.pointer_down(x, y, e.shiftKey, alt, pressureOf(e))) {
         // A smart object's pixels, an adjustment layer's, or a locked
         // layer: the engine says which, and what to do instead.
         const why = np.edit_refusal();
@@ -3461,10 +3776,10 @@ function bindPointer() {
       pan = { x, y };
       needsDraw = true;
     } else if (np.is_transforming()) {
-      if (e.buttons & 1) np.pointer_move(x, y, e.shiftKey, e.altKey);
+      if (e.buttons & 1) np.pointer_move(x, y, e.shiftKey, e.altKey, pressureOf(e));
       else setHitCursor(np.transform_hit(x, y));
     } else if (np.is_gesturing()) {
-      const changed = np.pointer_move(x, y, e.shiftKey, e.altKey);
+      const changed = np.pointer_move(x, y, e.shiftKey, e.altKey, pressureOf(e));
       if (tool === "eyedropper") syncSwatches();
       if (changed && SELECTION_TOOLS.has(tool)) antsDirty = true;
       needsDraw = true;
@@ -3497,10 +3812,10 @@ function bindPointer() {
       pan = null;
       viewport.classList.remove("panning", "dragging");
     } else if (np.is_transforming()) {
-      np.pointer_up(x, y, e.shiftKey, e.altKey);
+      np.pointer_up(x, y, e.shiftKey, e.altKey, pressureOf(e));
       layersDirty = true;
     } else if (np.is_gesturing()) {
-      np.pointer_up(x, y, e.shiftKey, e.altKey);
+      np.pointer_up(x, y, e.shiftKey, e.altKey, pressureOf(e));
       needsDraw = true;
       if (SELECTION_TOOLS.has(tool)) {
         antsDirty = true;

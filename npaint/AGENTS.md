@@ -198,7 +198,9 @@ answer.
 drawn by the page over the composite and are not in the document; the
 guides are dragged out of the rulers and can be moved, or dragged off the
 canvas to remove them, with any tool. Rulers, grid, snapping and the
-history depth are remembered in `localStorage`. The page hands the engine a
+history depth are remembered in `localStorage`, and so is the colour
+picker's strip of recent colours (`npaint.recentColors`, the last twelve a
+picker was closed on after a change). The page hands the engine a
 copy of the guides (`set_guides`) whenever they change, and `src/snap.rs`
 pulls the move tool's pixels and the free-transform box (edges and centre
 on a move, the handle on a scale) onto guides, canvas edges and the canvas centre
@@ -372,6 +374,28 @@ coverage as full, so it stays hard under chalk too. The page shows the
 hardness slider only when `brush_tip_has_hardness` says it means anything,
 and draws the brush ring as a square for the square tip.
 
+Three settings shape the path before the tip is stamped, all in
+`ToolSettings` and all in `tools/stroke.rs`:
+
+* **Symmetry** (`tools::Symmetry`): mirrors in the canvas's vertical and
+  horizontal axes and an n-fold turn about the canvas centre, which
+  combine — a mirror with a six-fold turn is twelve dabs, a mandala. Every
+  segment of a stroke is stamped at every image into the one coverage
+  mask, so the copies never compound where they meet, and the dirty
+  rectangle is the union of the segments. `Symmetry::images` snaps its
+  answers to a millionth of a pixel because positions are floored into
+  pixels and a quarter turn otherwise lands at 14.999999999999998. The page
+  draws the axes over the canvas while a brush tool is in hand.
+* **Smoothing**: the brush goes only part of the way towards each pointer
+  event (`follow`), which rounds off a hand's jitter and cuts corners; the
+  stroke always ends at the pointer.
+* **Pressure**: the page passes a pen's pressure with every pointer event
+  (`NPaint::pointer_down(x, y, shift, alt, pressure)`, a mouse being 1),
+  the editor keeps it for the `PointerEvent`, and the stroke scales the
+  dab by it while `pressure_size` is on. The page reports 1 for anything
+  that is not a pen, since a mouse claims a pressure of 0.5 while its
+  button is down.
+
 ## Text
 
 The engine has no fonts. A text layer is a **smart object whose source the
@@ -405,6 +429,34 @@ text is blank or unchanged, in which case a new layer goes away again and
 an edited one is put back. Any layer operation, undo or new document
 cancels the session, as with every session, and the page notices through
 `is_editing_text` and takes its box away.
+
+**The Character panel.** `text::PARAMS` is the one list of its settings —
+tracking (thousandths of an em), leading (a multiple of the size),
+horizontal and vertical scale, caps, underline, strikethrough, outline width
+and shadow — with their ranges; `TextStyle::set_param`/`param` read and
+write them by name, `set_text_param`/`text_param` cross the boundary, and
+the page builds the panel from `text_param_names`/`text_param_ranges`, so a
+new setting is a row in `PARAMS`, two arms in `text.rs`, a line in the file
+(format 4 appended them after the origin) and whatever the page's renderer
+does with it. The outline colour is the one setting that is a colour
+(`set_text_outline_color`); its swatch in the panel opens the same colour
+picker as the foreground and background swatches (`openPicker("outline")`),
+and closing the picker hands focus back to the text box so Ctrl+Enter
+still keeps the text.
+Rendering: tracking is the canvas's `letterSpacing` (drawn a glyph at a
+time where a browser lacks it), leading the line pitch, the scales a
+`ctx.scale` round the block (the padding stays unscaled, and the box's CSS
+matrix carries the same scale), caps `toUpperCase`, underline and
+strikethrough drawn as rules, outline a `strokeText` under the fill in the
+outline colour, and the shadow the canvas's own, half-black, offset down
+and right by the setting and blurred by as much. The padding grows to hold
+the outline and the shadow.
+
+**Fonts from a file.** The font list's last entry loads a `.ttf`, `.otf`,
+`.woff` or `.woff2` through `FontFace` and adds it under the file's name.
+The file keeps the name only: a document set in such a font asks for it
+again on another machine (the name is added to the list so the panel shows
+it) and renders in the fallback until it is loaded.
 
 The page's text box is a `textarea` over the canvas with invisible text
 (the canvas shows the engine's rendering) put through the layer's
@@ -659,9 +711,10 @@ on the mark or on the name.
 
 No lasso or polygon drawn by hand, though the mask machinery is there for
 one; no gradients or blur-type filters; text has one style per layer (no
-mixed runs), no wrapping to a box, no letter or line spacing controls, and
-is set in whatever the browser has for the font's name; the brush tips have
-no angle or spacing controls, and no tip of the user's own; the dither's error-diffusion
+mixed runs), no wrapping to a box, no kerning or baseline shift, and is set
+in whatever the browser has for the font's name unless the file is loaded;
+a loaded font file is not kept in the document; the brush tips have no
+angle or spacing controls, and no tip of the user's own; the dither's error-diffusion
 patterns are a serial pass over every pixel, so as a live adjustment *layer*
 on a very large canvas they cost noticeably more per composite than the
 ordered ones; no layer

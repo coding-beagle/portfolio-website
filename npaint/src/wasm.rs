@@ -23,7 +23,7 @@ use crate::mask::SelectMode;
 use crate::transform::{Handle, Hit};
 use crate::raster::Raster;
 use crate::text::TextAlign;
-use crate::tools::ToolKind;
+use crate::tools::{Symmetry, ToolKind, MAX_RADIAL};
 
 #[wasm_bindgen]
 pub struct NPaint {
@@ -247,6 +247,35 @@ impl NPaint {
         self.editor.settings().tip.has_hardness()
     }
 
+    /// Paint symmetry: mirrors in the canvas's vertical and horizontal
+    /// axes, and how many ways the stroke is turned about the centre (1
+    /// for none).
+    pub fn set_symmetry(&mut self, mirror_x: bool, mirror_y: bool, radial: u32) {
+        self.editor.settings_mut().symmetry = Symmetry { mirror_x, mirror_y, radial: radial.clamp(1, MAX_RADIAL) };
+    }
+
+    /// The symmetry as `[mirror_x, mirror_y, radial]`.
+    pub fn symmetry(&self) -> Vec<u32> {
+        let s = self.editor.settings().symmetry;
+        vec![u32::from(s.mirror_x), u32::from(s.mirror_y), s.radial]
+    }
+
+    pub fn set_smoothing(&mut self, smoothing: f32) {
+        self.editor.settings_mut().smoothing = smoothing.clamp(0.0, 1.0);
+    }
+
+    pub fn smoothing(&self) -> f32 {
+        self.editor.settings().smoothing
+    }
+
+    pub fn set_pressure_size(&mut self, on: bool) {
+        self.editor.settings_mut().pressure_size = on;
+    }
+
+    pub fn pressure_size(&self) -> bool {
+        self.editor.settings().pressure_size
+    }
+
     pub fn brush_tip_names() -> Vec<String> {
         BrushTip::ALL.iter().map(|t| t.name().to_owned()).collect()
     }
@@ -302,6 +331,35 @@ impl NPaint {
 
     pub fn text_align(&self) -> String {
         self.editor.settings().text.align.name().to_owned()
+    }
+
+    /// The Character panel's settings by name — see `text::PARAMS`; a flag
+    /// is 0 or 1. Setting one clamps it to its range.
+    pub fn set_text_param(&mut self, name: &str, value: f64) -> Result<(), String> {
+        self.editor.settings_mut().text.set_param(name, value).map_err(err)
+    }
+
+    pub fn text_param(&self, name: &str) -> Result<f64, String> {
+        self.editor.settings().text.param(name).ok_or_else(|| format!("no text setting called \"{name}\""))
+    }
+
+    /// The names of the Character panel's settings, with `[min, max]` for
+    /// each in `text_param_ranges`.
+    pub fn text_param_names() -> Vec<String> {
+        crate::text::PARAMS.iter().map(|(n, ..)| (*n).to_owned()).collect()
+    }
+
+    pub fn text_param_ranges() -> Vec<f64> {
+        crate::text::PARAMS.iter().flat_map(|(_, lo, hi)| [*lo, *hi]).collect()
+    }
+
+    pub fn set_text_outline_color(&mut self, hex: &str) -> Result<(), String> {
+        self.editor.settings_mut().text.outline_color = Rgba::from_hex(hex).map_err(err)?;
+        Ok(())
+    }
+
+    pub fn text_outline_color(&self) -> String {
+        self.editor.settings().text.outline_color.to_hex()
     }
 
     /// Starts a new text layer with its text's corner at a screen point.
@@ -440,15 +498,19 @@ impl NPaint {
     //
     // Screen coordinates, in CSS pixels relative to the canvas.
 
-    pub fn pointer_down(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> bool {
+    /// `pressure` is the pen's, `0.0..=1.0`; pass 1 for a mouse.
+    pub fn pointer_down(&mut self, x: f64, y: f64, shift: bool, alt: bool, pressure: f64) -> bool {
+        self.editor.set_pressure(pressure);
         self.editor.pointer_down(Point::new(x, y), shift, alt)
     }
 
-    pub fn pointer_move(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> bool {
+    pub fn pointer_move(&mut self, x: f64, y: f64, shift: bool, alt: bool, pressure: f64) -> bool {
+        self.editor.set_pressure(pressure);
         self.editor.pointer_move(Point::new(x, y), shift, alt)
     }
 
-    pub fn pointer_up(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> bool {
+    pub fn pointer_up(&mut self, x: f64, y: f64, shift: bool, alt: bool, pressure: f64) -> bool {
+        self.editor.set_pressure(pressure);
         self.editor.pointer_up(Point::new(x, y), shift, alt)
     }
 
@@ -1301,8 +1363,8 @@ mod tests {
         np.set_tool("pencil").unwrap();
         np.set_color("#0000ff").unwrap();
         np.set_size(1);
-        np.pointer_down(0.0, 0.0, false, false);
-        np.pointer_up(0.0, 0.0, false, false);
+        np.pointer_down(0.0, 0.0, false, false, 1.0);
+        np.pointer_up(0.0, 0.0, false, false, 1.0);
         assert!(!np.render().is_empty());
         assert_eq!(np.frame_copy()[..4], [0, 0, 255, 255]);
     }
@@ -1342,8 +1404,8 @@ mod tests {
         assert!(np.begin_transform().is_err(), "nothing to transform");
         np.set_tool("pencil").unwrap();
         np.set_size(1);
-        np.pointer_down(5.0, 5.0, false, false);
-        np.pointer_up(5.0, 5.0, false, false);
+        np.pointer_down(5.0, 5.0, false, false, 1.0);
+        np.pointer_up(5.0, 5.0, false, false, 1.0);
         np.begin_transform().unwrap();
         assert_eq!(np.transform_handles().len(), 16);
         assert_eq!(np.transform_info().len(), 7);
@@ -1373,10 +1435,10 @@ mod tests {
         np.set_tool("zoom").unwrap();
         np.set_scrubby_zoom(false); // the marquee is the option now
         assert!(np.tool_overlay().is_empty());
-        np.pointer_down(10.0, 10.0, false, false);
-        np.pointer_move(50.0, 30.0, false, false);
+        np.pointer_down(10.0, 10.0, false, false, 1.0);
+        np.pointer_move(50.0, 30.0, false, false, 1.0);
         assert_eq!(np.tool_overlay(), vec![10.0, 10.0, 40.0, 20.0]);
-        np.pointer_up(50.0, 30.0, false, false);
+        np.pointer_up(50.0, 30.0, false, false, 1.0);
         assert!(np.tool_overlay().is_empty());
         assert!(np.zoom() > 1.0, "the drag zoomed in on the box");
     }
@@ -1395,8 +1457,8 @@ mod tests {
         np.set_tool("wand").unwrap();
         assert_eq!(np.tolerance(), 32);
         np.set_tolerance(0);
-        np.pointer_down(5.0, 5.0, false, false);
-        np.pointer_up(5.0, 5.0, false, false);
+        np.pointer_down(5.0, 5.0, false, false, 1.0);
+        np.pointer_up(5.0, 5.0, false, false, 1.0);
         // A blank sheet is all one colour, so the wand takes the lot — which
         // is the same as nothing being selected.
         assert!(np.selection_rect().is_empty());
@@ -1633,7 +1695,7 @@ mod tests {
         assert!(np.place_smart_object("x", 3, 3, &red).is_err(), "bytes that do not match");
         np.set_tool("brush").unwrap();
         assert!(!np.edit_refusal().is_empty());
-        assert!(!np.pointer_down(2.0, 2.0, false, false));
+        assert!(!np.pointer_down(2.0, 2.0, false, false, 1.0));
         np.begin_transform().unwrap();
         assert!(np.transform_nudge(1.0, 0.0));
         assert!(np.commit_session());
@@ -1658,6 +1720,28 @@ mod tests {
         assert!(np.set_brush_tip("fan").is_err());
         assert_eq!(NPaint::brush_tip_names().len(), NPaint::brush_tip_labels().len());
         assert!(NPaint::brush_tip_names().contains(&"calligraphy".to_owned()));
+    }
+
+    #[test]
+    fn the_stroke_settings_and_character_settings_cross_the_boundary() {
+        let mut np = NPaint::new(4, 4, "").unwrap();
+        assert_eq!(np.symmetry(), vec![0, 0, 1]);
+        np.set_symmetry(true, false, 99);
+        assert_eq!(np.symmetry(), vec![1, 0, MAX_RADIAL]);
+        np.set_smoothing(2.0);
+        assert_eq!(np.smoothing(), 1.0);
+        assert!(np.pressure_size());
+        np.set_pressure_size(false);
+        assert!(!np.pressure_size());
+        assert_eq!(NPaint::text_param_names().len() * 2, NPaint::text_param_ranges().len());
+        np.set_text_param("tracking", 100.0).unwrap();
+        assert_eq!(np.text_param("tracking").unwrap(), 100.0);
+        np.set_text_param("caps", 1.0).unwrap();
+        assert_eq!(np.text_param("caps").unwrap(), 1.0);
+        assert!(np.set_text_param("kerning", 1.0).is_err());
+        assert!(np.text_param("kerning").is_err());
+        np.set_text_outline_color("#ff0000").unwrap();
+        assert_eq!(np.text_outline_color(), "#ff0000");
     }
 
     #[test]

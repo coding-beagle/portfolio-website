@@ -33,6 +33,10 @@
 //!   source and placement as kind `2` writes them, then the text, its font
 //!   name, size, bold, italic, alignment, colour and origin. Kind `2` is
 //!   unchanged; a format-2 file simply has no kind `3` in it.
+//! * **4** — the Character panel: after a text layer's origin come its
+//!   tracking, leading, horizontal and vertical scale, caps, underline,
+//!   strikethrough, outline width and colour, and shadow. A format-3 text
+//!   layer has none of these and comes back with the defaults.
 
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
@@ -45,7 +49,7 @@ use crate::transform::Affine;
 
 const MAGIC: &[u8; 6] = b"NPAINT";
 /// The format this build writes. See the module's version history.
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileError {
@@ -113,7 +117,7 @@ impl Writer {
         }
     }
 
-    fn text(&mut self, t: &TextObject) {
+    fn text(&mut self, t: &TextObject, version: u16) {
         self.str(&t.text);
         self.str(&t.style.font);
         self.f64(t.style.size);
@@ -125,14 +129,35 @@ impl Writer {
         }
         self.f64(t.origin.x);
         self.f64(t.origin.y);
+        if version < 4 {
+            return;
+        }
+        let s = &t.style;
+        for v in [s.tracking, s.leading, s.scale_x, s.scale_y] {
+            self.f64(v);
+        }
+        for v in [s.caps, s.underline, s.strike] {
+            self.u8(u8::from(v));
+        }
+        self.f64(s.outline);
+        for v in [s.outline_color.r, s.outline_color.g, s.outline_color.b, s.outline_color.a] {
+            self.u8(v);
+        }
+        self.f64(s.shadow);
     }
 }
 
 /// The document and its guides as NPaint file bytes.
 pub fn save(doc: &Document, guides: &Guides) -> Vec<u8> {
+    save_as(doc, guides, VERSION)
+}
+
+/// [`save`] in an older format, for testing that older files still open;
+/// what an older version cannot carry is left out.
+fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
     let mut w = Writer { out: Vec::new() };
     w.out.extend_from_slice(MAGIC);
-    w.u16(VERSION);
+    w.u16(version);
     w.u32(doc.width());
     w.u32(doc.height());
     w.u32(doc.active_index() as u32);
@@ -166,7 +191,7 @@ pub fn save(doc: &Document, guides: &Guides) -> Vec<u8> {
                 w.raster(&object.source);
                 w.affine(&object.transform);
                 if let Some(text) = &object.text {
-                    w.text(text);
+                    w.text(text, version);
                 }
             }
         }
@@ -240,7 +265,7 @@ impl Reader<'_> {
         Ok(Affine { a: self.f64()?, b: self.f64()?, c: self.f64()?, d: self.f64()?, e: self.f64()?, f: self.f64()? })
     }
 
-    fn text(&mut self) -> Result<TextObject, FileError> {
+    fn text(&mut self, version: u16) -> Result<TextObject, FileError> {
         let text = self.str()?;
         let font = self.str()?;
         let mut style = TextStyle { font, ..TextStyle::default() };
@@ -252,6 +277,21 @@ impl Reader<'_> {
         let origin = crate::geometry::Point::new(self.f64()?, self.f64()?);
         if !origin.x.is_finite() || !origin.y.is_finite() {
             return Err(FileError::Corrupt("text origin"));
+        }
+        if version >= 4 {
+            for name in ["tracking", "leading", "scale_x", "scale_y"] {
+                let v = self.f64()?;
+                style.set_param(name, v).expect("a known setting");
+            }
+            for name in ["caps", "underline", "strike"] {
+                let v = self.u8()?;
+                style.set_param(name, f64::from(v)).expect("a known setting");
+            }
+            let outline = self.f64()?;
+            style.set_param("outline", outline).expect("a known setting");
+            style.outline_color = crate::color::Rgba::new(self.u8()?, self.u8()?, self.u8()?, self.u8()?);
+            let shadow = self.f64()?;
+            style.set_param("shadow", shadow).expect("a known setting");
         }
         Ok(TextObject { text, style, color, origin })
     }
@@ -309,7 +349,7 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
                 let transform = r.affine()?;
                 let mut object = SmartObject::new(source, transform);
                 if kind == 3 {
-                    object.text = Some(r.text()?);
+                    object.text = Some(r.text(version)?);
                 }
                 let raster = object.render(width, height);
                 (LayerKind::Smart(object), raster)
@@ -392,7 +432,23 @@ mod tests {
         // A text layer, in a style that is nothing like the default.
         let text = TextObject {
             text: "Hi\nthere ✓".to_owned(),
-            style: TextStyle { font: "Georgia, serif".to_owned(), size: 13.5, bold: true, italic: true, align: TextAlign::Center },
+            style: TextStyle {
+                font: "Georgia, serif".to_owned(),
+                size: 13.5,
+                bold: true,
+                italic: true,
+                align: TextAlign::Center,
+                tracking: 50.0,
+                leading: 1.5,
+                scale_x: 1.25,
+                scale_y: 0.8,
+                caps: true,
+                underline: true,
+                strike: false,
+                outline: 2.0,
+                outline_color: Rgba::new(1, 2, 3, 4),
+                shadow: 3.0,
+            },
             color: Rgba::new(10, 20, 30, 200),
             origin: crate::geometry::Point::new(2.0, 3.0),
         };
@@ -444,18 +500,24 @@ mod tests {
 
     #[test]
     fn a_file_from_an_older_format_still_opens() {
-        let mut bytes = save(&document(), &Guides::default());
+        let bytes = save(&document(), &Guides::default());
         assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), VERSION, "the version is written where the reader looks");
-        // Every format up to this one is still read. The bytes are the same
-        // shape throughout: what changed between 1 and 2 is only what an
-        // adjustment's parameters may say, and an older one that says
-        // nothing about a channel comes back on RGB (see `adjust`); 3 added
-        // a layer kind, which an older file simply never contains.
+        // Every format up to this one is still read. What changed between 1
+        // and 2 is only what an adjustment's parameters may say, and an
+        // older one that says nothing about a channel comes back on RGB
+        // (see `adjust`); 3 added a layer kind; 4 added the Character
+        // panel's settings after a text layer, which come back as the
+        // defaults from a format-3 file.
         for older in 1..VERSION {
-            bytes[6..8].copy_from_slice(&older.to_le_bytes());
+            let bytes = save_as(&document(), &Guides::default(), older);
             let (doc, _) = load(&bytes).expect("an older file still opens");
             assert_eq!(doc.layers().len(), document().layers().len(), "format {older}");
+            let text = doc.layers()[4].text().expect("the text layer");
+            assert_eq!(text.text, "Hi\nthere ✓", "format {older}");
+            assert_eq!(text.style.leading, 1.2, "format {older}: the default, not the 1.5 a newer file keeps");
         }
+        let (doc, _) = load(&bytes).unwrap();
+        assert_eq!(doc.layers()[4].text().unwrap().style.leading, 1.5);
     }
 
     #[test]

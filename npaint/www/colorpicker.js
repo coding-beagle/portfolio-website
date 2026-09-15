@@ -50,10 +50,31 @@ export function parseHex(text) {
  * shows it anchored to an element with an initial hex; `onChange` fires
  * for every change, `onClose` when it is dismissed.
  */
-export function createColorPicker(root, { onChange }) {
+/** Where the recent colours are kept between sessions, and how many. */
+const RECENT_KEY = "npaint.recentColors";
+const RECENT_MAX = 12;
+
+function loadRecent() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(saved) ? saved.filter((c) => parseHex(String(c))).slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(recent) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  } catch {
+    // Private windows and full stores lose the list; the picker still works.
+  }
+}
+
+export function createColorPicker(root, { onChange, onClose = () => {} }) {
   let h = 0, s = 0, v = 0;
   let original = "#000000";
-  let recent = [];
+  let recent = loadRecent();
   let dragging = null; // "ring" | "square"
   const dpr = window.devicePixelRatio || 1;
 
@@ -207,18 +228,22 @@ export function createColorPicker(root, { onChange }) {
   }
 
   function remember(hex) {
-    recent = [hex, ...recent.filter((c) => c !== hex)].slice(0, 12);
+    recent = [hex, ...recent.filter((c) => c !== hex)].slice(0, RECENT_MAX);
+    saveRecent(recent);
     renderRecent();
   }
+  renderRecent();
 
   let closeHandler = null;
 
+  /** Closes the picker; a colour that was changed joins the recent strip. */
   function close() {
     if (root.hidden) return;
     root.hidden = true;
-    remember(current());
+    if (current() !== original.toLowerCase()) remember(current());
     window.removeEventListener("pointerdown", closeHandler, true);
     closeHandler = null;
+    onClose();
   }
 
   function open(anchor, hex) {
@@ -229,7 +254,8 @@ export function createColorPicker(root, { onChange }) {
     root.style.left = `${Math.min(r.right + 8, window.innerWidth - root.offsetWidth - 8)}px`;
     root.style.top = `${Math.min(r.top, window.innerHeight - root.offsetHeight - 8)}px`;
     closeHandler = (e) => {
-      if (!root.contains(e.target) && !anchor.contains(e.target)) close();
+      const target = e.target instanceof Node ? e.target : null;
+      if (!target || (!root.contains(target) && !anchor.contains(target))) close();
     };
     window.addEventListener("pointerdown", closeHandler, true);
     field("cp-hex").focus();

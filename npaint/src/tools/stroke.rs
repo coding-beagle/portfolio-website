@@ -12,6 +12,14 @@
 //!
 //! Shift-clicking joins the new stroke to where the last one ended with a
 //! straight line, as in Photoshop, so a run of Shift-clicks draws a polyline.
+//!
+//! Three settings shape the path before it is stamped. *Smoothing* makes
+//! the brush trail the pointer — each event moves the brush only part of
+//! the way towards it — which rounds off the jitter of a hand; the stroke
+//! catches up to the pointer when it ends. *Pressure* from a pen scales the
+//! dab. *Symmetry* lays every segment down again at its mirror images and
+//! turns about the canvas centre, all into the one coverage mask, so the
+//! copies never compound where they meet.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::geometry::{Point, Rect};
@@ -46,13 +54,22 @@ struct InProgress {
     mask: Raster,
 }
 
+/// How far the brush moves towards the pointer on each event, for a
+/// smoothing setting: all the way at 0, a twentieth of the way at 1.
+fn follow(smoothing: f32) -> f64 {
+    1.0 - 0.95 * f64::from(smoothing.clamp(0.0, 1.0))
+}
+
 impl StrokeTool {
     pub fn new(mode: StrokeMode) -> StrokeTool {
         StrokeTool { mode, gesture: None, previous_end: None, touched: None }
     }
 
-    fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point) {
-        let size = ctx.settings.size.max(1);
+    fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point, pressure: f64) {
+        let mut size = ctx.settings.size.max(1);
+        if ctx.settings.pressure_size {
+            size = ((f64::from(size) * pressure.clamp(0.0, 1.0)).round() as u32).max(1);
+        }
         let hardness = if self.mode == StrokeMode::Pencil { 1.0 } else { ctx.settings.hardness };
         let clip = ctx.clip();
         self.touched = None;
@@ -60,16 +77,21 @@ impl StrokeTool {
         let all = g.mask.bounds();
         let from = g.last;
         let tip = ctx.settings.tip;
-        stamp_spaced(from, to, spacing(size), |p| tip.stamp(&mut g.mask, p, size, hardness, &all));
-        g.last = to;
-
+        let bounds = ctx.document.bounds();
+        let centre = Point::new(f64::from(bounds.w) / 2.0, f64::from(bounds.h) / 2.0);
+        let froms = ctx.settings.symmetry.images(from, centre);
+        let tos = ctx.settings.symmetry.images(to, centre);
         let reach = (size as i32) / 2 + 1;
-        let (fx, fy) = from.round();
-        let (tx, ty) = to.round();
-        // Coverage only grew within this segment's reach, and each pixel's
-        // result depends only on its coverage and the base, so only that
-        // part needs re-blending; the rest of the stroke is already right.
-        let segment = Rect::from_corners((fx, fy), (tx, ty)).inflate(reach);
+        let mut segment = Rect::default();
+        for (a, b) in froms.iter().zip(&tos) {
+            stamp_spaced(*a, *b, spacing(size), |p| tip.stamp(&mut g.mask, p, size, hardness, &all));
+            // Coverage only grew within each segment's reach, and each
+            // pixel's result depends only on its coverage and the base, so
+            // only that part needs re-blending; the rest of the stroke is
+            // already right.
+            segment = segment.union(&Rect::from_corners(a.round(), b.round()).inflate(reach));
+        }
+        g.last = to;
         let region = segment.intersect(&clip);
         let layer = ctx.document.active_surface_mut();
         let color = ctx.settings.color;
@@ -142,22 +164,27 @@ impl Tool for StrokeTool {
             mask: Raster::new(layer.width(), layer.height()),
         });
         // A click without movement still lays down one dab.
-        self.stamp_to(ctx, ev.pos);
+        self.stamp_to(ctx, ev.pos, ev.pressure);
         Gesture::EditsActiveLayer
     }
 
     fn update(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
-        if self.gesture.is_none() {
-            return false;
-        }
-        self.stamp_to(ctx, ev.pos);
+        let Some(g) = self.gesture.as_ref() else { return false };
+        // Smoothing: the brush goes only part of the way to the pointer.
+        let k = follow(ctx.settings.smoothing);
+        let to = Point::new(g.last.x + (ev.pos.x - g.last.x) * k, g.last.y + (ev.pos.y - g.last.y) * k);
+        self.stamp_to(ctx, to, ev.pressure);
         true
     }
 
     fn finish(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
-        let changed = self.update(ctx, ev);
+        if self.gesture.is_none() {
+            return false;
+        }
+        // The stroke ends where the pointer is, smoothing or no smoothing.
+        self.stamp_to(ctx, ev.pos, ev.pressure);
         self.previous_end = self.gesture.take().map(|g| g.last);
-        changed
+        true
     }
 
     fn cancel(&mut self, ctx: &mut ToolContext) {
@@ -395,6 +422,71 @@ mod tests {
         let n = rig.painted();
         assert!(n > 0 && n < 21 * 9, "grainy: {n} of the band");
         assert!(rig.doc.active_layer().raster.pixels().iter().all(|p| p.a == 0 || *p == RED), "the pencil keeps chalk hard");
+    }
+
+    #[test]
+    fn smoothing_rounds_a_corner_off_and_still_ends_at_the_pointer() {
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.stroke(&[(5.0, 5.0), (25.0, 5.0), (25.0, 25.0)]);
+        assert_eq!(rig.px(25, 5), RED, "no smoothing: the corner is painted");
+
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.settings.smoothing = 0.8;
+        rig.stroke(&[(5.0, 5.0), (25.0, 5.0), (25.0, 25.0)]);
+        assert_eq!(rig.px(25, 5), Rgba::TRANSPARENT, "smoothed: the brush cut the corner");
+        assert_eq!(rig.px(25, 25), RED, "but it ends where the pointer did");
+        assert_eq!(rig.px(5, 5), RED);
+        assert!(rig.painted() > 20, "and it is one continuous line");
+    }
+
+    #[test]
+    fn pen_pressure_scales_the_dab_unless_switched_off() {
+        let at = |p: f64| PointerEvent { pressure: p, ..PointerEvent::at(15.0, 15.0) };
+        let dab = |pressure_size: bool, pressure: f64| {
+            let mut rig = Rig::new(StrokeMode::Brush);
+            rig.settings.size = 20;
+            rig.settings.pressure_size = pressure_size;
+            let mut ctx = ToolContext { document: &mut rig.doc, selection: &mut rig.selection, viewport: &mut rig.viewport, settings: &mut rig.settings };
+            rig.tool.begin(&mut ctx, at(pressure));
+            rig.tool.finish(&mut ctx, at(pressure));
+            rig.painted()
+        };
+        let full = dab(true, 1.0);
+        let half = dab(true, 0.5);
+        assert!(half * 3 < full && half > 0, "half the pressure is a quarter of the area: {half} of {full}");
+        assert_eq!(dab(false, 0.5), full, "switched off, the pen presses as a mouse does");
+        assert_eq!(dab(true, 0.0), 1, "no pressure at all is still a pixel");
+    }
+
+    #[test]
+    fn symmetry_paints_the_images_too_without_compounding() {
+        use crate::tools::Symmetry;
+        let mut rig = Rig::new(StrokeMode::Brush);
+        rig.settings.opacity = 0.5;
+        rig.settings.size = 5;
+        // The canvas is 30x30, so the centre is (15,15).
+        rig.settings.symmetry = Symmetry { mirror_x: true, mirror_y: false, radial: 1 };
+        rig.stroke(&[(5.0, 10.0), (12.0, 10.0)]);
+        assert_eq!(rig.px(8, 10).a, 128);
+        assert_eq!(rig.px(22, 10).a, 128, "mirrored across x = 15");
+        assert_eq!(rig.px(15, 20).a, 0);
+
+        let mut rig = Rig::new(StrokeMode::Brush);
+        rig.settings.opacity = 0.5;
+        rig.settings.size = 5;
+        rig.settings.symmetry = Symmetry { mirror_x: true, mirror_y: true, radial: 1 };
+        // A stroke through the centre meets its own images there.
+        rig.stroke(&[(5.0, 15.0), (25.0, 15.0)]);
+        assert_eq!(rig.px(15, 15).a, 128, "where the copies overlap they do not compound");
+        assert_eq!(rig.px(25, 15).a, 128);
+
+        let mut rig = Rig::new(StrokeMode::Pencil);
+        rig.settings.symmetry = Symmetry { mirror_x: false, mirror_y: false, radial: 4 };
+        rig.stroke(&[(20.0, 15.0)]);
+        for (x, y) in [(20, 15), (15, 20), (10, 15), (15, 10)] {
+            assert_eq!(rig.px(x, y), RED, "({x},{y})");
+        }
+        assert_eq!(rig.painted(), 4);
     }
 
     #[test]

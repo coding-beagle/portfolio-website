@@ -203,6 +203,9 @@ pub struct Editor {
     /// by its placement: it commits itself when the pointer comes up, as a
     /// step called Move.
     moving_smart: bool,
+    /// The pen pressure the next pointer event carries. See
+    /// [`Editor::set_pressure`].
+    pressure: f64,
     /// The selection and guides as they were when a gesture that does not
     /// edit pixels began, so that a selection tool's drag is one undo step.
     gesture_aside: Option<Aside>,
@@ -237,6 +240,7 @@ impl Editor {
             preview_base: None,
             transform_base: None,
             moving_smart: false,
+            pressure: 1.0,
             gesture_base: None,
             gesture_aside: None,
             clipboard: None,
@@ -490,7 +494,13 @@ impl Editor {
     }
 
     fn event(&self, screen: Point, shift: bool, alt: bool) -> PointerEvent {
-        PointerEvent { pos: self.viewport.screen_to_doc(screen), screen, shift, alt }
+        PointerEvent { pos: self.viewport.screen_to_doc(screen), screen, shift, alt, pressure: self.pressure }
+    }
+
+    /// How hard the pen is pressing for the pointer events to come,
+    /// `0.0..=1.0`; the page sets it before each one, and a mouse is 1.
+    pub fn set_pressure(&mut self, pressure: f64) {
+        self.pressure = if pressure.is_finite() { pressure.clamp(0.0, 1.0) } else { 1.0 };
     }
 
     /// Why the current tool cannot paint on the active layer, if it cannot:

@@ -210,6 +210,14 @@ pub struct ToolSettings {
     pub size: u32,
     /// The shape of the brush's dab. The brush, pencil and eraser share it.
     pub tip: BrushTip,
+    /// Where else every dab lands: mirrored, turned about the centre, or
+    /// nowhere else.
+    pub symmetry: Symmetry,
+    /// How much the pointer's path is smoothed before it is painted,
+    /// `0.0..=1.0`: 0 follows the pointer exactly, 1 trails well behind it.
+    pub smoothing: f32,
+    /// Whether a pen's pressure sets the dab's size.
+    pub pressure_size: bool,
     /// Brush opacity, `0.0..=1.0`. The pencil ignores it.
     pub opacity: f32,
     /// How far out from the centre a brush dab is solid before it fades,
@@ -247,6 +255,9 @@ impl Default for ToolSettings {
             background: Rgba::WHITE,
             size: 8,
             tip: BrushTip::Round,
+            symmetry: Symmetry::default(),
+            smoothing: 0.0,
+            pressure_size: true,
             opacity: 1.0,
             hardness: 1.0,
             fill: true,
@@ -263,7 +274,7 @@ impl Default for ToolSettings {
 }
 
 /// A pointer position in document space plus the modifier keys held.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerEvent {
     /// In document pixels.
     pub pos: Point,
@@ -274,11 +285,71 @@ pub struct PointerEvent {
     pub shift: bool,
     /// Draws shapes from their centre.
     pub alt: bool,
+    /// How hard a pen is pressing, `0.0..=1.0`; a mouse is always 1.
+    pub pressure: f64,
+}
+
+impl Default for PointerEvent {
+    fn default() -> PointerEvent {
+        PointerEvent { pos: Point::default(), screen: Point::default(), shift: false, alt: false, pressure: 1.0 }
+    }
 }
 
 impl PointerEvent {
     pub fn at(x: f64, y: f64) -> PointerEvent {
         PointerEvent { pos: Point::new(x, y), screen: Point::new(x, y), ..PointerEvent::default() }
+    }
+}
+
+/// Paint symmetry: every dab of a stroke is laid down again at its images
+/// under a mirror in the canvas's vertical axis, its horizontal axis, or
+/// both, and turned `radial` times about the canvas centre — a mandala.
+/// The two combine: a four-fold turn with a mirror is eight dabs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Symmetry {
+    pub mirror_x: bool,
+    pub mirror_y: bool,
+    /// How many ways about the centre; 1 is none.
+    pub radial: u32,
+}
+
+/// The most ways a stroke is turned about the centre.
+pub const MAX_RADIAL: u32 = 24;
+
+impl Default for Symmetry {
+    fn default() -> Symmetry {
+        Symmetry { mirror_x: false, mirror_y: false, radial: 1 }
+    }
+}
+
+impl Symmetry {
+    pub fn is_off(self) -> bool {
+        !self.mirror_x && !self.mirror_y && self.radial <= 1
+    }
+
+    /// `p` and every image of it, `p` first. `centre` is the canvas centre.
+    pub fn images(self, p: Point, centre: Point) -> Vec<Point> {
+        let n = self.radial.clamp(1, MAX_RADIAL);
+        let mut out = Vec::with_capacity(n as usize * 4);
+        let (dx, dy) = (p.x - centre.x, p.y - centre.y);
+        // Positions are floored into pixels, so a quarter turn that lands
+        // at 14.999999999999998 would be a pixel off: snap the noise away.
+        let snap = |v: f64| (v * 1e6).round() / 1e6;
+        for k in 0..n {
+            let (s, c) = (std::f64::consts::TAU * f64::from(k) / f64::from(n)).sin_cos();
+            let (rx, ry) = (snap(dx * c - dy * s), snap(dx * s + dy * c));
+            out.push(Point::new(centre.x + rx, centre.y + ry));
+            if self.mirror_x {
+                out.push(Point::new(centre.x - rx, centre.y + ry));
+            }
+            if self.mirror_y {
+                out.push(Point::new(centre.x + rx, centre.y - ry));
+            }
+            if self.mirror_x && self.mirror_y {
+                out.push(Point::new(centre.x - rx, centre.y - ry));
+            }
+        }
+        out
     }
 }
 
@@ -396,6 +467,29 @@ mod tests {
             assert_eq!(kind.instantiate().kind(), *kind);
         }
         assert_eq!(ToolKind::from_name("lasso"), None);
+    }
+
+    #[test]
+    fn symmetry_images_a_point_about_the_centre() {
+        let c = Point::new(10.0, 10.0);
+        let p = Point::new(13.0, 11.0);
+        assert_eq!(Symmetry::default().images(p, c), vec![p]);
+        assert!(Symmetry::default().is_off());
+        let mirror = Symmetry { mirror_x: true, ..Symmetry::default() };
+        assert_eq!(mirror.images(p, c), vec![p, Point::new(7.0, 11.0)]);
+        let both = Symmetry { mirror_x: true, mirror_y: true, radial: 1 };
+        assert_eq!(both.images(p, c).len(), 4);
+        assert!(both.images(p, c).contains(&Point::new(7.0, 9.0)));
+        let four = Symmetry { radial: 4, ..Symmetry::default() };
+        let imgs = four.images(p, c);
+        assert_eq!(imgs.len(), 4);
+        assert_eq!(imgs[0], p);
+        // A quarter turn about (10,10) takes (13,11) to (9,13).
+        assert!((imgs[1].x - 9.0).abs() < 1e-9 && (imgs[1].y - 13.0).abs() < 1e-9, "{:?}", imgs[1]);
+        let eight = Symmetry { mirror_x: true, radial: 4, ..Symmetry::default() };
+        assert_eq!(eight.images(p, c).len(), 8);
+        let too_many = Symmetry { radial: 99, ..Symmetry::default() };
+        assert_eq!(too_many.images(p, c).len(), MAX_RADIAL as usize);
     }
 
     #[test]

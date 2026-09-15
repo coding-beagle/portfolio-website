@@ -1158,14 +1158,16 @@ export class NPaint {
         return ret[0] >>> 0;
     }
     /**
+     * `pressure` is the pen's, `0.0..=1.0`; pass 1 for a mouse.
      * @param {number} x
      * @param {number} y
      * @param {boolean} shift
      * @param {boolean} alt
+     * @param {number} pressure
      * @returns {boolean}
      */
-    pointer_down(x, y, shift, alt) {
-        const ret = wasm.npaint_pointer_down(this.__wbg_ptr, x, y, shift, alt);
+    pointer_down(x, y, shift, alt, pressure) {
+        const ret = wasm.npaint_pointer_down(this.__wbg_ptr, x, y, shift, alt, pressure);
         return ret !== 0;
     }
     /**
@@ -1173,10 +1175,11 @@ export class NPaint {
      * @param {number} y
      * @param {boolean} shift
      * @param {boolean} alt
+     * @param {number} pressure
      * @returns {boolean}
      */
-    pointer_move(x, y, shift, alt) {
-        const ret = wasm.npaint_pointer_move(this.__wbg_ptr, x, y, shift, alt);
+    pointer_move(x, y, shift, alt, pressure) {
+        const ret = wasm.npaint_pointer_move(this.__wbg_ptr, x, y, shift, alt, pressure);
         return ret !== 0;
     }
     /**
@@ -1184,10 +1187,18 @@ export class NPaint {
      * @param {number} y
      * @param {boolean} shift
      * @param {boolean} alt
+     * @param {number} pressure
      * @returns {boolean}
      */
-    pointer_up(x, y, shift, alt) {
-        const ret = wasm.npaint_pointer_up(this.__wbg_ptr, x, y, shift, alt);
+    pointer_up(x, y, shift, alt, pressure) {
+        const ret = wasm.npaint_pointer_up(this.__wbg_ptr, x, y, shift, alt, pressure);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    pressure_size() {
+        const ret = wasm.npaint_pressure_size(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -1783,6 +1794,12 @@ export class NPaint {
         wasm.npaint_set_opacity(this.__wbg_ptr, opacity);
     }
     /**
+     * @param {boolean} on
+     */
+    set_pressure_size(on) {
+        wasm.npaint_set_pressure_size(this.__wbg_ptr, on);
+    }
+    /**
      * @param {boolean} all
      */
     set_sample_all_layers(all) {
@@ -1813,10 +1830,27 @@ export class NPaint {
         wasm.npaint_set_size(this.__wbg_ptr, size);
     }
     /**
+     * @param {number} smoothing
+     */
+    set_smoothing(smoothing) {
+        wasm.npaint_set_smoothing(this.__wbg_ptr, smoothing);
+    }
+    /**
      * @param {boolean} on
      */
     set_snap(on) {
         wasm.npaint_set_snap(this.__wbg_ptr, on);
+    }
+    /**
+     * Paint symmetry: mirrors in the canvas's vertical and horizontal
+     * axes, and how many ways the stroke is turned about the centre (1
+     * for none).
+     * @param {boolean} mirror_x
+     * @param {boolean} mirror_y
+     * @param {number} radial
+     */
+    set_symmetry(mirror_x, mirror_y, radial) {
+        wasm.npaint_set_symmetry(this.__wbg_ptr, mirror_x, mirror_y, radial);
     }
     /**
      * "left", "center" or "right".
@@ -1849,6 +1883,31 @@ export class NPaint {
      */
     set_text_italic(italic) {
         wasm.npaint_set_text_italic(this.__wbg_ptr, italic);
+    }
+    /**
+     * @param {string} hex
+     */
+    set_text_outline_color(hex) {
+        const ptr0 = passStringToWasm0(hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_text_outline_color(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The Character panel's settings by name — see `text::PARAMS`; a flag
+     * is 0 or 1. Setting one clamps it to its range.
+     * @param {string} name
+     * @param {number} value
+     */
+    set_text_param(name, value) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_set_text_param(this.__wbg_ptr, ptr0, len0, value);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * @param {number} size
@@ -1896,6 +1955,13 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
+     * @returns {number}
+     */
+    smoothing() {
+        const ret = wasm.npaint_smoothing(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @returns {boolean}
      */
     snap() {
@@ -1924,6 +1990,16 @@ export class NPaint {
     }
     swap_colors() {
         wasm.npaint_swap_colors(this.__wbg_ptr);
+    }
+    /**
+     * The symmetry as `[mirror_x, mirror_y, radial]`.
+     * @returns {Uint32Array}
+     */
+    symmetry() {
+        const ret = wasm.npaint_symmetry(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * @returns {string}
@@ -1978,6 +2054,54 @@ export class NPaint {
     text_layer_at(x, y) {
         const ret = wasm.npaint_text_layer_at(this.__wbg_ptr, x, y);
         return ret;
+    }
+    /**
+     * @returns {string}
+     */
+    text_outline_color() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_text_outline_color(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {string} name
+     * @returns {number}
+     */
+    text_param(name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_text_param(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0];
+    }
+    /**
+     * The names of the Character panel's settings, with `[min, max]` for
+     * each in `text_param_ranges`.
+     * @returns {string[]}
+     */
+    static text_param_names() {
+        const ret = wasm.npaint_text_param_names();
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    static text_param_ranges() {
+        const ret = wasm.npaint_text_param_ranges();
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * @returns {number}

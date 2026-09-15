@@ -39,6 +39,32 @@
           <input id="opt-hardness" type="range" min="0" max="100" value="100" />
           <output id="opt-hardness-out">100%</output>
         </label>
+        <label class="opt" id="opt-symmetry-wrap" title="Paint symmetry: every dab lands again mirrored, or turned about the centre of the canvas">
+          <span>Symmetry</span>
+          <select id="opt-symmetry">
+            <option value="0,0,1">Off</option>
+            <option value="1,0,1">Mirror left–right</option>
+            <option value="0,1,1">Mirror top–bottom</option>
+            <option value="1,1,1">Mirror both</option>
+            <option value="0,0,3">Radial ×3</option>
+            <option value="0,0,4">Radial ×4</option>
+            <option value="0,0,6">Radial ×6</option>
+            <option value="0,0,8">Radial ×8</option>
+            <option value="0,0,12">Radial ×12</option>
+            <option value="1,0,6">Mandala ×6</option>
+            <option value="1,0,8">Mandala ×8</option>
+            <option value="1,0,12">Mandala ×12</option>
+          </select>
+        </label>
+        <label class="opt" id="opt-smoothing-wrap" title="Steadies the hand: the brush trails the pointer and rounds off its jitter">
+          <span>Smoothing</span>
+          <input id="opt-smoothing" type="range" min="0" max="100" value="0" />
+          <output id="opt-smoothing-out">0%</output>
+        </label>
+        <label class="opt check" id="opt-pressure-wrap" title="With a pen, pressing harder paints wider">
+          <input type="checkbox" id="opt-pressure" checked />
+          Pen pressure
+        </label>
         <label class="opt" id="opt-opacity-wrap">
           <span>Opacity</span>
           <input id="opt-opacity" type="range" min="1" max="100" value="100" />
@@ -95,6 +121,7 @@
           <button id="opt-align-center" aria-pressed="false" title="Centre: the text grows both ways about the click">☰</button>
           <button id="opt-align-right" aria-pressed="false" title="Align right: the text grows to the left of the click">⫸</button>
         </div>
+        <button class="opt" id="opt-character" aria-pressed="false" title="Tracking, leading, scale, caps, underline, outline and shadow">Character…</button>
         <div class="opt" id="text-bar" hidden>
           <button id="text-cancel" title="Throw the typing away (Esc)">Cancel</button>
           <button id="text-apply" class="primary" title="Keep the text (Ctrl+Enter, or click elsewhere)">Apply</button>
@@ -302,6 +329,12 @@
     </dialog>
 
     <div id="color-popover" class="color-popover" hidden></div>
+    <div id="char-panel" class="char-panel" hidden role="dialog" aria-label="Character">
+      <div class="char-title">Character <button id="char-close" title="Close">×</button></div>
+      <div class="char-grid" id="char-grid"></div>
+      <div class="char-row"><span>Outline colour</span><button id="char-outline-color" class="char-swatch" aria-label="Outline colour" title="The outline's colour"></button></div>
+    </div>
+    <input id="font-input" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" hidden />
     <div id="menu-layer" hidden></div>
 
     <input id="file-input" type="file" accept="image/*,.npaint" hidden />

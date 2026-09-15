@@ -58,8 +58,8 @@ impl TextAlign {
     }
 }
 
-/// The type settings: what the options bar shows for the text tool, and what
-/// a text layer was set in.
+/// The type settings: what the options bar and the Character panel show for
+/// the text tool, and what a text layer was set in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextStyle {
     /// A CSS font family, as the page will pass it to the canvas.
@@ -69,7 +69,40 @@ pub struct TextStyle {
     pub bold: bool,
     pub italic: bool,
     pub align: TextAlign,
+    /// Space added between letters, in thousandths of an em, as
+    /// Photoshop's tracking is.
+    pub tracking: f64,
+    /// Line pitch as a multiple of the size. 1.2 is what "auto" means.
+    pub leading: f64,
+    /// Stretch of the glyphs, as a factor. 1 is as drawn.
+    pub scale_x: f64,
+    pub scale_y: f64,
+    /// Set in capitals.
+    pub caps: bool,
+    pub underline: bool,
+    pub strike: bool,
+    /// An outline round every glyph, this many pixels wide, in
+    /// `outline_color`; 0 for none.
+    pub outline: f64,
+    pub outline_color: Rgba,
+    /// A soft shadow, offset down and to the right by this many pixels;
+    /// 0 for none.
+    pub shadow: f64,
 }
+
+/// The Character panel's numbers, by name, with their ranges: the one list
+/// the page and the file both read. Flags are 0 or 1.
+pub const PARAMS: &[(&str, f64, f64)] = &[
+    ("tracking", -500.0, 2000.0),
+    ("leading", 0.5, 5.0),
+    ("scale_x", 0.1, 10.0),
+    ("scale_y", 0.1, 10.0),
+    ("caps", 0.0, 1.0),
+    ("underline", 0.0, 1.0),
+    ("strike", 0.0, 1.0),
+    ("outline", 0.0, 100.0),
+    ("shadow", 0.0, 100.0),
+];
 
 /// The largest and smallest type the engine accepts, in pixels. The upper
 /// bound keeps the page's rendering canvas within what a browser allows.
@@ -78,7 +111,23 @@ pub const MAX_SIZE: f64 = 2000.0;
 
 impl Default for TextStyle {
     fn default() -> TextStyle {
-        TextStyle { font: "sans-serif".to_owned(), size: 48.0, bold: false, italic: false, align: TextAlign::Left }
+        TextStyle {
+            font: "sans-serif".to_owned(),
+            size: 48.0,
+            bold: false,
+            italic: false,
+            align: TextAlign::Left,
+            tracking: 0.0,
+            leading: 1.2,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            caps: false,
+            underline: false,
+            strike: false,
+            outline: 0.0,
+            outline_color: Rgba::WHITE,
+            shadow: 0.0,
+        }
     }
 }
 
@@ -86,7 +135,58 @@ impl TextStyle {
     pub fn set_size(&mut self, size: f64) {
         self.size = if size.is_finite() { size.clamp(MIN_SIZE, MAX_SIZE) } else { self.size };
     }
+
+    /// One of [`PARAMS`] by name; flags come back as 0 or 1.
+    pub fn param(&self, name: &str) -> Option<f64> {
+        Some(match name {
+            "tracking" => self.tracking,
+            "leading" => self.leading,
+            "scale_x" => self.scale_x,
+            "scale_y" => self.scale_y,
+            "caps" => f64::from(u8::from(self.caps)),
+            "underline" => f64::from(u8::from(self.underline)),
+            "strike" => f64::from(u8::from(self.strike)),
+            "outline" => self.outline,
+            "shadow" => self.shadow,
+            _ => return None,
+        })
+    }
+
+    /// Sets one of [`PARAMS`] by name, clamped to its range; a flag is set
+    /// by anything above a half. `Err` for a name that is not one.
+    pub fn set_param(&mut self, name: &str, value: f64) -> Result<(), UnknownParam> {
+        let (_, lo, hi) = PARAMS.iter().find(|(n, ..)| *n == name).ok_or(UnknownParam)?;
+        if !value.is_finite() {
+            return Ok(());
+        }
+        let v = value.clamp(*lo, *hi);
+        let flag = v > 0.5;
+        match name {
+            "tracking" => self.tracking = v,
+            "leading" => self.leading = v,
+            "scale_x" => self.scale_x = v,
+            "scale_y" => self.scale_y = v,
+            "caps" => self.caps = flag,
+            "underline" => self.underline = flag,
+            "strike" => self.strike = flag,
+            "outline" => self.outline = v,
+            "shadow" => self.shadow = v,
+            _ => unreachable!("every name in PARAMS has an arm"),
+        }
+        Ok(())
+    }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnknownParam;
+
+impl std::fmt::Display for UnknownParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no such text setting")
+    }
+}
+
+impl std::error::Error for UnknownParam {}
 
 /// A text layer's memory: the text, how it is set, its colour, and where in
 /// the rendered picture the block of text begins.
@@ -180,6 +280,27 @@ mod tests {
         t.text = "abcdefghijklmnopqrstuvwxyz0123".to_owned();
         assert_eq!(t.layer_name(), "abcdefghijklmnopqrstuvw…");
         assert_eq!(t.layer_name().chars().count(), 24);
+    }
+
+    #[test]
+    fn every_character_setting_reads_back_clamped() {
+        let mut s = TextStyle::default();
+        for (name, lo, hi) in PARAMS {
+            assert!(s.param(name).is_some(), "{name}");
+            s.set_param(name, hi + 1.0).unwrap();
+            assert_eq!(s.param(name), Some(*hi), "{name} clamps high");
+            s.set_param(name, lo - 1.0).unwrap();
+            assert_eq!(s.param(name), Some(*lo), "{name} clamps low");
+            let before = s.param(name);
+            s.set_param(name, f64::NAN).unwrap();
+            assert_eq!(s.param(name), before, "{name} ignores NaN");
+        }
+        s.set_param("caps", 0.7).unwrap();
+        assert!(s.caps);
+        s.set_param("caps", 0.2).unwrap();
+        assert!(!s.caps);
+        assert_eq!(s.set_param("kerning", 1.0), Err(UnknownParam));
+        assert_eq!(s.param("kerning"), None);
     }
 
     #[test]
