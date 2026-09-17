@@ -1,5 +1,8 @@
-// Tool help: the card that appears beside a tool button on hover, showing a
-// short silent clip of the tool in use above its name and its hint.
+// Tool demos: the short silent clip in the hover card beside a tool button.
+//
+// The card itself is `helpcard.js`; this is the media source that fills it
+// for tools. A tool's demo has to be a recording — what a lasso feels like is
+// a gesture over time, and there is nothing in the code to derive it from.
 //
 // The clips are a convention, not a manifest: a tool called `brush` shows
 // `demos/brush.webm` if that file is there, and shows just the text if it is
@@ -20,26 +23,8 @@
 // of this used to.
 //
 // See `demos/README.md` for how the clips are made.
-//
-// Only pointers that can actually hover get a card. On a touch screen a
-// `pointerenter` arrives with the tap that also picks the tool, so the card
-// would cover the canvas the user just aimed at; those devices keep the
-// browser's own tooltip instead.
 
-/** How long the pointer has to rest on a button before the card appears. */
-const HOVER_DELAY_MS = 250;
-
-/**
- * How long after a card is put away the next one still counts as the same
- * look around the toolbox. Within that window the wait is skipped: the delay
- * is there to keep cards from flashing up at a pointer that is only passing
- * through, and someone comparing one tool with the next has already shown
- * that is not what they are doing.
- */
-const WARM_MS = 600;
-
-/** Gap between the toolbox button and the card. */
-const OFFSET_PX = 8;
+import { attachHelpCard, canHover, restartCard, stillMotion } from "./helpcard.js";
 
 /** Whether a clip for a tool has loaded before: name -> boolean. */
 const probed = new Map();
@@ -58,12 +43,10 @@ const PREFETCH_CONCURRENCY = 4;
 
 let prefetchScheduled = false;
 
-const canHover = () => window.matchMedia?.("(hover: hover)").matches ?? true;
-const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-
-let card = null;
-let titleEl = null;
-let hintEl = null;
+/** The card the clips live in, once one tool has been hovered. */
+let host = null;
+/** Where in the card the clips go: everything sits above the title. */
+let hostBefore = null;
 
 /** The shared element for clips the prefetch has not got to yet. */
 let fallback = null;
@@ -71,12 +54,8 @@ let fallback = null;
 /** The element the card is showing, prefetched or fallback. */
 let video = null;
 
-/** The button the card is currently showing for, or null when it is hidden. */
-let shownFor = null;
-let timer = 0;
-
-/** When the last card was put away, for `WARM_MS`. */
-let hiddenAt = 0;
+/** Whether the card is currently showing one of ours. */
+let active = false;
 
 /** The URL a tool's clip is at right now — versioned after a retake. */
 function demoUrl(name) {
@@ -112,11 +91,10 @@ function makeVideo(name, src) {
   });
   el.addEventListener("loadeddata", () => {
     probed.set(el.dataset.tool, true);
-    if (video === el && shownFor) el.hidden = false;
+    if (video === el && active) el.hidden = false;
   });
 
-  // Before the title, so the clip sits above the text.
-  card.insertBefore(el, titleEl);
+  if (host) host.insertBefore(el, hostBefore);
   if (src) el.load();
   return el;
 }
@@ -144,7 +122,9 @@ async function prefetchOne(name) {
 async function prefetchAll() {
   const queue = wanted.slice();
   const worker = async () => {
-    for (let name = queue.shift(); name !== undefined; name = queue.shift()) await prefetchOne(name);
+    for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+      await prefetchOne(name);
+    }
   };
   await Promise.all(Array.from({ length: PREFETCH_CONCURRENCY }, worker));
 }
@@ -165,41 +145,6 @@ function schedulePrefetch() {
   else setTimeout(run, 500);
 }
 
-function build() {
-  card = document.createElement("div");
-  card.className = "toolhelp";
-  card.hidden = true;
-  // Decoration: the button it describes is already in the accessibility tree
-  // with its own label, and a card that comes and goes would only interrupt.
-  card.setAttribute("aria-hidden", "true");
-
-  titleEl = document.createElement("div");
-  titleEl.className = "toolhelp-title";
-  hintEl = document.createElement("div");
-  hintEl.className = "toolhelp-hint";
-
-  card.append(titleEl, hintEl);
-  document.body.appendChild(card);
-
-  fallback = makeVideo(null, null);
-}
-
-/** Puts the card beside `button`, or below it if there is no room to the right. */
-function place(button) {
-  const b = button.getBoundingClientRect();
-  const c = card.getBoundingClientRect();
-  const margin = 8;
-
-  let left = b.right + OFFSET_PX;
-  if (left + c.width > window.innerWidth - margin) left = Math.max(margin, b.left - OFFSET_PX - c.width);
-
-  let top = b.top + b.height / 2 - c.height / 2;
-  top = Math.min(Math.max(margin, top), window.innerHeight - margin - c.height);
-
-  card.style.left = `${Math.round(left)}px`;
-  card.style.top = `${Math.round(top)}px`;
-}
-
 /** Makes `el` the card's clip, putting away whichever one was there before. */
 function useVideo(el) {
   if (video && video !== el) {
@@ -209,55 +154,53 @@ function useVideo(el) {
   video = el;
 }
 
-function show(button, def) {
-  shownFor = button;
-  titleEl.textContent = def.key ? `${def.label} (${def.key})` : def.label;
-  hintEl.textContent = def.hint ?? "";
+/** The card's media source for tools. */
+const source = {
+  mount(card, before) {
+    host = card;
+    hostBefore = before;
+    // Clips fetched before the first hover were built without a home.
+    for (const el of clips.values()) card.insertBefore(el, before);
+    fallback = makeVideo(null, null);
+  },
 
-  // Unhide before measuring, but keep it out of the way until it is placed:
-  // a card that flashes at the top-left corner first is worse than no card.
-  card.style.visibility = "hidden";
-  card.hidden = false;
-
-  const ready = clips.get(def.name);
-  if (probed.get(def.name) === false) {
-    useVideo(null);
-  } else if (ready) {
-    useVideo(ready);
-    // Every clip starts from the top, however far the last hover got.
-    ready.currentTime = 0;
-    ready.hidden = false;
-    if (!stillMotion()) ready.play().catch(() => {});
-  } else {
+  show(name) {
+    active = true;
+    const ready = clips.get(name);
+    if (probed.get(name) === false) {
+      useVideo(null);
+      return false;
+    }
+    if (ready) {
+      useVideo(ready);
+      // Every clip starts from the top, however far the last hover got.
+      ready.currentTime = 0;
+      ready.hidden = false;
+      if (!stillMotion()) ready.play().catch(() => {});
+      return true;
+    }
     useVideo(fallback);
-    fallback.dataset.tool = def.name;
+    fallback.dataset.tool = name;
     // Unknown until it loads: showing an empty box and then the clip is worse
     // than the text growing a clip once there is one to show.
     fallback.hidden = true;
-    const src = demoUrl(def.name);
+    const src = demoUrl(name);
     if (!fallback.src.endsWith(src)) fallback.src = src;
     // Reduced motion gets the first frame and no loop; the hint carries the
     // rest. `preload="none"` means nothing is fetched until one of these.
     if (stillMotion()) fallback.load();
     else fallback.play().catch(() => {});
-  }
+    return true;
+  },
 
-  place(button);
-  card.style.visibility = "";
-}
-
-function hide() {
-  if (!shownFor) return;
-  shownFor = null;
-  hiddenAt = performance.now();
-  card.hidden = true;
-  video?.pause();
-}
-
-function cancel() {
-  clearTimeout(timer);
-  timer = 0;
-}
+  hide() {
+    active = false;
+    // Hidden as well as paused: the card outlives a move from a tool button
+    // to a menu row, and a stopped clip left showing under the next card's
+    // picture is worse than either on its own.
+    useVideo(null);
+  },
+};
 
 /**
  * Forgets what is known about one tool's clip, so the next hover fetches it
@@ -277,11 +220,7 @@ export function refreshDemo(name) {
   // The retake has to come off the server, so it is fetched again rather than
   // left to the next hover — which is what makes the new clip show at once.
   prefetchOne(name);
-  if (shownFor && (video === stale || video?.dataset.tool === name)) {
-    const button = shownFor;
-    hide();
-    button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
-  }
+  restartCard(name);
 }
 
 /**
@@ -292,54 +231,14 @@ export function refreshDemo(name) {
  */
 export function attachToolHelp(button, def) {
   if (!canHover()) return false;
-  if (!card) build();
-
-  button.addEventListener("pointerenter", (e) => {
-    if (e.pointerType === "touch") return;
-    cancel();
-    if (performance.now() - hiddenAt < WARM_MS) show(button, def);
-    else timer = setTimeout(() => show(button, def), HOVER_DELAY_MS);
+  const attached = attachHelpCard(button, {
+    name: def.name,
+    title: def.key ? `${def.label} (${def.key})` : def.label,
+    hint: def.hint,
+    source,
   });
-  button.addEventListener("pointerleave", () => {
-    cancel();
-    hide();
-  });
-  // Picking the tool answers the question the card was asking.
-  button.addEventListener("pointerdown", () => {
-    cancel();
-    hide();
-  });
-  // Keyboard users get the same card, without the wait.
-  button.addEventListener("focus", () => {
-    cancel();
-    show(button, def);
-  });
-  button.addEventListener("blur", () => {
-    cancel();
-    hide();
-  });
-
+  if (!attached) return false;
   wanted.push(def.name);
   schedulePrefetch();
   return true;
 }
-
-// Anything that moves the button out from under the card dismisses it rather
-// than leaving it stranded over the canvas. `scroll` needs the capture phase
-// to hear the toolbox scrolling, since it does not bubble — but that also
-// puts every event a descendant fires through here, and the card's own video
-// fires `resize` as it loads, so events from inside the card are ignored.
-const dismiss = (e) => {
-  if (card && e.target instanceof Node && card.contains(e.target)) return;
-  cancel();
-  hide();
-};
-window.addEventListener("scroll", dismiss, true);
-window.addEventListener("wheel", dismiss, { passive: true });
-window.addEventListener("resize", dismiss);
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    cancel();
-    hide();
-  }
-});

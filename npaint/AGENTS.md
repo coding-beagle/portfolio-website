@@ -750,15 +750,39 @@ and draws the brush ring as a square for the square tip.
 Three settings shape the path before the tip is stamped, all in
 `ToolSettings` and all in `tools/stroke.rs`:
 
-* **Symmetry** (`tools::Symmetry`): mirrors in the canvas's vertical and
-  horizontal axes and an n-fold turn about the canvas centre, which
-  combine — a mirror with a six-fold turn is twelve dabs, a mandala. Every
-  segment of a stroke is stamped at every image into the one coverage
-  mask, so the copies never compound where they meet, and the dirty
-  rectangle is the union of the segments. `Symmetry::images` snaps its
-  answers to a millionth of a pixel because positions are floored into
-  pixels and a quarter turn otherwise lands at 14.999999999999998. The page
-  draws the axes over the canvas while a brush tool is in hand.
+* **Symmetry** (`tools::Symmetry`): mirrors in two axes and an n-fold turn
+  about where they cross, which combine — a mirror with a six-fold turn is
+  twelve dabs, a mandala. Every segment of a stroke is stamped at every
+  image into the one coverage mask, so the copies never compound where they
+  meet, and the dirty rectangle is the union of the segments.
+  `Symmetry::images` snaps its answers to a millionth of a pixel because
+  positions are floored into pixels and a quarter turn otherwise lands at
+  14.999999999999998.
+
+  Where the axes are is a `SymmetryFrame`: a crossing point and an angle.
+  An origin of `None` means the canvas centre, worked out afresh each time,
+  so an unplaced frame follows a resize; a placed one is carried through a
+  crop, a resize, a flip and a turn (`Editor::remap_symmetry`) so that it
+  stays on the same part of the picture. A placed origin is held to half
+  pixels (`tools::ORIGIN_STEP`), because a reflection lands a pixel's centre
+  on a pixel's centre only when the axis sits on a whole or a half pixel;
+  anywhere else the fold is half a pixel out and shows as a doubled or bald
+  column down the axis.
+
+  Placing them is a mode, not a hit-test against a live brush: the page's
+  "Place axes" button arms the gizmo, and while it is armed the pointer
+  moves the axes instead of painting. The gizmo is the transform box's
+  pattern — `Editor::symmetry_hit` for the cursor, then
+  `symmetry_grab`/`symmetry_drag`/`symmetry_release`, with the whole drag
+  becoming one undo step. Dragging a drawn mirror line moves the frame only
+  across that line; the arm 64 screen pixels out turns it, settling on
+  multiples of `SYMMETRY_ANGLE_STEP` unless Shift is held. The frame is part
+  of the history's `Aside`, like the guides and the selection, so an undo
+  takes a placement back — the mirrors and the fold count are not, being
+  tool settings rather than something placed on the picture. The options bar
+  also shows the frame as X, Y and angle, right-clicking a guide offers to
+  fold the painting across it, and the page draws the brush ring at every
+  image so where the paint will land is visible before the stroke.
 * **Smoothing**: the brush goes only part of the way towards each pointer
   event (`follow`), which rounds off a hand's jitter and cuts corners; the
   stroke always ends at the pointer.

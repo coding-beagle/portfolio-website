@@ -26,6 +26,15 @@
 // to the layer rather than to pixels. The dialog cannot tell the difference,
 // which is the point.
 
+// An adjustment may also carry a `demo`, which is what the hover card in
+// `adjusthelp.js` shows for it. It is optional: without one the card sweeps
+// the first slider from where it sits to most of the way to its maximum,
+// which is a fair demo for a filter with one obvious knob and is what makes
+// adding a filter enough to get a demo. It is there on almost every entry
+// anyway, because the fair default is rarely the *good* one — Levels wants
+// its gamma swept, not its black point, and Sharpen shows nothing at all
+// unless it is held against the original.
+
 import { currentPaletteFlat } from "./palette.js";
 
 /**
@@ -70,6 +79,7 @@ const PALETTE_DIFFUSION = DITHER_FLOYD_STEINBERG + 1;
 export const ADJUSTMENTS = [
   {
     name: "brightness-contrast",
+    hint: "Lifts or drops the tones, and spreads or squeezes them about the middle.",
     label: "Brightness / Contrast…",
     shortcut: "",
     params: [
@@ -77,9 +87,11 @@ export const ADJUSTMENTS = [
       { label: "Brightness", min: -100, max: 100, value: 0 },
       { label: "Contrast", min: -100, max: 100, value: 0 },
     ],
+    demo: { param: "Brightness", from: -55, to: 55 },
   },
   {
     name: "levels",
+    hint: "Sets which input tones become black and white, and how the rest sit between.",
     label: "Levels…",
     shortcut: "Ctrl+L",
     params: [
@@ -88,15 +100,19 @@ export const ADJUSTMENTS = [
       { label: "White point", min: 1, max: 255, value: 255 },
       { label: "Gamma", min: 0.1, max: 4, value: 1, step: 0.01 },
     ],
+    demo: { param: "Gamma", from: 2.2, to: 0.45 },
   },
   {
     name: "curves",
+    hint: "The tone curve by hand: drag the line to say what each input becomes.",
     label: "Curves…",
     shortcut: "Ctrl+M",
     params: [channelParam(), { kind: "curve", label: "Curve", value: [0, 0, 255, 255] }],
+    demo: { style: "wipe", set: { Curve: [0, 0, 64, 30, 192, 225, 255, 255] } },
   },
   {
     name: "hue-saturation",
+    hint: "Turns every colour round the wheel, and how strong and how light it is.",
     label: "Hue / Saturation…",
     shortcut: "Ctrl+U",
     params: [
@@ -104,9 +120,11 @@ export const ADJUSTMENTS = [
       { label: "Saturation", min: -100, max: 100, value: 0 },
       { label: "Lightness", min: -100, max: 100, value: 0 },
     ],
+    demo: { param: "Hue", from: -180, to: 180 },
   },
   {
     name: "color-balance",
+    hint: "Warms or cools shadows, midtones and highlights apart from each other.",
     label: "Colour Balance…",
     shortcut: "Ctrl+B",
     params: [
@@ -123,9 +141,11 @@ export const ADJUSTMENTS = [
       { label: "Magenta – Green", min: -100, max: 100, value: 0 },
       { label: "Yellow – Blue", min: -100, max: 100, value: 0 },
     ],
+    demo: { param: "Midtones/Cyan – Red", from: -75, to: 75 },
   },
   {
     name: "dither",
+    hint: "Trades tones for a pattern made of the few that are left.",
     label: "Dither…",
     params: [
       { kind: "choice", label: "Pattern", value: DITHER_FLOYD_STEINBERG, options: DITHER_PATTERNS },
@@ -135,10 +155,29 @@ export const ADJUSTMENTS = [
       { label: "Cell size", min: 1, max: 16, value: 1, unit: " px", enabled: (v) => v[0] < DITHER_FLOYD_STEINBERG },
       { kind: "toggle", label: "Greyscale", value: 0 },
     ],
+    demo: { style: "wipe" },
   },
-  { name: "posterize", label: "Posterize…", params: [channelParam(), { label: "Levels", min: 2, max: 32, value: 4 }] },
-  { name: "threshold", label: "Threshold…", params: [{ label: "Level", min: 0, max: 255, value: 128 }] },
-  { name: "invert", label: "Invert", shortcut: "Ctrl+I", params: [] },
+  {
+    name: "posterize",
+    hint: "Rounds every channel to a few evenly spaced levels.",
+    label: "Posterize…",
+    params: [channelParam(), { label: "Levels", min: 2, max: 32, value: 4 }],
+    demo: { param: "Levels", from: 32, to: 3 },
+  },
+  {
+    name: "threshold",
+    hint: "Everything lighter than the level goes white, everything darker black.",
+    label: "Threshold…",
+    params: [{ label: "Level", min: 0, max: 255, value: 128 }],
+    demo: { param: "Level", from: 100, to: 175 },
+  },
+  {
+    name: "invert",
+    hint: "Swaps every channel for its opposite.",
+    label: "Invert",
+    shortcut: "Ctrl+I",
+    params: [],
+  },
   // The filters. They are adjustments in every way that matters — the same
   // dialog, the same preview, the same life as an adjustment layer — and
   // are marked only so the menu bar can list them under Filter, where
@@ -146,68 +185,85 @@ export const ADJUSTMENTS = [
   // tables like the rest.
   {
     name: "blur",
+    hint: "Averages each pixel with its neighbours out to the radius.",
     label: "Blur…",
     group: "filter",
     params: [{ label: "Radius", min: 0, max: 50, value: 2, unit: " px" }],
+    demo: { param: "Radius", from: 0, to: 8 },
   },
   {
     name: "motion-blur",
+    hint: "Smears the picture along one direction, as a moving camera would.",
     label: "Motion Blur…",
     group: "filter",
     params: [
       { label: "Angle", min: -180, max: 180, value: 0, unit: "°" },
       { label: "Distance", min: 0, max: 200, value: 20, unit: " px" },
     ],
+    demo: { param: "Distance", from: 0, to: 40 },
   },
   {
     name: "sharpen",
+    hint: "Raises contrast at the edges, which reads as more detail.",
     label: "Sharpen…",
     group: "filter",
     params: [
       { label: "Radius", min: 1, max: 50, value: 1, unit: " px" },
       { label: "Amount", min: 0, max: 300, value: 100, unit: "%" },
     ],
+    demo: { style: "wipe", set: { Radius: 2, Amount: 220 } },
   },
   {
     name: "median",
+    hint: "Takes the middle of each pixel's neighbours: speckles go, edges stay.",
     label: "Median…",
     group: "filter",
     params: [{ label: "Radius", min: 0, max: 8, value: 2, unit: " px" }],
+    demo: { style: "wipe", set: { Radius: 3 } },
   },
   {
     name: "noise",
+    hint: "Scatters random values over the pixels, in colour or in grey alone.",
     label: "Add Noise…",
     group: "filter",
     params: [
       { label: "Amount", min: 0, max: 100, value: 10, unit: "%" },
       { kind: "toggle", label: "Monochromatic", value: 0 },
     ],
+    demo: { param: "Amount", from: 0, to: 45 },
   },
   {
     name: "pixelate",
+    hint: "Averages the picture into square cells.",
     label: "Pixelate…",
     group: "filter",
     params: [{ label: "Cell size", min: 1, max: 100, value: 8, unit: " px" }],
+    demo: { param: "Cell size", from: 1, to: 22 },
   },
   {
     name: "emboss",
+    hint: "Turns edges into light and shade from one direction, over flat grey.",
     label: "Emboss…",
     group: "filter",
     params: [
       { label: "Angle", min: -180, max: 180, value: 135, unit: "°" },
       { label: "Amount", min: 0, max: 300, value: 100, unit: "%" },
     ],
+    demo: { style: "wipe" },
   },
   {
     name: "find-edges",
+    hint: "Keeps where the picture changes and drops where it does not.",
     label: "Find Edges…",
     group: "filter",
     params: [{ label: "Amount", min: 0, max: 300, value: 100, unit: "%" }],
+    demo: { style: "wipe" },
   },
   {
     // The colours are the palette panel's, and ride at the end of the
     // parameters as the curve's points do — see `src/palette.rs`.
     name: "palette",
+    hint: "Maps every pixel to the nearest colour the palette panel holds.",
     label: "Map to Palette…",
     group: "filter",
     params: [
@@ -216,9 +272,86 @@ export const ADJUSTMENTS = [
       { label: "Cell size", min: 1, max: 16, value: 1, unit: " px", enabled: (v) => v[0] > 0 && v[0] < PALETTE_DIFFUSION },
       { kind: "palette", label: "Palette", value: [] },
     ],
+    demo: { style: "wipe" },
   },
-  { name: "desaturate", label: "Desaturate", shortcut: "Ctrl+Shift+U", params: [] },
+  {
+    name: "desaturate",
+    hint: "Drops the colour, keeping each pixel's brightness.",
+    label: "Desaturate",
+    shortcut: "Ctrl+Shift+U",
+    params: [],
+  },
 ];
+
+/** How far toward its maximum a slider is swept when no demo says. */
+const DEMO_SWEEP_FRACTION = 0.6;
+
+/** The parameters of `spec` that carry a value, in declaration order. */
+const valueParams = (spec) => spec.params.filter((p) => !p.heading);
+
+/**
+ * What a parameter answers to in a demo's `param` and `set`: its label, or
+ * `Heading/Label` where a label alone would not say which — Colour Balance
+ * has three rows called "Cyan – Red".
+ */
+function paramKeys(spec) {
+  const keys = new Map();
+  let heading = "";
+  for (const p of spec.params) {
+    if (p.heading) {
+      heading = p.heading;
+      continue;
+    }
+    keys.set(p, heading ? `${heading}/${p.label}` : p.label);
+  }
+  return keys;
+}
+
+/** The values a parameter contributes to the engine's flat list. */
+function flatten(param, value) {
+  if (param.kind === "palette") {
+    const colors = Array.isArray(value) && value.length >= 3 ? value : currentPaletteFlat();
+    return colors;
+  }
+  if (param.kind === "curve") return Array.isArray(value) ? value : param.value;
+  return [Number(value)];
+}
+
+/**
+ * One adjustment's parameters in the order the engine reads them — the
+ * adjustment's own first, the channel last, as `values()` hands them over —
+ * starting from the dialog's defaults. `overrides` replaces values by the
+ * keys `paramKeys` gives.
+ */
+export function paramsFor(spec, overrides = {}) {
+  const keys = paramKeys(spec);
+  const own = [];
+  const channel = [];
+  for (const param of valueParams(spec)) {
+    const key = keys.get(param);
+    const value = key in overrides ? overrides[key] : param.value;
+    (param.channel ? channel : own).push(...flatten(param, value));
+  }
+  return new Float32Array([...own, ...channel]);
+}
+
+/**
+ * A demo's settings filled in: which parameter it sweeps and between what,
+ * with the rest of the adjustment pinned where `set` puts it. Returns null
+ * for a demo with nothing to sweep, which the card shows as a wipe against
+ * the original instead.
+ */
+export function demoSweep(spec) {
+  const demo = spec.demo ?? {};
+  if (demo.style === "wipe") return null;
+  const keys = paramKeys(spec);
+  const sliders = valueParams(spec).filter((p) => !p.channel && !p.kind);
+  const param = demo.param ? sliders.find((p) => keys.get(p) === demo.param) : sliders[0];
+  if (!param) return null;
+  const from = demo.from ?? param.value;
+  const to = demo.to ?? param.value + (param.max - param.value) * DEMO_SWEEP_FRACTION;
+  return { key: keys.get(param), from, to };
+}
 
 /** The size of the curves graph, in CSS pixels. */
 const CURVE_SIZE = 200;

@@ -1,10 +1,15 @@
 // A menu component: the menu bar's drop-downs and right-click context menus
 // are the same popup, built from the same item shape.
 //
-// An item is { label, shortcut?, action, enabled?, checked?, submenu? } or
-// { sep: true }. `enabled` and `checked` are functions evaluated when the
-// menu opens, so a menu built once always shows the current state; `label`
-// may be one too, for a row whose wording depends on what it would act on.
+// An item is { label, shortcut?, action, enabled?, checked?, submenu?,
+// hoverCard? } or { sep: true }. `enabled` and `checked` are functions
+// evaluated when the menu opens, so a menu built once always shows the
+// current state; `label` may be one too, for a row whose wording depends on
+// what it would act on.
+//
+// `hoverCard` is called with the finished row and the popup it is in, for a
+// row that wants a hover card of its own. Nothing here knows what goes in
+// one — see `adjusthelp.js`, which is what the adjustments pass.
 
 let openPopup = null; // the root popup element currently showing
 let openBarButton = null; // the menu-bar title it belongs to, if any
@@ -67,6 +72,7 @@ function buildPopup(items) {
         row.appendChild(sc);
       }
       row.addEventListener("mouseenter", () => closeSiblingsOf(popup));
+      item.hoverCard?.(row, popup);
       row.addEventListener("click", (e) => {
         e.stopPropagation();
         if (!enabled) return;

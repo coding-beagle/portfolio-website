@@ -33,6 +33,10 @@
 //! * **Layer effects, adjustment layers, text as text, vector shapes and
 //!   smart objects**, which arrive as the pixels Photoshop last rendered
 //!   for them — which is what the layer's channels hold anyway.
+//! * **Painting symmetry.** Photoshop keeps its symmetry as a path in the
+//!   Paths panel rather than as a placement of its own, and the engine has
+//!   no paths; the axes come in at the canvas centre. NPaint's own file
+//!   carries them (see `file.rs`), so they survive a save, not an import.
 //!
 //! [`save`] goes the other way, and the asymmetry is the whole of it: a
 //! reader may ignore what it does not understand, and a writer may not.
@@ -1936,8 +1940,8 @@ mod tests {
             // And it is a document the rest of the engine accepts: NPaint's
             // own file writes it and reads it back unchanged.
             let guides = crate::snap::Guides::default();
-            let saved = crate::file::save(&document, &guides);
-            let (reread, _) = crate::file::load(&saved).unwrap_or_else(|e| panic!("{name}: saving it made a file NPaint cannot open: {e}"));
+            let saved = crate::file::save(&document, &guides, crate::tools::SymmetryFrame::default());
+            let (reread, ..) = crate::file::load(&saved).unwrap_or_else(|e| panic!("{name}: saving it made a file NPaint cannot open: {e}"));
             assert_eq!(reread.layers().len(), document.layers().len(), "{name}: lost a layer on the way through the file");
             for (before, after) in document.layers().iter().zip(reread.layers()) {
                 assert_eq!(before.name, after.name, "{name}");

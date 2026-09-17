@@ -16,6 +16,7 @@ import { createGradientEditor, paintGradient, toFlat, fromFlat, loadStops } from
 import { createPalettePanel } from "./palette.js";
 import { readRecovery, writeRecovery, clearRecovery, supported as recoverySupported } from "./recovery.js";
 import { attachToolHelp, refreshDemo } from "./toolhelp.js";
+import { attachAdjustHelp, prefetchDemos, useEngine as useAdjustHelpEngine } from "./adjusthelp.js";
 
 // ---- Tools ------------------------------------------------------------------
 
@@ -228,6 +229,12 @@ let snapToGuides = true;
 // Guides in document pixels, and one being dragged out of a ruler or moved.
 let guides = { h: [], v: [] };
 let guideDrag = null; // { axis: "h" | "v", at: number | null, index: number | null }
+/**
+ * Whether the symmetry axes are being placed. While this is on the gizmo is
+ * live and the pointer moves the axes instead of painting, which is what
+ * keeps a stroke that starts near an axis from moving it by accident.
+ */
+let placingAxes = false;
 
 // ---- Boot -------------------------------------------------------------------
 
@@ -242,6 +249,7 @@ async function boot() {
   const exports = await init();
   memory = exports.memory;
   np = new NPaint(1024, 768, "#ffffff");
+  useAdjustHelpEngine(np);
 
   buildToolbox();
   buildMenus();
@@ -275,6 +283,7 @@ async function boot() {
   requestAnimationFrame(frame);
   startRecovery();
   startRecordMode();
+  startDemoSheet();
 }
 
 /**
@@ -291,6 +300,17 @@ async function startRecordMode() {
     currentTool: () => tool,
     onSaved: (name) => refreshDemo(name),
   });
+}
+
+/**
+ * The adjustment demos all at once, for judging what each one's `demo` entry
+ * chose to show. A development tool like record mode, asked for by hand with
+ * `?demos=1`, and its module is not fetched otherwise.
+ */
+async function startDemoSheet() {
+  if (!new URLSearchParams(location.search).has("demos")) return;
+  const { createDemoSheet } = await import("./demosheet.js");
+  createDemoSheet();
 }
 
 function onResize() {
@@ -425,6 +445,9 @@ function step(now) {
     syncTransformBar();
     syncCropBar();
     syncSwatches();
+    // An undo, a crop or a resize can all move the axes; the fields say
+    // where they are.
+    syncAxesFields();
     layersDirty = false;
     historyDirty = false;
   } else if (historyDirty && !np.is_gesturing()) {
@@ -464,7 +487,7 @@ function draw(now, ants, transforming) {
   vctx.strokeRect(px - 0.5, py - 0.5, w + 1, h + 1);
 
   if (showGrid) drawGrid(px, py, zoom, w, h);
-  if (BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine") drawSymmetryAxes(px, py, zoom, w, h);
+  if (paints()) drawSymmetryAxes(px, py, zoom, w, h);
   if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
   if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
   if (tool === "subject") drawSubjectBox(px, py, zoom);
@@ -807,39 +830,80 @@ function drawRulers(px, py, zoom) {
   vctx.restore();
 }
 
-/** The guides, and the one being dragged. */
+/** The colour the symmetry axes and their handles are drawn in. */
+const AXES_COLOR = "rgba(255, 120, 200, 0.75)";
+/** The same, while they are being placed: they are the thing in hand. */
+const AXES_COLOR_LIVE = "rgba(255, 120, 200, 1)";
+/** The radius of the dot where the axes cross, in CSS pixels. */
+const AXES_DOT = 5;
+
 /** The mirror axes and the spokes of a radial symmetry, while one is on. */
 function drawSymmetryAxes(px, py, zoom, w, h) {
   const [mx, my, n] = np.symmetry();
   if (!mx && !my && n <= 1) return;
-  const cx = px + w / 2;
-  const cy = py + h / 2;
+  const [ox, oy, degrees] = np.symmetry_frame();
+  const cx = px + ox * zoom;
+  const cy = py + oy * zoom;
+  const angle = (degrees * Math.PI) / 180;
+  // Long enough to cross the canvas from wherever the axes are, which may be
+  // outside it.
+  const reach = Math.hypot(w, h) + Math.hypot(cx - px - w / 2, cy - py - h / 2);
   vctx.save();
   vctx.beginPath();
   vctx.rect(px, py, w, h);
   vctx.clip();
-  vctx.lineWidth = 1;
-  vctx.setLineDash([6, 4]);
-  vctx.strokeStyle = "rgba(255, 120, 200, 0.75)";
+  vctx.lineWidth = placingAxes ? 2 : 1;
+  vctx.setLineDash(placingAxes ? [] : [6, 4]);
+  vctx.strokeStyle = placingAxes ? AXES_COLOR_LIVE : AXES_COLOR;
   vctx.beginPath();
-  if (mx) {
-    vctx.moveTo(Math.round(cx) + 0.5, py);
-    vctx.lineTo(Math.round(cx) + 0.5, py + h);
-  }
-  if (my) {
-    vctx.moveTo(px, Math.round(cy) + 0.5);
-    vctx.lineTo(px + w, Math.round(cy) + 0.5);
-  }
-  const reach = Math.hypot(w, h);
+  // A fold across the frame's y axis is the line along it, and the other way
+  // about: what is drawn is the line the paint is folded over.
+  const line = (dx, dy) => {
+    vctx.moveTo(cx - dx * reach, cy - dy * reach);
+    vctx.lineTo(cx + dx * reach, cy + dy * reach);
+  };
+  if (mx) line(-Math.sin(angle), Math.cos(angle));
+  if (my) line(Math.cos(angle), Math.sin(angle));
   for (let k = 0; k < (n > 1 ? n : 0); k++) {
-    const angle = (Math.PI * 2 * k) / n - Math.PI / 2;
+    const spoke = angle + (Math.PI * 2 * k) / n - Math.PI / 2;
     vctx.moveTo(cx, cy);
-    vctx.lineTo(cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
+    vctx.lineTo(cx + Math.cos(spoke) * reach, cy + Math.sin(spoke) * reach);
   }
   vctx.stroke();
   vctx.restore();
+  if (placingAxes) drawSymmetryHandles();
 }
 
+/**
+ * The gizmo: the dot where the axes cross and the arm that turns them. Drawn
+ * outside the canvas clip, so axes placed off the picture can still be
+ * grabbed.
+ */
+function drawSymmetryHandles() {
+  const handles = np.symmetry_handles();
+  if (!handles.length) return;
+  const [ox, oy, ax, ay] = handles;
+  vctx.save();
+  vctx.lineWidth = 2;
+  vctx.strokeStyle = AXES_COLOR_LIVE;
+  vctx.fillStyle = "rgba(20, 20, 20, 0.8)";
+  vctx.beginPath();
+  vctx.moveTo(ox, oy);
+  vctx.lineTo(ax, ay);
+  vctx.stroke();
+  for (const [x, y, r] of [
+    [ox, oy, AXES_DOT],
+    [ax, ay, AXES_DOT - 1],
+  ]) {
+    vctx.beginPath();
+    vctx.arc(x, y, r, 0, Math.PI * 2);
+    vctx.fill();
+    vctx.stroke();
+  }
+  vctx.restore();
+}
+
+/** The guides, and the one being dragged. */
 function drawGuides(px, py, zoom) {
   const lines = [];
   for (const y of guides.h) lines.push(["h", y, false]);
@@ -873,6 +937,13 @@ const COPYING_TOOLS = new Set(["clone", "heal"]);
 const showsBrushRing = () => BRUSH_TOOLS.has(tool);
 
 /**
+ * Whether the tool in hand lays down paint, and so whether symmetry means
+ * anything to it. Quick select and the refine brush use a brush's ring and a
+ * brush's size, but they edit the selection, which has no symmetry.
+ */
+const paints = () => BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine";
+
+/**
  * The brush, drawn where the pointer is and the size it will actually paint.
  * Two rings, light over dark, so it shows up against any picture.
  */
@@ -888,7 +959,7 @@ function brushRingAt(zoom) {
  */
 function brushRingPath(at, radius) {
   vctx.beginPath();
-  if (BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine" && np.brush_tip() === "square") {
+  if (paints() && np.brush_tip() === "square") {
     vctx.rect(at.x - radius, at.y - radius, radius * 2, radius * 2);
   } else {
     vctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
@@ -899,14 +970,22 @@ function drawBrushRing(zoom) {
   const { at, radius } = brushRingAt(zoom);
   // Below a pixel or two the ring is just noise; the crosshair says enough.
   if (radius < 1.5) return;
+  // Under a symmetry the dab lands in several places at once, so the ring is
+  // drawn at each of them: where the paint will go is worth seeing before
+  // the stroke rather than after it.
+  const images = paints() ? np.symmetry_images(at.x, at.y) : [at.x, at.y];
   vctx.save();
-  brushRingPath(at, radius);
-  vctx.lineWidth = 3;
-  vctx.strokeStyle = "rgba(0,0,0,0.45)";
-  vctx.stroke();
-  vctx.lineWidth = 1;
-  vctx.strokeStyle = "rgba(255,255,255,0.95)";
-  vctx.stroke();
+  for (let i = 0; i < images.length; i += 2) {
+    brushRingPath({ x: images[i], y: images[i + 1] }, radius);
+    vctx.lineWidth = 3;
+    vctx.strokeStyle = "rgba(0,0,0,0.45)";
+    vctx.stroke();
+    vctx.lineWidth = 1;
+    // The ring under the pointer is the one being aimed; the rest are
+    // quieter, so the pointer is still findable in a twelve-fold mandala.
+    vctx.strokeStyle = i === 0 ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.5)";
+    vctx.stroke();
+  }
   vctx.restore();
 }
 
@@ -1228,6 +1307,9 @@ function buildToolbox() {
 function setTool(name) {
   endSizing(false);
   commitText();
+  // The gizmo belongs to the brush tools' options bar; picking another tool
+  // is leaving it.
+  if (placingAxes) setPlacingAxes(false);
   tool = name;
   np.set_tool(name);
   for (const b of document.querySelectorAll(".tool")) {
@@ -1275,6 +1357,7 @@ function syncOptions() {
   $("opt-tip").value = np.brush_tip();
   $("opt-symmetry-wrap").hidden = !hasTip;
   $("opt-symmetry").value = np.symmetry().join(",");
+  syncAxesFields();
   $("opt-smoothing-wrap").hidden = !hasTip;
   $("opt-smoothing").value = Math.round(np.smoothing() * 100);
   $("opt-smoothing-out").value = `${Math.round(np.smoothing() * 100)}%`;
@@ -1441,8 +1524,17 @@ function bindOptions() {
   $("opt-symmetry").addEventListener("change", (e) => {
     const [mx, my, n] = e.target.value.split(",").map(Number);
     np.set_symmetry(Boolean(mx), Boolean(my), n);
+    syncAxesFields();
     needsDraw = true;
   });
+  $("opt-axes-place").addEventListener("click", () => setPlacingAxes(!placingAxes));
+  $("opt-axes-centre").addEventListener("click", () => {
+    act(() => np.centre_symmetry());
+    syncAxesFields();
+  });
+  for (const id of ["opt-axes-x", "opt-axes-y", "opt-axes-angle"]) {
+    $(id).addEventListener("change", commitAxesFields);
+  }
   const smoothing = $("opt-smoothing");
   smoothing.addEventListener("input", () => {
     np.set_smoothing(Number(smoothing.value) / 100);
@@ -1824,10 +1916,18 @@ function filterItems() {
 }
 
 function menuItemsFor(wanted) {
-  return ADJUSTMENTS.filter(wanted).map((a) => ({
+  const chosen = ADJUSTMENTS.filter(wanted);
+  const names = chosen.map((a) => a.name);
+  return chosen.map((a) => ({
     label: a.label,
     shortcut: a.shortcut,
     action: () => adjust.open(a.name),
+    hoverCard: (row, popup) => {
+      attachAdjustHelp(row, a.name, () => popup);
+      // A menu is walked down a row at a time, so the rest of this list is
+      // very likely to be asked for next.
+      prefetchDemos(names);
+    },
   }));
 }
 
@@ -2175,6 +2275,12 @@ function clearGuides() {
   commitGuides("Clear Guides");
 }
 
+/** One guide taken away, from the context menu rather than a drag. */
+function removeGuide(guide) {
+  guides[guide.axis].splice(guide.index, 1);
+  commitGuides("Remove Guide");
+}
+
 /** The engine keeps a copy of the guides to snap to. */
 function syncGuides() {
   np.set_guides(Float64Array.from(guides.h), Float64Array.from(guides.v));
@@ -2201,6 +2307,71 @@ function pullGuides() {
     guides = { h, v };
     needsDraw = true;
   }
+}
+
+// ---- Symmetry axes ----------------------------------------------------------
+//
+// Where the mirrors fold and what the mandala turns about is a place on the
+// picture, not a fixed middle: the engine keeps it, the options bar shows it
+// as numbers, and the gizmo moves it. Placing is a mode because the axes are
+// thin and a brush is in hand — a drag near one would otherwise move it
+// instead of painting.
+
+/** Whether any symmetry is on at all, which is what the gizmo needs. */
+function symmetryIsOn() {
+  const [mx, my, n] = np.symmetry();
+  return Boolean(mx || my || n > 1);
+}
+
+function setPlacingAxes(on) {
+  placingAxes = on && symmetryIsOn();
+  setPressed($("opt-axes-place"), placingAxes);
+  viewport.classList.toggle("placing-axes", placingAxes);
+  if (placingAxes) {
+    message("Drag the axes, the dot where they cross, or the arm that turns them; press anywhere to bring them there. Shift ignores the guides. Esc when done.");
+  }
+  view.style.cursor = "";
+  needsDraw = true;
+}
+
+/** The options bar's X, Y and angle, from the engine. */
+function syncAxesFields() {
+  const on = symmetryIsOn();
+  $("opt-axes-wrap").hidden = !on || !paints();
+  if (!on && placingAxes) setPlacingAxes(false);
+  setPressed($("opt-axes-place"), placingAxes);
+  const [x, y, degrees] = np.symmetry_frame();
+  for (const [id, value] of [
+    ["opt-axes-x", x],
+    ["opt-axes-y", y],
+    ["opt-axes-angle", degrees],
+  ]) {
+    // Not while it is being typed into: the engine rounds, and rounding
+    // under the caret eats what is half-typed.
+    if (document.activeElement !== $(id)) $(id).value = String(Math.round(value * 10) / 10);
+  }
+}
+
+/** The axes put where the three fields say, as one undo step. */
+function commitAxesFields() {
+  const x = Number($("opt-axes-x").value);
+  const y = Number($("opt-axes-y").value);
+  const degrees = Number($("opt-axes-angle").value);
+  act(() => np.set_symmetry_frame(x, y, degrees));
+  syncAxesFields();
+}
+
+/** Folds the strokes across a guide: the ruler route into a placed axis. */
+function mirrorAcrossGuide(axis, at) {
+  const [mx, my, n] = np.symmetry();
+  const [x, y] = np.symmetry_frame();
+  act(() => {
+    // A guide is square to the canvas, so it only means anything as one of
+    // the canvas's own axes: put the frame back square as well.
+    np.set_symmetry_frame(axis === "v" ? at : x, axis === "h" ? at : y, 0);
+    np.set_symmetry(axis === "v" ? true : Boolean(mx), axis === "h" ? true : Boolean(my), n);
+  });
+  syncOptions();
 }
 
 /** The view furniture is remembered between visits. */
@@ -2534,7 +2705,8 @@ function buildMenus() {
 }
 
 /** The canvas's right-click menu. */
-function canvasContextItems() {
+/** `guide` is the one under the pointer, if the click landed on one. */
+function canvasContextItems(guide) {
   if (np.is_transforming()) {
     return [
       { label: "Apply Transform", shortcut: "Enter", action: () => act(() => np.commit_session()) },
@@ -2545,6 +2717,18 @@ function canvasContextItems() {
       { label: "Rotate 180°", action: () => act(() => np.transform_rotate(180)) },
       { label: "Flip Horizontal", action: () => act(() => np.transform_flip_horizontal()) },
       { label: "Flip Vertical", action: () => act(() => np.transform_flip_vertical()) },
+    ];
+  }
+  if (guide) {
+    const at = guides[guide.axis][guide.index];
+    return [
+      {
+        label: "Mirror Painting Across This Guide",
+        action: () => mirrorAcrossGuide(guide.axis, at),
+      },
+      { label: "Remove Guide", action: () => removeGuide(guide) },
+      { sep: true },
+      { label: "Clear Guides", action: clearGuides },
     ];
   }
   return [
@@ -4556,6 +4740,16 @@ function bindPointer() {
       return;
     }
     const wantsPan = e.button === 1 || spaceHeld;
+    // Placing the axes takes the pointer: nothing else is being aimed at.
+    if (placingAxes && !wantsPan && e.button === 0) {
+      np.symmetry_grab(x, y, true);
+      np.symmetry_drag(x, y, e.shiftKey);
+      syncAxesFields();
+      needsDraw = true;
+      view.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
     const edge = wantsPan ? null : edgeAt(x, y);
     const onRuler = showRulers && !wantsPan && e.button === 0 && (x < RULER || y < RULER);
     // Guides are grabbed with whatever tool is in hand: they are thin, and
@@ -4612,6 +4806,17 @@ function bindPointer() {
       cursor = { x, y };
       needsDraw = true;
     }
+    if (np.is_dragging_symmetry()) {
+      np.symmetry_drag(x, y, e.shiftKey);
+      syncAxesFields();
+      needsDraw = true;
+      return;
+    }
+    if (placingAxes) {
+      view.style.cursor = np.symmetry_hit(x, y) === "rotate" ? "grab" : "move";
+      needsDraw = true;
+      return;
+    }
     if (guideDrag) {
       guideDrag.at = guidePosition(x, y);
       needsDraw = true;
@@ -4644,6 +4849,13 @@ function bindPointer() {
 
   const end = (e) => {
     const [x, y] = canvasPoint(e);
+    if (np.is_dragging_symmetry()) {
+      // The whole drag is one undo step, recorded as it ends.
+      if (np.symmetry_release()) touch();
+      syncAxesFields();
+      needsDraw = true;
+      return;
+    }
     if (guideDrag) {
       const at = guidePosition(x, y);
       if (at !== null) guides[guideDrag.axis].push(at);
@@ -4697,6 +4909,7 @@ function bindPointer() {
     pan = null;
     resizing = null;
     guideDrag = null;
+    if (np.is_dragging_symmetry()) np.symmetry_release();
     view.style.cursor = "";
     viewport.classList.remove("panning", "dragging");
     np.cancel_gesture();
@@ -4729,7 +4942,8 @@ function bindPointer() {
 
   view.addEventListener("contextmenu", (e) => {
     e.preventDefault();
-    showContextMenu(e.clientX, e.clientY, canvasContextItems());
+    const [x, y] = canvasPoint(e);
+    showContextMenu(e.clientX, e.clientY, canvasContextItems(guideAt(x, y)));
   });
   // A stray middle-click on Linux would otherwise paste.
   view.addEventListener("auxclick", (e) => e.preventDefault());
@@ -4821,6 +5035,10 @@ function bindKeyboard() {
         closeMenus();
         picker.close();
         if (endSizing(false)) return;
+        if (placingAxes) {
+          setPlacingAxes(false);
+          return;
+        }
         np.cancel_gesture();
         np.clear_subject_box();
         needsDraw = true;

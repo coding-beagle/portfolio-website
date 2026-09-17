@@ -113,6 +113,20 @@ impl std::fmt::Display for DocumentError {
 
 impl std::error::Error for DocumentError {}
 
+/// Where a point of a `width` x `height` canvas lands when the canvas is
+/// turned `turns` quarter turns clockwise — what anything placed on the
+/// canvas rather than painted into it follows: a smart object's placement,
+/// the symmetry axes.
+pub fn canvas_turn(width: u32, height: u32, turns: i32) -> Affine {
+    let (w, h) = (f64::from(width), f64::from(height));
+    match turns.rem_euclid(4) {
+        0 => Affine::IDENTITY,
+        1 => Affine { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: h, f: 0.0 },
+        2 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
+        _ => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
+    }
+}
+
 impl Document {
     /// A document with one layer, `Background`, filled with `background`.
     /// Pass [`Rgba::TRANSPARENT`] for an empty canvas.
@@ -1102,17 +1116,7 @@ impl Document {
     /// Rotates the whole canvas, every layer, by quarter turns clockwise.
     /// Odd turns swap the document's width and height.
     pub fn rotate_canvas(&mut self, turns: i32) {
-        let (w, h) = (f64::from(self.width), f64::from(self.height));
-        // Where a point of the old canvas lands on the new one, so a smart
-        // object's placement turns with the canvas rather than being
-        // resampled.
-        let turn = match turns.rem_euclid(4) {
-            0 => Affine::IDENTITY,
-            1 => Affine { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: h, f: 0.0 },
-            2 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
-            _ => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
-        };
-        let turn = Projective::from(turn);
+        let turn = Projective::from(canvas_turn(self.width, self.height, turns));
         if turns.rem_euclid(2) == 1 {
             std::mem::swap(&mut self.width, &mut self.height);
         }

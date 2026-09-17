@@ -172,6 +172,22 @@ button.opt {
   accent-color: var(--accent);
   margin: 0;
 }
+.opt.axes {
+  gap: 8px;
+}
+.opt.axes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.opt.axes input[type="number"] {
+  width: 4em;
+}
+.opt.axes button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
 .seg {
   gap: 0;
 }
@@ -303,6 +319,9 @@ button.opt {
 }
 .viewport.tool-text canvas {
   cursor: text;
+}
+.viewport.placing-axes canvas {
+  cursor: move;
 }
 
 /*
@@ -1887,4 +1906,46 @@ button.primary {
   background: var(--panel);
   border-radius: 2px;
   white-space: nowrap;
+}
+
+/* ---- Demo sheet (?demos=1) ---- */
+.demosheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: auto;
+  background: var(--bg);
+}
+.demosheet-bar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.demosheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+.demosheet-cell {
+  margin: 0;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.demosheet-cell figcaption {
+  margin-top: 6px;
+}
+/* The style a demo is shown in, which is the thing being judged. */
+.demosheet-cell figcaption span {
+  color: var(--text-dim);
+  font-weight: 400;
 }

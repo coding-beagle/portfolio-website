@@ -19,9 +19,12 @@
 //! if it is set the buffer's place as four `i32` and then the buffer); a
 //! file written before it has none, which is what a layer that has never
 //! been moved off the edge holds anyway.
-//! After the layers comes a trailer with the guides; a file without one
-//! (the first files written) simply has none, and a reader from before the
-//! trailer stops after the layers.
+//! After the layers comes a trailer with the guides, and after those, where
+//! the symmetry axes were placed: one byte for whether they were placed at
+//! all, then their crossing point and angle. The trailer is read as far as
+//! the bytes go, so a file written before either part simply has none of it
+//! — the first files have no trailer, and a reader from before the trailer
+//! stops after the layers.
 //!
 //! # The version
 //!
@@ -59,11 +62,12 @@
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
 use crate::document::Document;
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect};
 use crate::layer::{Layer, LayerId, LayerKind, Offscreen, SmartObject, Target};
 use crate::raster::Raster;
 use crate::snap::Guides;
 use crate::text::{TextAlign, TextObject, TextStyle};
+use crate::tools::SymmetryFrame;
 use crate::transform::{Affine, Projective};
 
 const MAGIC: &[u8; 6] = b"NPAINT";
@@ -179,14 +183,14 @@ impl Writer {
     }
 }
 
-/// The document and its guides as NPaint file bytes.
-pub fn save(doc: &Document, guides: &Guides) -> Vec<u8> {
-    save_as(doc, guides, VERSION)
+/// The document, its guides and its symmetry axes as NPaint file bytes.
+pub fn save(doc: &Document, guides: &Guides, symmetry: SymmetryFrame) -> Vec<u8> {
+    save_as(doc, guides, symmetry, VERSION)
 }
 
 /// [`save`] in an older format, for testing that older files still open;
 /// what an older version cannot carry is left out.
-fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
+fn save_as(doc: &Document, guides: &Guides, symmetry: SymmetryFrame, version: u16) -> Vec<u8> {
     let mut w = Writer { out: Vec::new() };
     w.out.extend_from_slice(MAGIC);
     w.u16(version);
@@ -271,6 +275,11 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
             w.f64(at);
         }
     }
+    let origin = symmetry.origin.unwrap_or_default();
+    w.u8(u8::from(symmetry.origin.is_some()));
+    w.f64(origin.x);
+    w.f64(origin.y);
+    w.f64(symmetry.angle);
     w.out
 }
 
@@ -385,9 +394,10 @@ fn read_offscreen(extra: &[u8]) -> Option<Offscreen> {
     ((rect.w, rect.h) == size).then(|| Offscreen::new(rect, raster))
 }
 
-/// A document and its guides from NPaint file bytes. The guides come back
-/// with snapping off; that is the editor's setting, not the file's.
-pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
+/// A document, its guides and its symmetry axes from NPaint file bytes. The
+/// guides come back with snapping off; that is the editor's setting, not the
+/// file's.
+pub fn load(bytes: &[u8]) -> Result<(Document, Guides, SymmetryFrame), FileError> {
     let mut r = Reader { bytes, at: 0 };
     if r.take(MAGIC.len()).map_err(|_| FileError::NotNPaint)? != MAGIC {
         return Err(FileError::NotNPaint);
@@ -499,7 +509,13 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
             }
         }
     }
-    Ok((doc, guides))
+    let mut symmetry = SymmetryFrame::default();
+    if r.at < bytes.len() {
+        let placed = r.u8()? != 0;
+        let origin = Point::new(r.f64()?, r.f64()?);
+        symmetry = SymmetryFrame { origin: placed.then_some(origin), angle: r.f64()? };
+    }
+    Ok((doc, guides, symmetry))
 }
 
 #[cfg(test)]
@@ -574,13 +590,15 @@ mod tests {
     fn a_document_survives_the_round_trip_exactly() {
         let doc = document();
         let guides = Guides { h: vec![10.0, 25.5], v: vec![3.0], enabled: true };
-        let bytes = save(&doc, &guides);
+        let axes = SymmetryFrame { origin: Some(Point::new(3.5, 4.0)), angle: 0.5 };
+        let bytes = save(&doc, &guides, axes);
         assert_eq!(&bytes[..6], b"NPAINT");
-        let (back, back_guides) = load(&bytes).unwrap();
+        let (back, back_guides, back_axes) = load(&bytes).unwrap();
         assert_eq!(back, doc);
         let adjustment = back.layers()[2].adjustment().expect("the adjustment layer");
         assert_eq!(adjustment.channel, crate::adjust::Channel::Green, "the channel came back with it");
         assert_eq!((back_guides.h, back_guides.v), (guides.h, guides.v));
+        assert_eq!(back_axes, axes, "where the symmetry axes were placed travels with the file");
         // And it keeps working as a document: new ids do not collide.
         let mut back = back;
         let i = back.add_layer();
@@ -594,20 +612,27 @@ mod tests {
     #[test]
     fn opening_and_resaving_is_a_fixed_point() {
         let guides = Guides { h: vec![10.0, 25.5], v: vec![3.0], enabled: false };
-        let first = save(&document(), &guides);
-        let (doc, guides) = load(&first).unwrap();
-        let second = save(&doc, &guides);
+        let axes = SymmetryFrame { origin: Some(Point::new(1.0, 2.0)), angle: -0.25 };
+        let first = save(&document(), &guides, axes);
+        let (doc, guides, axes) = load(&first).unwrap();
+        let second = save(&doc, &guides, axes);
         assert_eq!(second, first);
-        let (again, _) = load(&second).unwrap();
+        let (again, ..) = load(&second).unwrap();
         assert_eq!(again, doc);
     }
 
     #[test]
-    fn a_file_from_before_guides_opens_with_none() {
-        let bytes = save(&document(), &Guides::default());
-        // The trailer is two empty counts; a first-version file ends before it.
-        let older = &bytes[..bytes.len() - 8];
-        let (_, guides) = load(older).unwrap();
+    fn a_file_from_before_the_trailer_opens_without_it() {
+        let axes = SymmetryFrame { origin: Some(Point::new(1.0, 2.0)), angle: 0.0 };
+        let bytes = save(&document(), &Guides::default(), axes);
+        // The trailer is two empty guide counts and then the axes; a file
+        // from before either part ends where that part starts.
+        const AXES_BYTES: usize = 1 + 8 * 3;
+        let without_axes = &bytes[..bytes.len() - AXES_BYTES];
+        let (_, _, none) = load(without_axes).unwrap();
+        assert_eq!(none, SymmetryFrame::default(), "axes that were never written are not placed");
+        let first_version = &without_axes[..without_axes.len() - 8];
+        let (_, guides, _) = load(first_version).unwrap();
         assert!(guides.h.is_empty() && guides.v.is_empty());
     }
 
@@ -625,17 +650,17 @@ mod tests {
         let placement = Projective::from_quad(square, quad).unwrap();
         assert!(placement.as_affine().is_none());
         doc.set_smart_transform(3, placement).unwrap();
-        let (back, _) = load(&save(&doc, &Guides::default())).unwrap();
+        let (back, ..) = load(&save(&doc, &Guides::default(), SymmetryFrame::default())).unwrap();
         assert_eq!(back.layer(3).unwrap().smart_object().unwrap().transform, placement);
         // Written as a format-5 file there is nowhere to put it, and the
         // object comes back placed as squarely as that format could say.
-        let (older, _) = load(&save_as(&doc, &Guides::default(), 5)).unwrap();
+        let (older, ..) = load(&save_as(&doc, &Guides::default(), SymmetryFrame::default(), 5)).unwrap();
         assert!(older.layer(3).unwrap().smart_object().unwrap().transform.as_affine().is_some());
     }
 
     #[test]
     fn a_file_from_an_older_format_still_opens() {
-        let bytes = save(&document(), &Guides::default());
+        let bytes = save(&document(), &Guides::default(), SymmetryFrame::default());
         assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), VERSION, "the version is written where the reader looks");
         // Every format up to this one is still read. What changed between 1
         // and 2 is only what an adjustment's parameters may say, and an
@@ -647,8 +672,8 @@ mod tests {
         // 6 made a placement projective, and an older one is the affine it
         // always was.
         for older in 1..VERSION {
-            let bytes = save_as(&document(), &Guides::default(), older);
-            let (doc, _) = load(&bytes).expect("an older file still opens");
+            let bytes = save_as(&document(), &Guides::default(), SymmetryFrame::default(), older);
+            let (doc, ..) = load(&bytes).expect("an older file still opens");
             assert_eq!(doc.layers().len(), document().layers().len(), "format {older}");
             let text = doc.layers()[4].text().expect("the text layer");
             assert_eq!(text.text, "Hi\nthere ✓", "format {older}");
@@ -661,7 +686,7 @@ mod tests {
             let placed = doc.layers()[3].smart_object().expect("the smart object");
             assert!(placed.transform.as_affine().is_some(), "format {older} places affinely");
         }
-        let (doc, _) = load(&bytes).unwrap();
+        let (doc, ..) = load(&bytes).unwrap();
         assert_eq!(doc.layers()[4].text().unwrap().style.leading, 1.5);
     }
 
@@ -669,7 +694,7 @@ mod tests {
     fn other_files_and_broken_ones_are_refused_politely() {
         assert_eq!(load(b"\x89PNG\r\n"), Err(FileError::NotNPaint));
         assert_eq!(load(b""), Err(FileError::NotNPaint));
-        let bytes = save(&document(), &Guides::default());
+        let bytes = save(&document(), &Guides::default(), SymmetryFrame::default());
         assert!(matches!(load(&bytes[..bytes.len() / 2]), Err(FileError::Corrupt(_))), "cut short");
         let mut newer = bytes.clone();
         newer[6] = 99;

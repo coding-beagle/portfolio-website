@@ -7,16 +7,17 @@
 //! snapshot captures the matching "after" state on the redo stack, so the
 //! two stacks are symmetric and a redo is an undo of an undo.
 //!
-//! Every step also carries an [`Aside`]: the selection and the guides as
-//! they stood before the step. They are not part of the document, but
-//! undoing a move should bring the marquee back with the pixels, and
-//! changing the selection or a guide is a step in its own right — one whose
-//! snapshot is [`Snapshot::Nothing`].
+//! Every step also carries an [`Aside`]: the selection, the guides and the
+//! symmetry axes as they stood before the step. They are not part of the
+//! document, but undoing a move should bring the marquee back with the
+//! pixels, and changing the selection, a guide or where the axes cross is a
+//! step in its own right — one whose snapshot is [`Snapshot::Nothing`].
 
 use crate::document::Document;
 use crate::layer::{Layer, LayerId, Offscreen, Target};
 use crate::raster::Raster;
 use crate::selection::Selection;
+use crate::tools::SymmetryFrame;
 
 // A snapshot is built once and moved into the history; what the variants
 // weigh in memory is their rasters, not the enum.
@@ -38,14 +39,17 @@ pub enum Snapshot {
     Nothing,
 }
 
-/// What travels with a step besides the document: the selection and the
-/// guide positions. Snapping on or off is a preference, not state, and is
-/// not here.
+/// What travels with a step besides the document: the selection, the guide
+/// positions, and where the symmetry axes are. Snapping on or off is a
+/// preference, not state, and is not here; neither are the symmetry's
+/// mirrors, which are a tool setting rather than something placed on the
+/// picture.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Aside {
     pub selection: Selection,
     pub guides_h: Vec<f64>,
     pub guides_v: Vec<f64>,
+    pub symmetry: SymmetryFrame,
 }
 
 impl Snapshot {
@@ -312,7 +316,11 @@ mod tests {
     #[test]
     fn a_step_brings_its_selection_and_guides_back() {
         let mut doc = Document::new(4, 4, Rgba::WHITE);
-        let mut aside = Aside { selection: Selection::Rect(crate::geometry::Rect::new(0, 0, 2, 2)), guides_h: vec![1.0], guides_v: vec![] };
+        let mut aside = Aside {
+            selection: Selection::Rect(crate::geometry::Rect::new(0, 0, 2, 2)),
+            guides_h: vec![1.0],
+            ..Aside::default()
+        };
         let mut history = History::new(10);
         history.push(Snapshot::Nothing, aside.clone(), "Deselect");
         let before = aside.clone();

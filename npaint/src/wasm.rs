@@ -26,7 +26,7 @@ use crate::palette::Palette;
 use crate::raster::Raster;
 use crate::transform::{Handle, Hit};
 use crate::text::TextAlign;
-use crate::tools::{Symmetry, ToolKind, MAX_RADIAL};
+use crate::tools::{Symmetry, SymmetryFrame, SymmetryHit, ToolKind, MAX_RADIAL};
 
 #[wasm_bindgen]
 pub struct NPaint {
@@ -260,17 +260,89 @@ impl NPaint {
         self.editor.settings().tip.has_hardness()
     }
 
-    /// Paint symmetry: mirrors in the canvas's vertical and horizontal
-    /// axes, and how many ways the stroke is turned about the centre (1
-    /// for none).
+    /// Paint symmetry: mirrors in each of the axes, and how many ways the
+    /// stroke is turned about where they cross (1 for none). Where the axes
+    /// are is left alone: it is set on its own.
     pub fn set_symmetry(&mut self, mirror_x: bool, mirror_y: bool, radial: u32) {
-        self.editor.settings_mut().symmetry = Symmetry { mirror_x, mirror_y, radial: radial.clamp(1, MAX_RADIAL) };
+        let frame = self.editor.settings().symmetry.frame;
+        let radial = radial.clamp(1, MAX_RADIAL);
+        self.editor.settings_mut().symmetry = Symmetry { mirror_x, mirror_y, radial, frame };
     }
 
     /// The symmetry as `[mirror_x, mirror_y, radial]`.
     pub fn symmetry(&self) -> Vec<u32> {
         let s = self.editor.settings().symmetry;
         vec![u32::from(s.mirror_x), u32::from(s.mirror_y), s.radial]
+    }
+
+    /// Where the symmetry axes cross and how far they are turned, as
+    /// `[x, y, degrees, centred]` — document pixels, and 1 for axes still at
+    /// the canvas centre and square to it.
+    pub fn symmetry_frame(&self) -> Vec<f64> {
+        let (origin, angle) = self.editor.symmetry_frame();
+        vec![origin.x, origin.y, angle.to_degrees(), f64::from(u8::from(self.editor.symmetry_is_centred()))]
+    }
+
+    /// Puts the axes at a document position, turned `degrees`, as one undo
+    /// step.
+    pub fn set_symmetry_frame(&mut self, x: f64, y: f64, degrees: f64) -> bool {
+        if !(x.is_finite() && y.is_finite() && degrees.is_finite()) {
+            return false;
+        }
+        let frame = SymmetryFrame { origin: Some(Point::new(x, y)), angle: degrees.to_radians() };
+        self.editor.set_symmetry_frame(frame)
+    }
+
+    /// Puts the axes back at the centre of the canvas, square to it.
+    pub fn centre_symmetry(&mut self) -> bool {
+        self.editor.centre_symmetry()
+    }
+
+    /// The gizmo's handles in screen pixels, `[origin_x, origin_y, arm_x,
+    /// arm_y]`, or empty when no symmetry is on.
+    pub fn symmetry_handles(&self) -> Vec<f64> {
+        match self.editor.symmetry_handles() {
+            Some((origin, arm)) => vec![origin.x, origin.y, arm.x, arm.y],
+            None => Vec::new(),
+        }
+    }
+
+    /// What the pointer would grab on the gizmo: `"origin"`, `"axis-x"`,
+    /// `"axis-y"`, `"rotate"`, or empty for nothing.
+    pub fn symmetry_hit(&self, x: f64, y: f64) -> String {
+        match self.editor.symmetry_hit(Point::new(x, y)) {
+            None => String::new(),
+            Some(SymmetryHit::Origin) => "origin".to_owned(),
+            Some(SymmetryHit::AxisX) => "axis-x".to_owned(),
+            Some(SymmetryHit::AxisY) => "axis-y".to_owned(),
+            Some(SymmetryHit::Rotate) => "rotate".to_owned(),
+        }
+    }
+
+    /// Takes hold of the gizmo. `place` is the page's placing mode, where a
+    /// press anywhere on the picture brings the axes to the pointer.
+    pub fn symmetry_grab(&mut self, x: f64, y: f64, place: bool) -> bool {
+        self.editor.symmetry_grab(Point::new(x, y), place)
+    }
+
+    /// Drags the gizmo; `free` is the modifier that suspends snapping.
+    pub fn symmetry_drag(&mut self, x: f64, y: f64, free: bool) -> bool {
+        self.editor.symmetry_drag(Point::new(x, y), free)
+    }
+
+    /// Ends the drag, which becomes one undo step.
+    pub fn symmetry_release(&mut self) -> bool {
+        self.editor.symmetry_release()
+    }
+
+    pub fn is_dragging_symmetry(&self) -> bool {
+        self.editor.is_dragging_symmetry()
+    }
+
+    /// Every place a screen position would be painted under the symmetry in
+    /// hand, as `[x0, y0, x1, y1, ...]` in screen pixels.
+    pub fn symmetry_images(&self, x: f64, y: f64) -> Vec<f64> {
+        self.editor.symmetry_images(Point::new(x, y)).into_iter().flat_map(|p| [p.x, p.y]).collect()
     }
 
     pub fn set_smoothing(&mut self, smoothing: f32) {
@@ -1382,6 +1454,28 @@ impl NPaint {
         self.editor.is_adjusting()
     }
 
+    /// One adjustment applied to a loose RGBA buffer, returned as new bytes.
+    ///
+    /// Nothing about the document is touched, which is what separates this
+    /// from [`NPaint::preview_adjustment`]: it is for previews that are not
+    /// the picture being edited — the demo strip in the hover card. Going
+    /// through [`Adjustment`] like everything else is the point, so a demo
+    /// cannot drift from what the menu item it describes actually does.
+    pub fn adjust_rgba(
+        name: &str,
+        params: &[f32],
+        width: u32,
+        height: u32,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let adjustment = Adjustment::from_params(name, params).map_err(err)?;
+        let mut raster =
+            Raster::from_rgba_bytes(width, height, bytes).ok_or("byte count does not match the size")?;
+        let bounds = raster.bounds();
+        adjustment.apply(&mut raster, &bounds);
+        Ok(raster.to_rgba_bytes())
+    }
+
     // ---- Free transform ------------------------------------------------------------
 
     pub fn begin_transform(&mut self) -> Result<(), String> {
@@ -1584,6 +1678,24 @@ impl NPaint {
         self.editor.composite_crop(Rect::new(x, y, w, h)).to_rgba_bytes()
     }
 
+    /// The whole flattened picture reduced to fit `w` by `h`, as RGBA bytes,
+    /// with the result's own size returned ahead of the pixels as two `u32`s
+    /// — the fit keeps the document's aspect, so the caller cannot work the
+    /// size out from `w` and `h` alone.
+    ///
+    /// For previews of the picture as a whole, such as the demo in an
+    /// adjustment's hover card. It composites the document to do it, so a
+    /// caller that asks repeatedly should hold on to the answer until
+    /// [`NPaint::document_state`] changes.
+    pub fn composite_thumbnail(&self, w: u32, h: u32) -> Vec<u8> {
+        let (width, height) = fit(self.editor.document().width(), self.editor.document().height(), w, h);
+        let mut out = Vec::with_capacity(8 + (width as usize) * (height as usize) * 4);
+        out.extend_from_slice(&width.to_le_bytes());
+        out.extend_from_slice(&height.to_le_bytes());
+        out.extend_from_slice(&thumbnail(&self.editor.document().composite(), width, height, |p| p));
+        out
+    }
+
     /// Selects the subject the model found in the box: `matte` is the
     /// model's coverage of the box alone. Shift adds to the selection and
     /// Alt takes away, as with the other selection tools.
@@ -1660,6 +1772,18 @@ impl NPaint {
     }
 }
 
+/// The largest `width` by `height` no bigger than `max_w` by `max_h` that
+/// keeps the aspect of `w` by `h`. Never returns a zero side: a sliver of a
+/// document still has to come back as a picture.
+fn fit(w: u32, h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
+    if w == 0 || h == 0 {
+        return (1, 1);
+    }
+    let scale = f64::from(max_w).min(f64::from(max_h) * f64::from(w) / f64::from(h)) / f64::from(w);
+    let scale = scale.min(1.0);
+    ((f64::from(w) * scale).round().max(1.0) as u32, (f64::from(h) * scale).round().max(1.0) as u32)
+}
+
 /// A `w` by `h` nearest-neighbour thumbnail of `raster`, each pixel through
 /// `map`, as RGBA bytes.
 fn thumbnail(raster: &Raster, w: u32, h: u32, map: impl Fn(Rgba) -> Rgba) -> Vec<u8> {
@@ -1709,6 +1833,37 @@ mod tests {
         np.pointer_up(0.0, 0.0, false, false, 1.0);
         assert!(!np.render().is_empty());
         assert_eq!(np.frame_copy()[..4], [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn composite_thumbnail_fits_the_whole_document() {
+        let np = NPaint::new(400, 100, "#00ff00").unwrap();
+        let thumb = np.composite_thumbnail(64, 64);
+        // Size first, then the pixels: 400x100 into 64x64 is 64x16.
+        assert_eq!(&thumb[..8], &[64, 0, 0, 0, 16, 0, 0, 0]);
+        assert_eq!(thumb.len(), 8 + 64 * 16 * 4);
+        assert_eq!(thumb[8..12], [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn fit_keeps_aspect_and_never_enlarges() {
+        assert_eq!(fit(400, 100, 64, 64), (64, 16));
+        assert_eq!(fit(100, 400, 64, 64), (16, 64));
+        assert_eq!(fit(10, 10, 64, 64), (10, 10), "a small document is left alone");
+        assert_eq!(fit(4000, 1, 64, 64), (64, 1), "no side rounds away to nothing");
+        assert_eq!(fit(0, 0, 64, 64), (1, 1));
+    }
+
+    #[test]
+    fn adjust_rgba_works_off_the_document() {
+        let red = vec![255, 0, 0, 255];
+        let inverted = NPaint::adjust_rgba("invert", &[], 1, 1, &red).unwrap();
+        assert_eq!(inverted, vec![0, 255, 255, 255]);
+        // A spatial filter reads its neighbours, so it has to survive the
+        // round trip through the loose buffer as well as a lookup table does.
+        assert!(NPaint::adjust_rgba("blur", &[1.0], 1, 1, &red).is_ok());
+        assert!(NPaint::adjust_rgba("invert", &[], 2, 2, &red).is_err(), "byte count checked");
+        assert!(NPaint::adjust_rgba("nothing-of-the-sort", &[], 1, 1, &red).is_err());
     }
 
     #[test]
@@ -2187,6 +2342,22 @@ mod tests {
         assert_eq!(np.symmetry(), vec![0, 0, 1]);
         np.set_symmetry(true, false, 99);
         assert_eq!(np.symmetry(), vec![1, 0, MAX_RADIAL]);
+        assert_eq!(np.symmetry_frame(), vec![2.0, 2.0, 0.0, 1.0], "at the canvas centre until placed");
+        assert!(np.set_symmetry_frame(1.0, 3.0, 45.0));
+        assert_eq!(np.symmetry_frame(), vec![1.0, 3.0, 45.0, 0.0]);
+        assert!(!np.set_symmetry_frame(f64::NAN, 0.0, 0.0), "nothing is placed at nowhere");
+        np.set_symmetry(false, false, 1);
+        assert!(np.symmetry_handles().is_empty(), "no gizmo while the symmetry is off");
+        assert_eq!(np.symmetry_hit(1.0, 3.0), "");
+        np.set_symmetry(true, false, 1);
+        assert_eq!(np.symmetry_hit(1.0, 3.0), "origin");
+        // On the axis the fold lands back on itself, so both images are the
+        // same place.
+        assert_eq!(np.symmetry_images(1.0, 3.0), vec![1.0, 3.0, 1.0, 3.0]);
+        np.set_symmetry_frame(1.0, 3.0, 0.0);
+        assert_eq!(np.symmetry_images(4.0, 3.0), vec![4.0, 3.0, -2.0, 3.0], "folded about x = 1");
+        assert!(np.centre_symmetry());
+        assert_eq!(np.symmetry_frame(), vec![2.0, 2.0, 0.0, 1.0]);
         np.set_smoothing(2.0);
         assert_eq!(np.smoothing(), 1.0);
         assert!(np.pressure_size());

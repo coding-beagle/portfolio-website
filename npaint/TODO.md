@@ -2,9 +2,7 @@ Sorted by priority (top = highest to bottom):
 
 # Features:
 
-Create webm's for demoing filters and adjustment layers, layer masks and layer clipping? How do we record the ones that take a while (e.g. median, etc?)
-
-Change mirror axis via ruler? UX requires thought
+Demos for layer masks and layer clipping. Both are gestures, so both want a recorded clip the way the tools do — see demos/README.md. (The filters and adjustments are done, and are not recordings: see adjusthelp.js.)
 
 Photo / Pixel Art / Vector mode split?
 

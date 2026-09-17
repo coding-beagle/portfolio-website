@@ -103,6 +103,36 @@ export class NPaint {
         }
     }
     /**
+     * One adjustment applied to a loose RGBA buffer, returned as new bytes.
+     *
+     * Nothing about the document is touched, which is what separates this
+     * from [`NPaint::preview_adjustment`]: it is for previews that are not
+     * the picture being edited — the demo strip in the hover card. Going
+     * through [`Adjustment`] like everything else is the point, so a demo
+     * cannot drift from what the menu item it describes actually does.
+     * @param {string} name
+     * @param {Float32Array} params
+     * @param {number} width
+     * @param {number} height
+     * @param {Uint8Array} bytes
+     * @returns {Uint8Array}
+     */
+    static adjust_rgba(name, params, width, height, bytes) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(params, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.npaint_adjust_rgba(ptr0, len0, ptr1, len1, width, height, ptr2, len2);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v4;
+    }
+    /**
      * @returns {string[]}
      */
     static adjustment_names() {
@@ -332,6 +362,14 @@ export class NPaint {
         return ret !== 0;
     }
     /**
+     * Puts the axes back at the centre of the canvas, square to it.
+     * @returns {boolean}
+     */
+    centre_symmetry() {
+        const ret = wasm.npaint_centre_symmetry(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Clicking the empty part of the panel: back to the active layer
      * alone. One layer is always active — the tools need something to
      * paint on — so this is as far as unselecting goes.
@@ -437,6 +475,26 @@ export class NPaint {
     commit_session() {
         const ret = wasm.npaint_commit_session(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * The whole flattened picture reduced to fit `w` by `h`, as RGBA bytes,
+     * with the result's own size returned ahead of the pixels as two `u32`s
+     * — the fit keeps the document's aspect, so the caller cannot work the
+     * size out from `w` and `h` alone.
+     *
+     * For previews of the picture as a whole, such as the demo in an
+     * adjustment's hover card. It composites the document to do it, so a
+     * caller that asks repeatedly should hold on to the answer until
+     * [`NPaint::document_state`] changes.
+     * @param {number} w
+     * @param {number} h
+     * @returns {Uint8Array}
+     */
+    composite_thumbnail(w, h) {
+        const ret = wasm.npaint_composite_thumbnail(this.__wbg_ptr, w, h);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
     }
     /**
      * `[width, height]` the canvas would need to hold everything, which is
@@ -872,6 +930,13 @@ export class NPaint {
      */
     is_adjusting() {
         const ret = wasm.npaint_is_adjusting(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_dragging_symmetry() {
+        const ret = wasm.npaint_is_dragging_symmetry(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -2409,15 +2474,27 @@ export class NPaint {
         wasm.npaint_set_snap(this.__wbg_ptr, on);
     }
     /**
-     * Paint symmetry: mirrors in the canvas's vertical and horizontal
-     * axes, and how many ways the stroke is turned about the centre (1
-     * for none).
+     * Paint symmetry: mirrors in each of the axes, and how many ways the
+     * stroke is turned about where they cross (1 for none). Where the axes
+     * are is left alone: it is set on its own.
      * @param {boolean} mirror_x
      * @param {boolean} mirror_y
      * @param {number} radial
      */
     set_symmetry(mirror_x, mirror_y, radial) {
         wasm.npaint_set_symmetry(this.__wbg_ptr, mirror_x, mirror_y, radial);
+    }
+    /**
+     * Puts the axes at a document position, turned `degrees`, as one undo
+     * step.
+     * @param {number} x
+     * @param {number} y
+     * @param {number} degrees
+     * @returns {boolean}
+     */
+    set_symmetry_frame(x, y, degrees) {
+        const ret = wasm.npaint_set_symmetry_frame(this.__wbg_ptr, x, y, degrees);
+        return ret !== 0;
     }
     /**
      * "left", "center" or "right".
@@ -2588,6 +2665,92 @@ export class NPaint {
         var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
+    }
+    /**
+     * Drags the gizmo; `free` is the modifier that suspends snapping.
+     * @param {number} x
+     * @param {number} y
+     * @param {boolean} free
+     * @returns {boolean}
+     */
+    symmetry_drag(x, y, free) {
+        const ret = wasm.npaint_symmetry_drag(this.__wbg_ptr, x, y, free);
+        return ret !== 0;
+    }
+    /**
+     * Where the symmetry axes cross and how far they are turned, as
+     * `[x, y, degrees, centred]` — document pixels, and 1 for axes still at
+     * the canvas centre and square to it.
+     * @returns {Float64Array}
+     */
+    symmetry_frame() {
+        const ret = wasm.npaint_symmetry_frame(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Takes hold of the gizmo. `place` is the page's placing mode, where a
+     * press anywhere on the picture brings the axes to the pointer.
+     * @param {number} x
+     * @param {number} y
+     * @param {boolean} place
+     * @returns {boolean}
+     */
+    symmetry_grab(x, y, place) {
+        const ret = wasm.npaint_symmetry_grab(this.__wbg_ptr, x, y, place);
+        return ret !== 0;
+    }
+    /**
+     * The gizmo's handles in screen pixels, `[origin_x, origin_y, arm_x,
+     * arm_y]`, or empty when no symmetry is on.
+     * @returns {Float64Array}
+     */
+    symmetry_handles() {
+        const ret = wasm.npaint_symmetry_handles(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * What the pointer would grab on the gizmo: `"origin"`, `"axis-x"`,
+     * `"axis-y"`, `"rotate"`, or empty for nothing.
+     * @param {number} x
+     * @param {number} y
+     * @returns {string}
+     */
+    symmetry_hit(x, y) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_symmetry_hit(this.__wbg_ptr, x, y);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Every place a screen position would be painted under the symmetry in
+     * hand, as `[x0, y0, x1, y1, ...]` in screen pixels.
+     * @param {number} x
+     * @param {number} y
+     * @returns {Float64Array}
+     */
+    symmetry_images(x, y) {
+        const ret = wasm.npaint_symmetry_images(this.__wbg_ptr, x, y);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Ends the drag, which becomes one undo step.
+     * @returns {boolean}
+     */
+    symmetry_release() {
+        const ret = wasm.npaint_symmetry_release(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * @returns {string}

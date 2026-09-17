@@ -3,6 +3,15 @@
 One silent, looping WebM per tool, shown in the card that appears when the
 pointer rests on a tool button.
 
+**Only the tools have clips.** The adjustments and filters get the same card,
+but nothing here: their demos are computed while you look at them, over the
+picture you have open — see `www/adjusthelp.js`. A tool has to be recorded
+because a gesture cannot be derived from code; an adjustment is a function of
+pixels and a few numbers, so recording one would cost bytes and a retake every
+time a default changed, and still could not show it acting on your own
+document. If you came here to record a filter, don't: give it a `demo` entry
+in `www/adjust.js` and look at the result with `?demos=1`.
+
 The filename is the tool's name as `ToolKind::name` gives it in
 `src/tools/mod.rs` — `brush.webm`, `ellipse-select.webm`, `quickselect.webm`.
 There is no manifest: a tool with a file here gets a clip, a tool without one

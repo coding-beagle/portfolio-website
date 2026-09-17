@@ -656,7 +656,7 @@ mod tests {
         rig.settings.opacity = 0.5;
         rig.settings.size = 5;
         // The canvas is 30x30, so the centre is (15,15).
-        rig.settings.symmetry = Symmetry { mirror_x: true, mirror_y: false, radial: 1 };
+        rig.settings.symmetry = Symmetry { mirror_x: true, ..Symmetry::default() };
         rig.stroke(&[(5.0, 10.0), (12.0, 10.0)]);
         assert_eq!(rig.px(8, 10).a, 128);
         assert_eq!(rig.px(22, 10).a, 128, "mirrored across x = 15");
@@ -665,14 +665,14 @@ mod tests {
         let mut rig = Rig::new(StrokeMode::Brush);
         rig.settings.opacity = 0.5;
         rig.settings.size = 5;
-        rig.settings.symmetry = Symmetry { mirror_x: true, mirror_y: true, radial: 1 };
+        rig.settings.symmetry = Symmetry { mirror_x: true, mirror_y: true, ..Symmetry::default() };
         // A stroke through the centre meets its own images there.
         rig.stroke(&[(5.0, 15.0), (25.0, 15.0)]);
         assert_eq!(rig.px(15, 15).a, 128, "where the copies overlap they do not compound");
         assert_eq!(rig.px(25, 15).a, 128);
 
         let mut rig = Rig::new(StrokeMode::Pencil);
-        rig.settings.symmetry = Symmetry { mirror_x: false, mirror_y: false, radial: 4 };
+        rig.settings.symmetry = Symmetry { radial: 4, ..Symmetry::default() };
         rig.stroke(&[(20.0, 15.0)]);
         for (x, y) in [(20, 15), (15, 20), (10, 15), (15, 10)] {
             assert_eq!(rig.px(x, y), RED, "({x},{y})");

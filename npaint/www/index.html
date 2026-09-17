@@ -39,7 +39,7 @@
           <input id="opt-hardness" type="range" min="0" max="100" value="100" />
           <output id="opt-hardness-out">100%</output>
         </label>
-        <label class="opt" id="opt-symmetry-wrap" title="Paint symmetry: every dab lands again mirrored, or turned about the centre of the canvas">
+        <label class="opt" id="opt-symmetry-wrap" title="Paint symmetry: every dab lands again mirrored, or turned about where the axes cross">
           <span>Symmetry</span>
           <select id="opt-symmetry">
             <option value="0,0,1">Off</option>
@@ -56,6 +56,24 @@
             <option value="1,0,12">Mandala ×12</option>
           </select>
         </label>
+        <div class="opt axes" id="opt-axes-wrap">
+          <button id="opt-axes-place" aria-pressed="false" title="Move the axes: drag them on the canvas, or press anywhere to bring them there (Shift while dragging ignores the guides)">
+            Place axes
+          </button>
+          <label title="Where the axes cross, in document pixels">
+            <span>X</span>
+            <input id="opt-axes-x" type="number" step="0.5" />
+          </label>
+          <label title="Where the axes cross, in document pixels">
+            <span>Y</span>
+            <input id="opt-axes-y" type="number" step="0.5" />
+          </label>
+          <label title="How far the axes are turned from the canvas's own">
+            <span>Angle</span>
+            <input id="opt-axes-angle" type="number" step="15" min="-180" max="180" />
+          </label>
+          <button id="opt-axes-centre" title="Put the axes back at the centre of the canvas, square to it">Centre</button>
+        </div>
         <label class="opt" id="opt-smoothing-wrap" title="Steadies the hand: the brush trails the pointer and rounds off its jitter">
           <span>Smoothing</span>
           <input id="opt-smoothing" type="range" min="0" max="100" value="0" />

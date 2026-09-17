@@ -11,7 +11,7 @@ use crate::autoselect::{mask_from_matte, select_subject, ColorSet};
 use crate::blend::BlendMode;
 use crate::checker;
 use crate::color::Rgba;
-use crate::document::{Document, DocumentError, Drop};
+use crate::document::{canvas_turn, Document, DocumentError, Drop};
 use crate::file::{self, FileError};
 use crate::geometry::{Point, Rect};
 use crate::history::{Aside, History, Snapshot};
@@ -22,12 +22,29 @@ use crate::selection::Selection;
 use crate::snap::Snap;
 use crate::text::TextObject;
 use crate::tools::movetool::{drag_offset, split_for_move, Split};
-use crate::tools::{sample_color, Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
+use crate::tools::{
+    sample_color, Gesture, PointerEvent, SymmetryFrame, SymmetryHit, Tool, ToolContext, ToolKind,
+    ToolSettings,
+};
 use crate::transform::{Affine, Hit, Projective, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
 
 /// How close to a transform handle counts as grabbing it, in screen pixels.
 pub const HANDLE_GRAB_PX: f64 = 8.0;
+
+/// How far out from the crossing point the arm that turns the symmetry axes
+/// sits, in screen pixels: far enough that the turn is not all wrist, near
+/// enough to stay on screen at any zoom.
+pub const ROTATE_ARM_PX: f64 = 64.0;
+
+/// The angles the symmetry axes settle on while snapping is on, in degrees.
+pub const SYMMETRY_ANGLE_STEP: f64 = 15.0;
+
+/// An angle held to [`SYMMETRY_ANGLE_STEP`].
+fn snap_angle(radians: f64) -> f64 {
+    let step = SYMMETRY_ANGLE_STEP.to_radians();
+    (radians / step).round() * step
+}
 
 /// The most a preview may be shrunk, however far out the canvas is zoomed.
 const MAX_PREVIEW_STEP: u32 = 16;
@@ -139,6 +156,22 @@ struct ReducedGesture {
     /// selection and an alpha lock hold the preview against, the way
     /// [`Editor::gesture_base`] does at full size.
     base: Raster,
+}
+
+/// A drag of the symmetry gizmo: what it has hold of, and enough to put the
+/// axes back where they were, both for the pointer's grip on them and for
+/// the one undo step the whole drag becomes.
+#[derive(Clone, Copy, Debug)]
+struct SymmetryDrag {
+    hit: SymmetryHit,
+    /// The axes as the drag began.
+    before: SymmetryFrame,
+    /// Where the crossing point is from the pointer, in frame coordinates,
+    /// so a grab near the edge of a handle does not snap it to the pointer.
+    offset: Point,
+    /// The angle from the crossing point to the pointer when a turn began,
+    /// taken off every angle since.
+    arm: f64,
 }
 
 /// A live edit that the page previews and then commits or cancels: an
@@ -327,6 +360,8 @@ pub struct Editor {
     /// What the last Copy or Cut took. Outlives the document, so a picture
     /// can be carried into a new one.
     clipboard: Option<Clip>,
+    /// The symmetry gizmo's drag, while one is under way.
+    symmetry_drag: Option<SymmetryDrag>,
     /// Whether the composite the page last rendered is stale.
 /// The part of the composite that has changed since the page last drew,
     /// or `None` when nothing has. A rectangle rather than a flag because a
@@ -361,6 +396,7 @@ impl Editor {
             gesture_base: None,
             gesture_aside: None,
             clipboard: None,
+            symmetry_drag: None,
             dirty: Some(Rect::new(0, 0, width as i32, height as i32)),
         }
     }
@@ -396,7 +432,7 @@ impl Editor {
         self.cancel_session();
         self.abort_gesture();
         self.history.mark_saved();
-        file::save(&self.document, &self.settings.guides)
+        file::save(&self.document, &self.settings.guides, self.settings.symmetry.frame)
     }
 
     /// A number that changes whenever the document does, and comes back to
@@ -425,7 +461,7 @@ impl Editor {
     pub fn snapshot_document(&mut self) -> Vec<u8> {
         self.cancel_session();
         self.abort_gesture();
-        file::save(&self.document, &self.settings.guides)
+        file::save(&self.document, &self.settings.guides, self.settings.symmetry.frame)
     }
 
     /// The document as a Photoshop file, for taking the work somewhere
@@ -463,10 +499,11 @@ impl Editor {
 
     /// Opens an NPaint file, replacing the document and the guides.
     pub fn open_document(&mut self, bytes: &[u8]) -> Result<(), FileError> {
-        let (document, guides) = file::load(bytes)?;
+        let (document, guides, symmetry) = file::load(bytes)?;
         self.replace_document(document);
         self.settings.guides.h = guides.h;
         self.settings.guides.v = guides.v;
+        self.settings.symmetry.frame = symmetry;
         Ok(())
     }
 
@@ -1231,12 +1268,14 @@ impl Editor {
 
     // ---- History -----------------------------------------------------------
 
-    /// The selection and guides as they stand, for a step to carry.
+    /// The selection, guides and symmetry axes as they stand, for a step to
+    /// carry.
     fn aside(&self) -> Aside {
         Aside {
             selection: self.selection.clone(),
             guides_h: self.settings.guides.h.clone(),
             guides_v: self.settings.guides.v.clone(),
+            symmetry: self.settings.symmetry.frame,
         }
     }
 
@@ -1274,6 +1313,7 @@ impl Editor {
             self.selection = aside.selection;
             self.settings.guides.h = aside.guides_h;
             self.settings.guides.v = aside.guides_v;
+            self.settings.symmetry.frame = aside.symmetry;
             self.touch_all();
         }
         done
@@ -1300,6 +1340,184 @@ impl Editor {
         self.settings.guides.h = h;
         self.settings.guides.v = v;
         true
+    }
+
+    // ---- Symmetry ----------------------------------------------------------------
+
+    /// The canvas centre, which is where the symmetry axes cross until they
+    /// are put somewhere else.
+    fn canvas_centre(&self) -> Point {
+        let b = self.document.bounds();
+        Point::new(f64::from(b.w) / 2.0, f64::from(b.h) / 2.0)
+    }
+
+    /// Where the symmetry axes cross and how far they are turned, with the
+    /// canvas centre filled in for axes that have never been placed.
+    pub fn symmetry_frame(&self) -> (Point, f64) {
+        let s = self.settings.symmetry;
+        (s.origin(self.canvas_centre()), s.frame.angle)
+    }
+
+    /// Whether the axes are still at the canvas centre, square to it — what
+    /// the page's "Centre Axes" command undoes back to.
+    pub fn symmetry_is_centred(&self) -> bool {
+        self.settings.symmetry.frame == SymmetryFrame::default()
+    }
+
+    /// Puts the axes somewhere, as one undo step. The origin is held to a
+    /// half pixel ([`crate::tools::ORIGIN_STEP`]) and the angle folded into
+    /// a half turn, so that setting the same place twice records nothing.
+    pub fn set_symmetry_frame(&mut self, frame: SymmetryFrame) -> bool {
+        let frame = frame.tidied();
+        if self.settings.symmetry.frame == frame {
+            return false;
+        }
+        let label = if frame == SymmetryFrame::default() { "Centre Axes" } else { "Symmetry Axes" };
+        self.record(Snapshot::Nothing, label);
+        self.settings.symmetry.frame = frame;
+        true
+    }
+
+    /// Puts the axes back at the centre of the canvas, square to it.
+    pub fn centre_symmetry(&mut self) -> bool {
+        self.set_symmetry_frame(SymmetryFrame::default())
+    }
+
+    /// The gizmo's two drawn handles in screen space: where the axes cross,
+    /// and the arm that turns them. Empty when there is no symmetry on.
+    pub fn symmetry_handles(&self) -> Option<(Point, Point)> {
+        let s = self.settings.symmetry;
+        if s.is_off() {
+            return None;
+        }
+        let centre = self.canvas_centre();
+        let arm = s.rotate_handle(centre, ROTATE_ARM_PX / self.viewport.zoom());
+        Some((self.viewport.doc_to_screen(s.origin(centre)), self.viewport.doc_to_screen(arm)))
+    }
+
+    /// What the pointer would grab on the gizmo at a screen position.
+    pub fn symmetry_hit(&self, screen: Point) -> Option<SymmetryHit> {
+        let zoom = self.viewport.zoom();
+        self.settings.symmetry.hit(
+            self.viewport.screen_to_doc(screen),
+            self.canvas_centre(),
+            ROTATE_ARM_PX / zoom,
+            HANDLE_GRAB_PX / zoom,
+        )
+    }
+
+    /// Takes hold of whatever the gizmo offers at a screen position. The
+    /// grab remembers where within the handle the pointer landed, so the
+    /// axes do not jump to the pointer as the drag starts.
+    ///
+    /// `place` is the page in its placing mode, where a press on the picture
+    /// itself takes the crossing point straight to the pointer rather than
+    /// asking anyone to find a dot first.
+    pub fn symmetry_grab(&mut self, screen: Point, place: bool) -> bool {
+        let s = self.settings.symmetry;
+        let held = self.symmetry_hit(screen);
+        let hit = match held {
+            Some(hit) => hit,
+            None if place && !s.is_off() => SymmetryHit::Origin,
+            None => return false,
+        };
+        let f = s.to_frame(self.viewport.screen_to_doc(screen), self.canvas_centre());
+        // A grab of a handle keeps the pointer where it landed on it; a
+        // fresh placement has nothing to keep and comes to the pointer.
+        let offset = if held.is_some() { Point::new(-f.x, -f.y) } else { Point::default() };
+        self.symmetry_drag = Some(SymmetryDrag { hit, before: s.frame, offset, arm: f.y.atan2(f.x) });
+        true
+    }
+
+    /// Drags the gizmo. `free` is the modifier that turns the snapping off:
+    /// without it the crossing point is pulled onto guides, the canvas edges
+    /// and its centre, and the angle onto multiples of
+    /// [`SYMMETRY_ANGLE_STEP`]. The half-pixel rule is not a preference and
+    /// applies either way.
+    pub fn symmetry_drag(&mut self, screen: Point, free: bool) -> bool {
+        let Some(drag) = self.symmetry_drag else { return false };
+        let centre = self.canvas_centre();
+        let p = self.viewport.screen_to_doc(screen);
+        let s = self.settings.symmetry;
+        let frame = match drag.hit {
+            SymmetryHit::Rotate => {
+                let turned = (p.y - s.origin(centre).y).atan2(p.x - s.origin(centre).x) - drag.arm;
+                let angle = if free { turned } else { snap_angle(turned) };
+                SymmetryFrame { angle, ..s.frame }
+            }
+            hit => {
+                // The pointer carries the handle it grabbed, so the origin
+                // is wherever that handle's own position would put it.
+                let mut origin = s.from_frame(drag.offset, centre);
+                origin = Point::new(origin.x + p.x - s.origin(centre).x, origin.y + p.y - s.origin(centre).y);
+                if !free {
+                    if let Some(snap) = Snap::new(&self.settings.guides, self.document.bounds(), self.viewport.zoom()) {
+                        origin = snap.point(origin);
+                    }
+                }
+                // A mirror line only moves across itself: sliding it along
+                // its own length would move nothing but would drag the other
+                // axis off the place it was put.
+                let along = match hit {
+                    SymmetryHit::AxisX => Some(Point::new(1.0, 0.0)),
+                    SymmetryHit::AxisY => Some(Point::new(0.0, 1.0)),
+                    _ => None,
+                };
+                if let Some(axis) = along {
+                    let was = s.origin(centre);
+                    let (sa, ca) = s.frame.angle.sin_cos();
+                    let dir = Point::new(axis.x * ca - axis.y * sa, axis.x * sa + axis.y * ca);
+                    let travel = (origin.x - was.x) * dir.x + (origin.y - was.y) * dir.y;
+                    origin = Point::new(was.x + dir.x * travel, was.y + dir.y * travel);
+                }
+                SymmetryFrame { origin: Some(origin), ..s.frame }
+            }
+        };
+        let frame = frame.tidied();
+        if self.settings.symmetry.frame == frame {
+            return false;
+        }
+        self.settings.symmetry.frame = frame;
+        true
+    }
+
+    /// Ends the drag, recording the whole of it as one undo step. False when
+    /// the axes came back to where they started.
+    pub fn symmetry_release(&mut self) -> bool {
+        let Some(drag) = self.symmetry_drag.take() else { return false };
+        let now = self.settings.symmetry.frame;
+        if now == drag.before {
+            return false;
+        }
+        // The drag has already moved them; the step has to hold where they
+        // were, so put them back to record it.
+        self.settings.symmetry.frame = drag.before;
+        self.set_symmetry_frame(now)
+    }
+
+    pub fn is_dragging_symmetry(&self) -> bool {
+        self.symmetry_drag.is_some()
+    }
+
+    /// Every place a screen position would be painted under the symmetry in
+    /// hand, in screen pixels — the brush ring, drawn once per image.
+    pub fn symmetry_images(&self, screen: Point) -> Vec<Point> {
+        let p = self.viewport.screen_to_doc(screen);
+        self.settings
+            .symmetry
+            .images(p, self.canvas_centre())
+            .into_iter()
+            .map(|q| self.viewport.doc_to_screen(q))
+            .collect()
+    }
+
+    /// Carries placed axes through a change to the canvas, so they stay on
+    /// the same part of the picture. Axes left at the centre need nothing:
+    /// the centre is worked out afresh every time they are used.
+    fn remap_symmetry(&mut self, place: impl FnOnce(Point) -> Point, turn: impl FnOnce(f64) -> f64) {
+        let frame = self.settings.symmetry.frame;
+        self.settings.symmetry.frame =
+            SymmetryFrame { origin: frame.origin.map(place), angle: turn(frame.angle) }.tidied();
     }
 
     /// Every step the history holds, oldest first, done and undone alike;
@@ -2060,11 +2278,14 @@ impl Editor {
     // ---- Canvas (every layer, undoable) -----------------------------------------
 
     pub fn rotate_canvas(&mut self, turns: i32) {
+        let turn = canvas_turn(self.document.width(), self.document.height(), turns);
         self.structural("Rotate Canvas", |d| {
             d.rotate_canvas(turns);
             Ok(())
         })
         .expect("rotating cannot fail");
+        let quarter = std::f64::consts::FRAC_PI_2 * f64::from(turns);
+        self.remap_symmetry(|p| turn.apply(p), |a| a + quarter);
         // The canvas changed shape, so a selection in the old coordinates is
         // meaningless.
         self.selection = Selection::None;
@@ -2089,6 +2310,8 @@ impl Editor {
             Ok(())
         })
         .expect("resizing cannot fail");
+        let (dx, dy) = (f64::from(dx), f64::from(dy));
+        self.remap_symmetry(|p| Point::new(p.x + dx, p.y + dy), |a| a);
         self.selection = Selection::None;
         true
     }
@@ -2126,29 +2349,40 @@ impl Editor {
         if width == self.document.width() && height == self.document.height() {
             return false;
         }
+        let (sx, sy) = (
+            f64::from(width) / f64::from(self.document.width()),
+            f64::from(height) / f64::from(self.document.height()),
+        );
         self.structural("Image Size", |d| {
             d.resample(width, height);
             Ok(())
         })
         .expect("resampling cannot fail");
+        self.remap_symmetry(|p| Point::new(p.x * sx, p.y * sy), |a| a);
         self.selection = Selection::None;
         true
     }
 
     pub fn flip_canvas_horizontal(&mut self) {
+        let w = f64::from(self.document.width());
         self.structural("Flip Canvas", |d| {
             d.flip_canvas_horizontal();
             Ok(())
         })
         .expect("flipping cannot fail");
+        // The picture is reflected, so the axes are too: the crossing point
+        // lands across the canvas and the frame leans the other way.
+        self.remap_symmetry(|p| Point::new(w - p.x, p.y), |a| -a);
     }
 
     pub fn flip_canvas_vertical(&mut self) {
+        let h = f64::from(self.document.height());
         self.structural("Flip Canvas", |d| {
             d.flip_canvas_vertical();
             Ok(())
         })
         .expect("flipping cannot fail");
+        self.remap_symmetry(|p| Point::new(p.x, h - p.y), |a| -a);
     }
 
     pub fn flatten(&mut self) {
@@ -3039,6 +3273,7 @@ fn selection_raster(selection: &Selection, bounds: Rect) -> Raster {
 mod tests {
     use super::*;
     use crate::adjust::Kind;
+    use crate::tools::Symmetry;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
 
@@ -5168,6 +5403,100 @@ mod tests {
         assert!(e.selection().contains(20, 20));
         assert!(!e.selection().contains(16, 16));
         assert!(!e.select_subject_builtin_in_box(Rect::new(0, 0, 10, 10), SelectMode::Replace), "plain white: nothing");
+    }
+
+    #[test]
+    fn dragging_the_symmetry_gizmo_moves_the_axes_and_is_one_undo_step() {
+        let mut e = Editor::new(100, 100, Rgba::WHITE);
+        e.settings_mut().symmetry = Symmetry { mirror_x: true, ..Symmetry::default() };
+        assert!(e.symmetry_is_centred());
+        assert_eq!(e.symmetry_frame().0, Point::new(50.0, 50.0), "until placed, the canvas centre");
+
+        // Nothing to grab out in the picture; the crossing point is there.
+        assert_eq!(e.symmetry_hit(Point::new(80.0, 80.0)), None);
+        assert!(e.symmetry_grab(Point::new(50.0, 50.0), false));
+        assert!(e.symmetry_drag(Point::new(70.0, 30.0), true));
+        assert_eq!(e.symmetry_frame().0, Point::new(70.0, 30.0));
+        let steps = e.history_labels().len();
+        assert!(e.symmetry_release());
+        assert_eq!(e.history_labels().len(), steps + 1, "the whole drag is one step");
+        assert_eq!(e.history_labels().last().unwrap(), "Symmetry Axes");
+
+        assert!(e.undo());
+        assert!(e.symmetry_is_centred(), "undo puts the axes back");
+        assert!(e.redo());
+        assert_eq!(e.symmetry_frame().0, Point::new(70.0, 30.0));
+
+        // The mirror line itself only travels across itself: dragging it
+        // sideways leaves the other coordinate where it was put.
+        assert_eq!(e.symmetry_hit(Point::new(70.0, 90.0)), Some(SymmetryHit::AxisX));
+        assert!(e.symmetry_grab(Point::new(70.0, 90.0), false));
+        assert!(e.symmetry_drag(Point::new(20.0, 10.0), true));
+        assert_eq!(e.symmetry_frame().0, Point::new(20.0, 30.0));
+        e.symmetry_release();
+
+        // While the page is placing them, a press out in the picture brings
+        // the axes there rather than doing nothing.
+        assert!(!e.symmetry_grab(Point::new(80.0, 80.0), false));
+        assert!(e.symmetry_grab(Point::new(80.0, 80.0), true));
+        assert!(e.symmetry_drag(Point::new(80.0, 80.0), true));
+        assert_eq!(e.symmetry_frame().0, Point::new(80.0, 80.0));
+        e.symmetry_release();
+    }
+
+    #[test]
+    fn a_placed_origin_is_held_to_half_pixels() {
+        let mut e = Editor::new(100, 100, Rgba::WHITE);
+        e.settings_mut().symmetry = Symmetry { mirror_x: true, ..Symmetry::default() };
+        e.symmetry_grab(Point::new(50.0, 50.0), false);
+        e.symmetry_drag(Point::new(30.4, 20.9), true);
+        // Anywhere else and a mirrored stroke would land half a pixel out.
+        assert_eq!(e.symmetry_frame().0, Point::new(30.5, 21.0));
+    }
+
+    #[test]
+    fn turning_the_gizmo_settles_on_the_step_unless_it_is_let_free() {
+        let mut e = Editor::new(100, 100, Rgba::WHITE);
+        e.settings_mut().symmetry = Symmetry { mirror_x: true, ..Symmetry::default() };
+        let arm = Point::new(50.0 + ROTATE_ARM_PX, 50.0);
+        assert_eq!(e.symmetry_hit(arm), Some(SymmetryHit::Rotate));
+        assert!(e.symmetry_grab(arm, false));
+        // Twenty degrees round, which snapping rounds to fifteen.
+        let twenty = 20.0_f64.to_radians();
+        let at = Point::new(50.0 + 60.0 * twenty.cos(), 50.0 + 60.0 * twenty.sin());
+        assert!(e.symmetry_drag(at, false));
+        assert!((e.symmetry_frame().1.to_degrees() - SYMMETRY_ANGLE_STEP).abs() < 1e-9);
+        assert!(e.symmetry_drag(at, true));
+        assert!((e.symmetry_frame().1.to_degrees() - 20.0).abs() < 1e-9, "free of the step");
+    }
+
+    #[test]
+    fn placed_axes_follow_the_canvas_through_a_crop_a_flip_and_a_turn() {
+        let mut e = Editor::new(100, 60, Rgba::WHITE);
+        e.settings_mut().symmetry = Symmetry { mirror_x: true, ..Symmetry::default() };
+        e.set_symmetry_frame(SymmetryFrame { origin: Some(Point::new(20.0, 10.0)), angle: 0.0 });
+
+        e.set_tool(ToolKind::Crop);
+        e.pointer_down(Point::new(10.0, 5.0), false, false);
+        e.pointer_up(Point::new(60.0, 45.0), false, false);
+        assert!(e.crop_to_selection());
+        assert_eq!(e.symmetry_frame().0, Point::new(10.0, 5.0), "the axes stay on the same pixels");
+
+        e.flip_canvas_horizontal();
+        assert_eq!(e.symmetry_frame().0, Point::new(40.0, 5.0));
+
+        e.rotate_canvas(1);
+        // A quarter turn clockwise on a 50x40 canvas takes (40, 5) to
+        // (40 - 5, 40), and the axes turn with it.
+        assert_eq!(e.symmetry_frame().0, Point::new(35.0, 40.0));
+        assert!((e.symmetry_frame().1.to_degrees() - 90.0).abs() < 1e-9);
+
+        // Axes left at the centre are not carried anywhere: the centre is
+        // worked out afresh from whatever the canvas has become.
+        e.centre_symmetry();
+        assert!(e.resize_canvas(80, 80, 10, 10));
+        assert_eq!(e.symmetry_frame().0, Point::new(40.0, 40.0));
+        assert!(e.symmetry_is_centred());
     }
 
     #[test]
