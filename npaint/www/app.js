@@ -68,7 +68,7 @@ const TOOLS = [
     name: "crop",
     label: "Crop",
     key: "C",
-    hint: "Drag out the area to keep, then press Enter or click Crop. Esc clears the box.",
+    hint: "Drag out the area to keep; letting go crops to it. Esc clears the box.",
   },
   {
     name: "wand",
@@ -1629,10 +1629,16 @@ function syncCropBar() {
 }
 
 function cropToSelection() {
+  const rect = np.selection_rect();
+  const zoom = np.zoom();
   act(() => {
     if (!np.crop_to_selection()) message("Drag out the area to keep first.");
     else {
-      fit();
+      // The kept pixels moved to the canvas origin, so leaving the pan alone
+      // would slide them across the screen by where the box started. Moving
+      // the origin the other way leaves the picture exactly where it was,
+      // still at the zoom the crop was judged at.
+      np.pan_by(rect[0] * zoom, rect[1] * zoom);
       message(`Cropped to ${np.width()} × ${np.height()} px.`);
     }
   });
@@ -4576,6 +4582,10 @@ function bindPointer() {
         historyDirty = true;
       }
       if (tool === "subject") finishSubjectBox();
+      // Letting go of a crop box is the whole gesture: the box is the answer,
+      // so there is nothing to confirm afterwards. A click that only clears
+      // the box leaves nothing to crop to, and is left alone.
+      if (tool === "crop" && hasSelection()) cropToSelection();
     }
   };
   view.addEventListener("pointerup", end);

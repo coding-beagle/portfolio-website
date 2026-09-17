@@ -472,6 +472,18 @@ tool, so that what is shown and where it lands cannot drift apart. The scale
 is frozen for as long as a drag is showing on the copy, since rebuilding it
 would take the document's own pixels, which are still where the drag began.
 
+The gradient has the same shape of problem from the other direction: it
+repaints its whole clip on every pointer event, so a drag costs a fill of
+the canvas each time however small the pointer moved. It takes the same way
+out through `Editor::hold_reduced_gesture` and `draw_on_the_copy`, which
+hand the tool the reduced document and the event divided by the step, then
+hold the copy's edges the way `enforce_limits` holds the document's. On
+release the copy is dropped and the drag is replayed once at full size as a
+`begin`/`finish` pair from where it started to where it ended — which is why
+`ToolKind::previews_on_the_reduced_copy` is a predicate rather than a flag
+on every tool: only a gesture decided by its two ends can be replayed like
+that. A stroke, whose path is the gesture, cannot.
+
 A placement that is only a shift by whole pixels resamples to exactly the
 pixels it started with, so `TransformSession::render_into` copies them
 instead — which is what dragging a placed picture is, and what took a 4K

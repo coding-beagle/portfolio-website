@@ -120,6 +120,21 @@ struct ReducedMove {
     bounds: Option<Rect>,
 }
 
+/// A drag shown on the reduced copy for a tool that repaints its whole clip
+/// on every pointer event. The document itself is not touched until the
+/// pointer comes up, when the same gesture is handed to the tool once at
+/// full size. See [`ToolKind::previews_on_the_reduced_copy`].
+struct ReducedGesture {
+    /// Where the drag began, in full-size document pixels, so that the
+    /// replay on release starts exactly where the preview did.
+    start: Point,
+    step: u32,
+    /// The edited layer's reduced pixels as the drag began: what a ragged
+    /// selection and an alpha lock hold the preview against, the way
+    /// [`Editor::gesture_base`] does at full size.
+    base: Raster,
+}
+
 /// A live edit that the page previews and then commits or cancels: an
 /// adjustment dialog, an adjustment layer's dialog, a free transform of the
 /// active layer, or a free transform of the selection outline. Only one can
@@ -279,6 +294,8 @@ pub struct Editor {
     transform_small: Option<TransformSession>,
     /// The move tool's drag, while it is being shown on the reduced copy.
     reduced_move: Option<ReducedMove>,
+    /// A whole-clip tool's drag, while it is being shown on the reduced copy.
+    reduced_gesture: Option<ReducedGesture>,
     /// The pen pressure the next pointer event carries. See
     /// [`Editor::set_pressure`].
     pressure: f64,
@@ -321,6 +338,7 @@ impl Editor {
             transform_shown: None,
             transform_small: None,
             reduced_move: None,
+            reduced_gesture: None,
             pressure: 1.0,
             gesture_base: None,
             gesture_aside: None,
@@ -510,7 +528,7 @@ impl Editor {
     /// Whether a drag is being shown on the reduced copy rather than on the
     /// document itself.
     fn drag_on_the_copy(&self) -> bool {
-        self.transform_small.is_some() || self.reduced_move.is_some()
+        self.transform_small.is_some() || self.reduced_move.is_some() || self.reduced_gesture.is_some()
     }
 
     /// Holds a reduced copy of the document for a transform to draw its drag
@@ -565,6 +583,61 @@ impl Editor {
             let surface = small.document.active_surface_mut();
             surface.copy_from(&drag.stationary, &clip);
             surface.merge_translated_in(&drag.moving, dx / step, dy / step, &clip);
+        }
+        self.touch_all();
+        true
+    }
+
+    /// Starts a whole-clip tool's drag on the reduced copy. False when no
+    /// reduced copy could be held, and the drag runs on the document as usual.
+    fn hold_reduced_gesture(&mut self, ev: PointerEvent) -> bool {
+        self.hold_preview_base(self.document.active_index());
+        let Some(small) = self.preview_base.as_ref().and_then(|b| b.small.as_ref()) else {
+            self.preview_base = None;
+            return false;
+        };
+        let base = small.document.active_surface().clone();
+        self.reduced_gesture = Some(ReducedGesture { start: ev.pos, step: small.step, base });
+        self.draw_on_the_copy(ev, true);
+        true
+    }
+
+    /// Hands the tool the reduced copy and the event in its coordinates, so
+    /// that a gradient at a quarter zoom fills a sixteenth of the pixels.
+    /// `begin` opens the gesture there; otherwise it is carried on.
+    fn draw_on_the_copy(&mut self, ev: PointerEvent, begin: bool) -> bool {
+        let Some(drag) = self.reduced_gesture.as_ref() else { return false };
+        let scale = f64::from(drag.step);
+        let base = &drag.base;
+        let confined = self.tool.kind().confined_to_selection();
+        let Some(small) = self.preview_base.as_mut().and_then(|b| b.small.as_mut()) else { return false };
+        let SmallPreview { document, selection, .. } = small;
+        let scaled = PointerEvent { pos: Point::new(ev.pos.x / scale, ev.pos.y / scale), ..ev };
+        let mut ctx = ToolContext {
+            document,
+            selection,
+            viewport: &mut self.viewport,
+            settings: &mut self.settings,
+        };
+        let changed = if begin {
+            self.tool.begin(&mut ctx, scaled) == Gesture::EditsActiveLayer
+        } else {
+            self.tool.update(&mut ctx, scaled)
+        };
+        if !changed {
+            return false;
+        }
+        // The same limits the document itself would keep: outside a mask
+        // selection, and the transparency of an alpha-locked layer, are the
+        // pixels the drag began with. See [`Editor::enforce_limits`].
+        let keeps_alpha = document.active_layer().keeps_alpha();
+        if confined && (selection.needs_base() || keeps_alpha) {
+            let all = document.bounds();
+            let raster = document.active_surface_mut();
+            selection.apply(raster, base, &all);
+            if keeps_alpha {
+                keep_alpha(raster, base, &all);
+            }
         }
         self.touch_all();
         true
@@ -800,6 +873,11 @@ impl Editor {
                 return true;
             }
         }
+        if self.tool.kind().previews_on_the_reduced_copy() && self.preview_step() > 1 && self.hold_reduced_gesture(ev) {
+            self.record(snapshot, self.tool.kind().label());
+            self.gesture = Some(Gesture::EditsActiveLayer);
+            return true;
+        }
         let mut ctx = ToolContext {
             document: &mut self.document,
             selection: &mut self.selection,
@@ -841,6 +919,9 @@ impl Editor {
         }
         if self.reduced_move.is_some() {
             return self.move_on_the_copy(ev.pos);
+        }
+        if self.reduced_gesture.is_some() {
+            return self.draw_on_the_copy(ev, false);
         }
         if self.gesture.is_none() {
             return false;
@@ -891,6 +972,29 @@ impl Editor {
             };
             self.tool.begin(&mut ctx, from);
             let changed = self.tool.finish(&mut ctx, to);
+            self.gesture = None;
+            self.touch_all();
+            return changed;
+        }
+        if let Some(reduced) = self.reduced_gesture.take() {
+            // Back to the document, which the drag never touched: the same
+            // gesture, handed to the tool once, from where it began to here.
+            self.preview_base = None;
+            let to = self.event(screen, shift, alt);
+            let from = PointerEvent { pos: reduced.start, screen: self.viewport.doc_to_screen(reduced.start), ..to };
+            let mut ctx = ToolContext {
+                document: &mut self.document,
+                selection: &mut self.selection,
+                viewport: &mut self.viewport,
+                settings: &mut self.settings,
+            };
+            self.tool.begin(&mut ctx, from);
+            let changed = self.tool.finish(&mut ctx, to);
+            let touched = self.tool_dirtied();
+            if changed {
+                self.enforce_limits(touched);
+            }
+            self.gesture_base = None;
             self.gesture = None;
             self.touch_all();
             return changed;
@@ -967,6 +1071,25 @@ impl Editor {
         if self.reduced_move.take().is_some() {
             self.preview_base = None;
             self.gesture = None;
+            self.history.discard_last();
+            self.touch_all();
+            return true;
+        }
+        if self.reduced_gesture.take().is_some() {
+            // The tool's own state lives on the copy that is about to go, so
+            // it is told to let go before the copy does.
+            if let Some(small) = self.preview_base.as_mut().and_then(|b| b.small.as_mut()) {
+                let mut ctx = ToolContext {
+                    document: &mut small.document,
+                    selection: &mut small.selection,
+                    viewport: &mut self.viewport,
+                    settings: &mut self.settings,
+                };
+                self.tool.cancel(&mut ctx);
+            }
+            self.preview_base = None;
+            self.gesture = None;
+            self.gesture_base = None;
             self.history.discard_last();
             self.touch_all();
             return true;
@@ -3934,6 +4057,48 @@ mod tests {
         assert!(e.document().active_layer().is_smart(), "still a smart object");
         assert!(e.undo());
         assert_eq!(px(&e, 4, 20), RED, "and one undo step puts it back");
+    }
+
+    #[test]
+    fn zoomed_out_a_gradient_drag_is_laid_down_on_the_reduced_copy() {
+        // A gradient repaints its whole clip on every pointer event, so
+        // zoomed out the drag runs on the copy and the document is filled
+        // once, by the tool, when the pointer comes up.
+        let mut e = Editor::new(64, 64, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().background = Rgba::opaque(0, 0, 255);
+        e.set_zoom_about(0.25, Point::new(0.0, 0.0));
+        let before = e.document().active_surface().clone();
+
+        e.set_tool(ToolKind::Gradient);
+        assert!(e.pointer_down(Point::new(0.0, 0.0), false, false));
+        assert!(e.pointer_move(Point::new(15.75, 0.0), false, false, false));
+        assert_eq!(e.preview_size(), Some([16, 16, 4]), "the copy is a quarter on a side");
+        assert_eq!(e.document().active_surface(), &before, "the document itself is untouched");
+
+        let mut shown = Raster::new(16, 16);
+        assert_eq!(e.preview_into(&mut shown), Some(true));
+        assert!(shown.get(0, 0).r > 240, "the first colour at the start of the run");
+        assert!(shown.get(15, 0).b > 240, "the second at the end");
+
+        e.pointer_up(Point::new(15.75, 0.0), false, false);
+        assert_eq!(e.preview_size(), None, "back to the frame");
+        assert!(px(&e, 0, 0).r > 240, "and the document holds the same run at full size");
+        assert!(px(&e, 63, 0).b > 240);
+
+        // Abandoning a drag leaves nothing behind: the document was never
+        // drawn on, so dropping the copy is the whole of putting it back.
+        let steps = e.history_labels().len();
+        let filled = e.document().active_surface().clone();
+        e.pointer_down(Point::new(0.0, 15.75), false, false);
+        e.pointer_move(Point::new(15.75, 15.75), false, false, false);
+        assert!(e.cancel_gesture());
+        assert_eq!(e.preview_size(), None);
+        assert_eq!(e.document().active_surface(), &filled, "the drag before it is untouched");
+        assert_eq!(e.history_labels().len(), steps, "and no step was kept");
+
+        assert!(e.undo());
+        assert_eq!(e.document().active_surface(), &before, "the gradient was one undo step");
     }
 
     #[test]

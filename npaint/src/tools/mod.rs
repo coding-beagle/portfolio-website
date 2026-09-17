@@ -190,6 +190,17 @@ impl ToolKind {
         self.edits_pixels() && self != ToolKind::Move
     }
 
+    /// Whether a drag with this tool can be shown on the reduced copy while
+    /// the canvas is zoomed out. The gradient repaints the whole clip on
+    /// every pointer event and has no small dirty rectangle to save it, so
+    /// at a quarter zoom a drag costs sixteen times what the screen shows.
+    /// A tool qualifies only if its gesture is decided by where it began and
+    /// where the pointer is now, since the drag is replayed on release as
+    /// one `begin`/`finish` pair against the document itself.
+    pub fn previews_on_the_reduced_copy(self) -> bool {
+        self == ToolKind::Gradient
+    }
+
     pub fn from_name(name: &str) -> Option<ToolKind> {
         ToolKind::ALL.iter().copied().find(|k| k.name() == name)
     }
