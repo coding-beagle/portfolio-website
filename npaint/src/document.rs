@@ -42,7 +42,7 @@ use std::ops::Range;
 use crate::mask::Mask;
 use crate::raster::Raster;
 use crate::text::TextObject;
-use crate::transform::Affine;
+use crate::transform::{Affine, Projective};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
@@ -140,7 +140,7 @@ impl Document {
             next_id: 1,
         };
         let id = doc.take_id();
-        let object = SmartObject::new(raster, Affine::IDENTITY);
+        let object = SmartObject::new(raster, Projective::IDENTITY);
         let (w, h) = (doc.width, doc.height);
         doc.layers.push(Layer::new_smart(id, name, object, w, h));
         doc
@@ -386,7 +386,7 @@ impl Document {
         let (width, height) = (width.max(1), height.max(1));
         let sx = f64::from(width) / f64::from(self.width.max(1));
         let sy = f64::from(height) / f64::from(self.height.max(1));
-        let scale = Affine::scaling(sx, sy);
+        let scale = Projective::from(Affine::scaling(sx, sy));
         for layer in &mut self.layers {
             layer.map_rasters(|r| r.resampled(width, height), |m| scale.then(m), width, height);
         }
@@ -483,7 +483,7 @@ impl Document {
         let bounds = layer.raster.content_bounds().unwrap_or(Rect::new(0, 0, 1, 1));
         let source = layer.raster.resized(bounds.w as u32, bounds.h as u32, -bounds.x, -bounds.y);
         let transform = Affine::translation(f64::from(bounds.x), f64::from(bounds.y));
-        layer.kind = LayerKind::Smart(SmartObject::new(source, transform));
+        layer.kind = LayerKind::Smart(SmartObject::new(source, transform.into()));
         Ok(())
     }
 
@@ -495,7 +495,7 @@ impl Document {
         let id = self.take_id();
         let name = text.layer_name();
         let transform = Affine::translation(at.x - text.origin.x, at.y - text.origin.y);
-        let mut object = SmartObject::new(source, transform);
+        let mut object = SmartObject::new(source, transform.into());
         object.text = Some(text);
         self.insert_above_active(Layer::new_smart(id, name, object, self.width, self.height))
     }
@@ -546,7 +546,7 @@ impl Document {
         };
         let sx = f64::from(object.source.width().max(1)) / f64::from(source.width().max(1));
         let sy = f64::from(object.source.height().max(1)) / f64::from(source.height().max(1));
-        object.transform = object.transform.then(&Affine::scaling(sx, sy));
+        object.transform = object.transform.then(&Affine::scaling(sx, sy).into());
         object.source = source;
         object.text = None;
         layer.raster = object.render(width, height);
@@ -555,7 +555,7 @@ impl Document {
 
     /// Moves a smart object and re-renders it. Not an error on other kinds;
     /// it simply does nothing.
-    pub fn set_smart_transform(&mut self, index: usize, transform: Affine) -> Result<(), DocumentError> {
+    pub fn set_smart_transform(&mut self, index: usize, transform: Projective) -> Result<(), DocumentError> {
         let (width, height) = (self.width, self.height);
         let layer = self.layers.get_mut(index).ok_or(DocumentError::NoSuchLayer)?;
         layer.set_smart_transform(transform, width, height);
@@ -1038,6 +1038,7 @@ impl Document {
             2 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
             _ => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
         };
+        let turn = Projective::from(turn);
         if turns.rem_euclid(2) == 1 {
             std::mem::swap(&mut self.width, &mut self.height);
         }
@@ -1051,7 +1052,7 @@ impl Document {
     /// new one. Every layer is document-sized, so they all move together.
     pub fn resize_canvas(&mut self, width: u32, height: u32, dx: i32, dy: i32) {
         let (width, height) = (width.max(1), height.max(1));
-        let shift = Affine::translation(f64::from(dx), f64::from(dy));
+        let shift = Projective::from(Affine::translation(f64::from(dx), f64::from(dy)));
         for layer in &mut self.layers {
             layer.map_rasters(|r| r.resized(width, height, dx, dy), |m| shift.then(m), width, height);
         }
@@ -1061,7 +1062,7 @@ impl Document {
 
     pub fn flip_canvas_horizontal(&mut self) {
         let (width, height) = (self.width, self.height);
-        let flip = Affine { a: -1.0, e: f64::from(width), ..Affine::IDENTITY };
+        let flip = Projective::from(Affine { a: -1.0, e: f64::from(width), ..Affine::IDENTITY });
         for layer in &mut self.layers {
             layer.map_rasters(Raster::flipped_horizontal, |m| flip.then(m), width, height);
         }
@@ -1069,7 +1070,7 @@ impl Document {
 
     pub fn flip_canvas_vertical(&mut self) {
         let (width, height) = (self.width, self.height);
-        let flip = Affine { d: -1.0, f: f64::from(height), ..Affine::IDENTITY };
+        let flip = Projective::from(Affine { d: -1.0, f: f64::from(height), ..Affine::IDENTITY });
         for layer in &mut self.layers {
             layer.map_rasters(Raster::flipped_vertical, |m| flip.then(m), width, height);
         }
@@ -1694,7 +1695,7 @@ mod tests {
         let mut doc = Document::new(4, 4, Rgba::TRANSPARENT);
         assert_eq!(doc.content_bounds(), doc.bounds(), "the canvas is the floor");
         let i = doc.place_smart_object("photo", Raster::filled(2, 2, RED));
-        doc.layer_mut(i).unwrap().set_smart_transform(Affine::translation(3.0, -2.0), 4, 4);
+        doc.layer_mut(i).unwrap().set_smart_transform(Affine::translation(3.0, -2.0).into(), 4, 4);
         assert_eq!(doc.content_bounds(), Rect::new(0, -2, 5, 6));
     }
 
@@ -2127,7 +2128,7 @@ mod tests {
         doc.add_mask(1, Some(white_mask_with_black_at(5, 4, 3, 2)), false).unwrap();
         doc.set_active(0).unwrap();
         doc.place_smart_object("p", picture.clone());
-        doc.set_smart_transform(1, Affine::translation(1.0, 1.0)).unwrap();
+        doc.set_smart_transform(1, Affine::translation(1.0, 1.0).into()).unwrap();
         doc.add_mask(1, Some(white_mask_with_black_at(5, 4, 3, 2)), false).unwrap();
         let same = |doc: &Document| {
             let pixels = doc.layer(2).unwrap();

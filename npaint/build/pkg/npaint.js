@@ -1137,8 +1137,10 @@ export class NPaint {
     }
     /**
      * A smart object's or text layer's placement, source pixels →
-     * document pixels, as the six numbers of a CSS `matrix()`; empty for
-     * any other layer.
+     * document pixels, as the nine numbers of its matrix, row by row;
+     * empty for any other layer. It is projective rather than affine
+     * because a 3D transform can put one in perspective, so the page
+     * builds a CSS `matrix3d` from it rather than a `matrix`.
      * @param {number} index
      * @returns {Float64Array}
      */
@@ -1515,11 +1517,12 @@ export class NPaint {
      * @param {number} y
      * @param {boolean} shift
      * @param {boolean} alt
+     * @param {boolean} ctrl
      * @param {number} pressure
      * @returns {boolean}
      */
-    pointer_move(x, y, shift, alt, pressure) {
-        const ret = wasm.npaint_pointer_move(this.__wbg_ptr, x, y, shift, alt, pressure);
+    pointer_move(x, y, shift, alt, ctrl, pressure) {
+        const ret = wasm.npaint_pointer_move(this.__wbg_ptr, x, y, shift, alt, ctrl, pressure);
         return ret !== 0;
     }
     /**
@@ -2709,6 +2712,17 @@ export class NPaint {
     transform_set_size(width, height) {
         const ret = wasm.npaint_transform_set_size(this.__wbg_ptr, width, height);
         return ret !== 0;
+    }
+    /**
+     * The rotation wheel's centre as `[x, y]` in screen pixels, or empty
+     * when not transforming. The page draws it; grabbing it turns the box.
+     * @returns {Float64Array}
+     */
+    transform_wheel() {
+        const ret = wasm.npaint_transform_wheel(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * @returns {boolean}

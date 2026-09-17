@@ -924,6 +924,47 @@ function drawZoomMarquee([x, y, w, h]) {
   vctx.restore();
 }
 
+/** The rotation wheel's radius, in CSS pixels. */
+const WHEEL_RADIUS = 7;
+
+/**
+ * The rotation wheel: a stalk out from the middle of the top edge and a
+ * ring with a gap in it, turning the way a drag on it turns the box. The
+ * engine says where it goes and answers "wheel" for it, so this only draws.
+ */
+function drawWheel(top) {
+  const w = np.transform_wheel();
+  if (w.length !== 2) return;
+  const [wx, wy] = w;
+  vctx.beginPath();
+  vctx.moveTo(top[0], top[1]);
+  vctx.lineTo(wx, wy);
+  vctx.strokeStyle = "rgba(0,0,0,0.8)";
+  vctx.stroke();
+  vctx.beginPath();
+  vctx.arc(wx, wy, WHEEL_RADIUS, 0, Math.PI * 2);
+  vctx.fillStyle = "#fff";
+  vctx.fill();
+  vctx.strokeStyle = "#000";
+  vctx.stroke();
+  // The arrow inside: three quarters of a turn, with a head on the end.
+  const r = WHEEL_RADIUS - 3;
+  const from = -Math.PI / 2;
+  const to = from + Math.PI * 1.5;
+  vctx.beginPath();
+  vctx.arc(wx, wy, r, from, to);
+  vctx.stroke();
+  const hx = wx + r * Math.cos(to);
+  const hy = wy + r * Math.sin(to);
+  vctx.beginPath();
+  vctx.moveTo(hx - 2.5, hy - 1);
+  vctx.lineTo(hx + 2.5, hy - 1);
+  vctx.lineTo(hx, hy + 2.5);
+  vctx.closePath();
+  vctx.fillStyle = "#000";
+  vctx.fill();
+}
+
 /** The free-transform box: outline through the corners, then the handles. */
 function drawTransformBox() {
   const h = np.transform_handles();
@@ -951,6 +992,7 @@ function drawTransformBox() {
     vctx.fillRect(x - 4, y - 4, 8, 8);
     vctx.strokeRect(x - 4.5, y - 4.5, 9, 9);
   }
+  drawWheel(pt(1));
   // Centre mark.
   const cx = (h[0] + h[8]) / 2;
   const cy = (h[1] + h[9]) / 2;
@@ -2789,7 +2831,7 @@ function placeTextBox() {
   if (!textEdit) return;
   const { box, index } = textEdit;
   const m = np.layer_placement(index);
-  if (m.length !== 6) return;
+  if (m.length !== 9) return;
   const [ox, oy] = np.layer_text_origin(index);
   const zoom = np.zoom();
   const t = measureText(box.value);
@@ -2805,14 +2847,28 @@ function placeTextBox() {
   box.style.caretColor = np.color();
   box.style.letterSpacing = `${t.c.tracking}px`;
   box.style.textTransform = t.c.caps ? "uppercase" : "none";
-  const [a, b, c, d, e, f] = m;
+  // The placement is a homography — the text layer may have been put in
+  // perspective by a 3D transform — so it goes into a `matrix3d`, which is
+  // the only CSS transform that carries the bottom row. The numbers are
+  // column-major there and row-major here.
   const px = np.pan_x();
   const py = np.pan_y();
+  // Source pixels to the screen: the placement, then the view. Both are
+  // 3x3, and the bottom row of the placement has a say in every term of
+  // the product, so the two are multiplied out rather than scaled apart.
+  const view = [zoom, 0, px, 0, zoom, py, 0, 0, 1];
+  const s = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      s.push(view[row * 3] * m[col] + view[row * 3 + 1] * m[3 + col] + view[row * 3 + 2] * m[6 + col]);
+    }
+  }
   // The box is laid out unscaled and stretched about the block's corner,
   // as the rendering was.
   const sx = t.c.scaleX;
   const sy = t.c.scaleY;
-  box.style.transform = `matrix(${a * zoom}, ${b * zoom}, ${c * zoom}, ${d * zoom}, ${e * zoom + px}, ${f * zoom + py}) translate(${ox}px, ${oy}px) scale(${sx}, ${sy}) translate(${left - ox}px, 0)`;
+  const place = [s[0], s[3], 0, s[6], s[1], s[4], 0, s[7], 0, 0, 1, 0, s[2], s[5], 0, s[8]];
+  box.style.transform = `matrix3d(${place.join(", ")}) translate(${ox}px, ${oy}px) scale(${sx}, ${sy}) translate(${left - ox}px, 0)`;
 }
 
 /** Keeps the text. Nothing typed takes a new layer away again. */
@@ -4214,6 +4270,7 @@ function canvasPoint(e) {
 const HIT_CURSOR = {
   inside: "cursor-move",
   rotate: "cursor-rotate",
+  wheel: "cursor-rotate",
   "top-left": "cursor-nwse",
   "bottom-right": "cursor-nwse",
   "top-right": "cursor-nesw",
@@ -4433,10 +4490,10 @@ function bindPointer() {
       pan = { x, y };
       needsDraw = true;
     } else if (np.is_transforming()) {
-      if (e.buttons & 1) np.pointer_move(x, y, e.shiftKey, e.altKey, pressureOf(e));
+      if (e.buttons & 1) np.pointer_move(x, y, e.shiftKey, e.altKey, e.ctrlKey || e.metaKey, pressureOf(e));
       else setHitCursor(np.transform_hit(x, y));
     } else if (np.is_gesturing()) {
-      const changed = np.pointer_move(x, y, e.shiftKey, e.altKey, pressureOf(e));
+      const changed = np.pointer_move(x, y, e.shiftKey, e.altKey, e.ctrlKey || e.metaKey, pressureOf(e));
       if (tool === "eyedropper") syncSwatches();
       if (changed && SELECTION_TOOLS.has(tool)) antsDirty = true;
       needsDraw = true;

@@ -109,6 +109,17 @@ pub enum Kind {
     /// Grain: colours scattered by up to `amount` percent of the range,
     /// keyed to where the pixel is. `mono` moves the channels together.
     Noise { amount: f32, mono: bool },
+    /// The middle colour of the `radius`-square around each pixel: speckles
+    /// go, edges stay. See [`crate::filter`].
+    Median { radius: f32 },
+    /// A smear `distance` pixels long in the direction `angle` names.
+    MotionBlur { angle: f32, distance: f32 },
+    /// Squared off into cells of `size` pixels, each its own average.
+    Pixelate { size: f32 },
+    /// Relief lit from `angle`, `amount` percent deep.
+    Emboss { angle: f32, amount: f32 },
+    /// The Sobel gradient, `amount` percent of it, as dark lines on white.
+    FindEdges { amount: f32 },
     /// Every colour replaced by the nearest in a palette, with the error
     /// hidden by `method` — `None` for a plain nearest match.
     /// `strength` and `scale` are the pattern's amount and cell size, as
@@ -158,6 +169,11 @@ impl Adjustment {
         "blur",
         "sharpen",
         "noise",
+        "median",
+        "motion-blur",
+        "pixelate",
+        "emboss",
+        "find-edges",
         "palette",
     ];
 
@@ -317,6 +333,17 @@ impl Kind {
                 amount: p(1, 100.0).clamp(0.0, 300.0),
             },
             "noise" => Kind::Noise { amount: p(0, 10.0).clamp(0.0, 100.0), mono: p(1, 0.0) >= 0.5 },
+            "median" => Kind::Median { radius: p(0, 2.0).round().clamp(0.0, filter::MAX_MEDIAN_RADIUS) },
+            "motion-blur" => Kind::MotionBlur {
+                angle: p(0, 0.0).clamp(-180.0, 180.0),
+                distance: p(1, 20.0).clamp(0.0, filter::MAX_MOTION_DISTANCE),
+            },
+            "pixelate" => Kind::Pixelate { size: p(0, 8.0).round().clamp(1.0, filter::MAX_CELL) },
+            "emboss" => Kind::Emboss {
+                angle: p(0, 135.0).clamp(-180.0, 180.0),
+                amount: p(1, 100.0).clamp(0.0, 300.0),
+            },
+            "find-edges" => Kind::FindEdges { amount: p(0, 100.0).clamp(0.0, 300.0) },
             // The palette's colours are variable-length and so ride last,
             // where the curve's points do. Zero for the pattern is no
             // dither at all, so the ladder of methods starts at one.
@@ -348,6 +375,11 @@ impl Kind {
             Kind::Blur { .. } => "blur",
             Kind::Sharpen { .. } => "sharpen",
             Kind::Noise { .. } => "noise",
+            Kind::Median { .. } => "median",
+            Kind::MotionBlur { .. } => "motion-blur",
+            Kind::Pixelate { .. } => "pixelate",
+            Kind::Emboss { .. } => "emboss",
+            Kind::FindEdges { .. } => "find-edges",
             Kind::Palette { .. } => "palette",
         }
     }
@@ -368,6 +400,11 @@ impl Kind {
             Kind::Blur { .. } => "Blur",
             Kind::Sharpen { .. } => "Sharpen",
             Kind::Noise { .. } => "Noise",
+            Kind::Median { .. } => "Median",
+            Kind::MotionBlur { .. } => "Motion Blur",
+            Kind::Pixelate { .. } => "Pixelate",
+            Kind::Emboss { .. } => "Emboss",
+            Kind::FindEdges { .. } => "Find Edges",
             Kind::Palette { .. } => "Palette",
         }
     }
@@ -391,6 +428,11 @@ impl Kind {
             Kind::Blur { radius } => vec![*radius],
             Kind::Sharpen { radius, amount } => vec![*radius, *amount],
             Kind::Noise { amount, mono } => vec![*amount, if *mono { 1.0 } else { 0.0 }],
+            Kind::Median { radius } => vec![*radius],
+            Kind::MotionBlur { angle, distance } => vec![*angle, *distance],
+            Kind::Pixelate { size } => vec![*size],
+            Kind::Emboss { angle, amount } => vec![*angle, *amount],
+            Kind::FindEdges { amount } => vec![*amount],
             Kind::Palette { method, strength, scale, palette } => {
                 let pattern = method.map_or(0.0, |m| m.index() + 1.0);
                 let mut params = vec![pattern, *strength, *scale];
@@ -424,7 +466,18 @@ impl Kind {
             // A palette map with no dither is a function of the colour
             // alone, and takes the cheaper path through [`PixelMap`].
             Kind::Palette { method, .. } => method.is_some(),
-            _ => matches!(self, Kind::Dither { .. } | Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. }),
+            _ => matches!(
+                self,
+                Kind::Dither { .. }
+                    | Kind::Blur { .. }
+                    | Kind::Sharpen { .. }
+                    | Kind::Noise { .. }
+                    | Kind::Median { .. }
+                    | Kind::MotionBlur { .. }
+                    | Kind::Pixelate { .. }
+                    | Kind::Emboss { .. }
+                    | Kind::FindEdges { .. }
+            ),
         }
     }
 
@@ -439,6 +492,11 @@ impl Kind {
             Kind::Blur { radius } => filter::blur(raster, clip, *radius),
             Kind::Sharpen { radius, amount } => filter::sharpen(raster, clip, *radius, *amount),
             Kind::Noise { amount, mono } => filter::noise(raster, clip, *amount, *mono),
+            Kind::Median { radius } => filter::median(raster, clip, *radius),
+            Kind::MotionBlur { angle, distance } => filter::motion_blur(raster, clip, *angle, *distance),
+            Kind::Pixelate { size } => filter::pixelate(raster, clip, *size),
+            Kind::Emboss { angle, amount } => filter::emboss(raster, clip, *angle, *amount),
+            Kind::FindEdges { amount } => filter::find_edges(raster, clip, *amount),
             Kind::Palette { method, strength, scale, palette } => {
                 palette.map(raster, clip, *method, strength / 100.0, *scale as i32)
             }
@@ -455,7 +513,17 @@ impl Kind {
         match self {
             Kind::Dither { .. } => self.dither().quantize(p),
             Kind::Palette { palette, .. } => palette.nearest(p),
-            Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. } => p,
+            // A filter has no neighbours here, and a pixel on its own is
+            // what it already was: an emboss of a flat field is flat, a
+            // median of one pixel is that pixel.
+            Kind::Blur { .. }
+            | Kind::Sharpen { .. }
+            | Kind::Noise { .. }
+            | Kind::Median { .. }
+            | Kind::MotionBlur { .. }
+            | Kind::Pixelate { .. }
+            | Kind::Emboss { .. }
+            | Kind::FindEdges { .. } => p,
             Kind::HueSaturation { hue, saturation, lightness } => {
                 let (h, s, l) = rgb_to_hsl(p);
                 let h = (h + hue).rem_euclid(360.0);

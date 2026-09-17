@@ -151,6 +151,15 @@ export const ADJUSTMENTS = [
     params: [{ label: "Radius", min: 0, max: 50, value: 2, unit: " px" }],
   },
   {
+    name: "motion-blur",
+    label: "Motion Blur…",
+    group: "filter",
+    params: [
+      { label: "Angle", min: -180, max: 180, value: 0, unit: "°" },
+      { label: "Distance", min: 0, max: 200, value: 20, unit: " px" },
+    ],
+  },
+  {
     name: "sharpen",
     label: "Sharpen…",
     group: "filter",
@@ -160,6 +169,12 @@ export const ADJUSTMENTS = [
     ],
   },
   {
+    name: "median",
+    label: "Median…",
+    group: "filter",
+    params: [{ label: "Radius", min: 0, max: 8, value: 2, unit: " px" }],
+  },
+  {
     name: "noise",
     label: "Add Noise…",
     group: "filter",
@@ -167,6 +182,27 @@ export const ADJUSTMENTS = [
       { label: "Amount", min: 0, max: 100, value: 10, unit: "%" },
       { kind: "toggle", label: "Monochromatic", value: 0 },
     ],
+  },
+  {
+    name: "pixelate",
+    label: "Pixelate…",
+    group: "filter",
+    params: [{ label: "Cell size", min: 1, max: 100, value: 8, unit: " px" }],
+  },
+  {
+    name: "emboss",
+    label: "Emboss…",
+    group: "filter",
+    params: [
+      { label: "Angle", min: -180, max: 180, value: 135, unit: "°" },
+      { label: "Amount", min: 0, max: 300, value: 100, unit: "%" },
+    ],
+  },
+  {
+    name: "find-edges",
+    label: "Find Edges…",
+    group: "filter",
+    params: [{ label: "Amount", min: 0, max: 300, value: 100, unit: "%" }],
   },
   {
     // The colours are the palette panel's, and ride at the end of the

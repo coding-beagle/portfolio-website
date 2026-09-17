@@ -23,7 +23,7 @@ use crate::snap::Snap;
 use crate::text::TextObject;
 use crate::tools::movetool::drag_offset;
 use crate::tools::{sample_color, Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
-use crate::transform::{Affine, Hit, TransformInfo, TransformSession};
+use crate::transform::{Affine, Hit, Projective, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
 
 /// How close to a transform handle counts as grabbing it, in screen pixels.
@@ -498,7 +498,13 @@ impl Editor {
         let all = self.document.bounds();
         self.document.composite_below(index, &mut below, &all);
         self.preview_base = Some(PreviewBase { index, edited, below, small: None });
-        self.refresh_small_preview();
+        // A freshly built reduced copy has never been composited, and the
+        // page's preview frame still holds whatever the *last* session drew
+        // there. Saying the document has changed is what makes the first
+        // frame of this session its own picture rather than that one.
+        if self.refresh_small_preview() {
+            self.touch_all();
+        }
     }
 
     /// Whether a drag is being shown on the reduced copy rather than on the
@@ -819,11 +825,15 @@ impl Editor {
         true
     }
 
-    pub fn pointer_move(&mut self, screen: Point, shift: bool, alt: bool) -> bool {
+    /// The pointer moved. `ctrl` is read here rather than at the start of
+    /// the gesture because it is a modifier on the drag in progress: it
+    /// takes a free transform's handle out of the box's own rectangle and
+    /// into the plane, and it may be pressed and let go mid-drag.
+    pub fn pointer_move(&mut self, screen: Point, shift: bool, alt: bool, ctrl: bool) -> bool {
         let ev = self.event(screen, shift, alt);
         if let Some(Session::Transform(t)) | Some(Session::TransformSelection { session: t, .. }) = &mut self.session {
             let snap = Snap::new(&self.settings.guides, self.document.bounds(), self.viewport.zoom());
-            let changed = t.pointer_move_snapped(ev.pos, shift, alt, snap.as_ref());
+            let changed = t.pointer_move_snapped(ev.pos, shift, alt, ctrl, snap.as_ref());
             if changed {
                 self.refresh_transform();
             }
@@ -1700,7 +1710,7 @@ impl Editor {
     // object's placement rather than its rendering — so one undo step holds
     // the whole layer.
 
-    fn layer_geometry(&mut self, label: &str, pixels: impl Fn(&Raster) -> Raster, place: impl Fn(&Affine) -> Affine) -> bool {
+    fn layer_geometry(&mut self, label: &str, pixels: impl Fn(&Raster) -> Raster, place: impl Fn(&Projective) -> Projective) -> bool {
         self.cancel_session();
         self.abort_gesture();
         if self.document.active_layer().locked {
@@ -1716,13 +1726,13 @@ impl Editor {
 
     pub fn flip_layer_horizontal(&mut self) -> bool {
         let w = f64::from(self.document.width());
-        let flip = Affine { a: -1.0, e: w, ..Affine::IDENTITY };
+        let flip = Projective::from(Affine { a: -1.0, e: w, ..Affine::IDENTITY });
         self.layer_geometry("Flip Layer", Raster::flipped_horizontal, |m| flip.then(m))
     }
 
     pub fn flip_layer_vertical(&mut self) -> bool {
         let h = f64::from(self.document.height());
-        let flip = Affine { d: -1.0, f: h, ..Affine::IDENTITY };
+        let flip = Projective::from(Affine { d: -1.0, f: h, ..Affine::IDENTITY });
         self.layer_geometry("Flip Layer", Raster::flipped_vertical, |m| flip.then(m))
     }
 
@@ -1732,7 +1742,7 @@ impl Editor {
         let (w, h) = (self.document.width(), self.document.height());
         let centre = Point::new(f64::from(w) / 2.0, f64::from(h) / 2.0);
         let turn = Affine::rotation(f64::from(turns) * std::f64::consts::FRAC_PI_2);
-        let about = Affine::IDENTITY.pre_about(&turn, centre);
+        let about = Projective::IDENTITY.pre_about(&turn, centre);
         self.layer_geometry("Rotate Layer", |r| r.rotated_quarter(turns).recentred(w, h), |m| about.then(m))
     }
 
@@ -1751,7 +1761,7 @@ impl Editor {
         if self.moves_by_placement() {
             // A smart object or text layer moves by its placement, whole.
             let Some(object) = layer.smart_object() else { return false };
-            let moved = Affine::translation(f64::from(dx), f64::from(dy)).then(&object.transform);
+            let moved = object.transform.after(&Affine::translation(f64::from(dx), f64::from(dy)));
             let was = object.extent();
             let snapshot = Snapshot::of_whole_layer(&self.document, index).expect("the active layer exists");
             self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
@@ -2245,7 +2255,7 @@ impl Editor {
     /// Where a smart object's (or text layer's) source lands in the
     /// document: source pixels → document pixels. The page puts its text
     /// box through this so the caret sits on the letters.
-    pub fn layer_placement(&self, index: usize) -> Option<Affine> {
+    pub fn layer_placement(&self, index: usize) -> Option<Projective> {
         Some(self.document.layer(index)?.smart_object()?.transform)
     }
 
@@ -2329,6 +2339,14 @@ impl Editor {
     pub fn transform_handles(&self) -> Option<[Point; 8]> {
         let t = self.transform_session()?;
         Some(t.handles().map(|p| self.viewport.doc_to_screen(p)))
+    }
+
+    /// The rotation wheel in screen space: the one handle that is not on
+    /// the box itself.
+    pub fn transform_wheel(&self) -> Option<Point> {
+        let t = self.transform_session()?;
+        let tolerance = HANDLE_GRAB_PX / self.viewport.zoom();
+        Some(self.viewport.doc_to_screen(t.wheel(tolerance)))
     }
 
     pub fn transform_info(&self) -> Option<TransformInfo> {
@@ -2841,7 +2859,7 @@ mod tests {
     #[test]
     fn move_and_up_without_down_do_nothing() {
         let mut e = editor();
-        assert!(!e.pointer_move(Point::new(1.0, 1.0), false, false));
+        assert!(!e.pointer_move(Point::new(1.0, 1.0), false, false, false));
         assert!(!e.pointer_up(Point::new(1.0, 1.0), false, false));
         assert!(!e.can_undo());
     }
@@ -2850,7 +2868,7 @@ mod tests {
     fn cancelling_a_gesture_leaves_no_undo_step() {
         let mut e = editor();
         e.pointer_down(Point::new(1.0, 1.0), false, false);
-        e.pointer_move(Point::new(9.0, 9.0), false, false);
+        e.pointer_move(Point::new(9.0, 9.0), false, false, false);
         assert!(e.cancel_gesture());
         assert_eq!(px(&e, 5, 5), Rgba::WHITE);
         assert!(!e.can_undo(), "nothing happened, so nothing to undo");
@@ -2862,7 +2880,7 @@ mod tests {
         let mut e = editor();
         e.set_tool(ToolKind::Rectangle);
         e.pointer_down(Point::new(0.0, 0.0), false, false);
-        e.pointer_move(Point::new(10.0, 10.0), false, false);
+        e.pointer_move(Point::new(10.0, 10.0), false, false, false);
         assert_eq!(px(&e, 5, 5), RED);
         e.set_tool(ToolKind::Brush);
         assert_eq!(px(&e, 5, 5), Rgba::WHITE);
@@ -3502,7 +3520,7 @@ mod tests {
         assert_eq!(handles[0], Point::new(16.0, 16.0));
         assert_eq!(e.transform_hit(Point::new(32.0, 32.0)), Some(Hit::Inside));
         assert!(e.pointer_down(Point::new(32.0, 32.0), false, false));
-        e.pointer_move(Point::new(72.0, 32.0), false, false);
+        e.pointer_move(Point::new(72.0, 32.0), false, false, false);
         e.pointer_up(Point::new(72.0, 32.0), false, false);
         assert_eq!(px(&e, 8, 3), RED, "previewed");
         assert!(e.is_transforming(), "still open until committed");
@@ -3511,6 +3529,34 @@ mod tests {
         assert_eq!(px(&e, 3, 3), Rgba::TRANSPARENT);
         assert!(e.undo());
         assert_eq!(px(&e, 3, 3), RED, "the whole transform is one undo step");
+    }
+
+    #[test]
+    fn ctrl_dragging_a_corner_puts_the_layer_in_perspective() {
+        let mut e = editor();
+        e.new_document(20, 20, Rgba::TRANSPARENT);
+        e.settings_mut().color = RED;
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(2.0, 2.0), false, false);
+        e.pointer_up(Point::new(10.0, 10.0), false, false);
+        assert!(e.fill_selection());
+        e.deselect();
+        e.set_zoom_about(8.0, Point::default());
+        e.begin_transform().unwrap();
+        // The top-left handle, dragged in towards the middle with Ctrl
+        // down: that corner alone moves, which no affine placement can do.
+        let handles = e.transform_handles().unwrap();
+        assert!(e.pointer_down(handles[0], false, false));
+        assert!(e.pointer_move(Point::new(handles[0].x + 32.0, handles[0].y), false, false, true));
+        e.pointer_up(Point::new(handles[0].x + 32.0, handles[0].y), false, false);
+        let moved = e.transform_handles().unwrap();
+        assert_eq!(moved[0], Point::new(handles[0].x + 32.0, handles[0].y));
+        assert_eq!(moved[4], handles[4], "the far corner stayed");
+        assert!(e.commit_session());
+        assert_eq!(px(&e, 3, 3), Rgba::TRANSPARENT, "the near corner has come away");
+        assert_eq!(px(&e, 8, 8), RED, "and the rest of it is still there");
+        assert!(e.undo());
+        assert_eq!(px(&e, 3, 3), RED, "one undo step, as any transform is");
     }
 
     #[test]
@@ -3845,7 +3891,7 @@ mod tests {
         e.take_dirty();
 
         assert!(e.pointer_down(Point::new(95.0, 95.0), false, false));
-        assert!(e.pointer_move(Point::new(105.0, 95.0), false, false));
+        assert!(e.pointer_move(Point::new(105.0, 95.0), false, false, false));
         let dirty = e.take_dirty().expect("the drag changed something");
         assert!(dirty.w < 200 && dirty.h < 200, "only the object's own rectangle: {dirty:?}");
         assert!(dirty.x <= 95 && dirty.right() >= 105, "covers where it was and where it has gone: {dirty:?}");
@@ -3870,7 +3916,7 @@ mod tests {
 
         e.set_tool(ToolKind::Move);
         assert!(e.pointer_down(Point::new(8.0, 8.0), false, false));
-        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false));
+        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false, false));
         assert_eq!(e.preview_size(), Some([16, 16, 4]), "the copy is a quarter on a side");
         assert_eq!(e.document().active_surface(), &before, "the document itself is untouched");
 
@@ -3905,9 +3951,9 @@ mod tests {
 
         e.set_tool(ToolKind::Move);
         assert!(e.pointer_down(Point::new(8.0, 8.0), false, false));
-        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false));
+        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false, false));
         // A fifth of a screen pixel is under a document pixel at this zoom.
-        assert!(!e.pointer_move(Point::new(12.01, 8.0), false, false), "the same whole pixel is not a change");
+        assert!(!e.pointer_move(Point::new(12.01, 8.0), false, false, false), "the same whole pixel is not a change");
         assert_eq!(e.preview_size(), Some([16, 16, 4]), "the copy is a quarter on a side");
         assert_eq!(e.document().active_surface(), &before, "the document itself is untouched");
 
@@ -3927,7 +3973,7 @@ mod tests {
         // drawn on, so dropping the copy is the whole of putting it back.
         let steps = e.history_labels().len();
         e.pointer_down(Point::new(8.0, 8.0), false, false);
-        e.pointer_move(Point::new(30.0, 30.0), false, false);
+        e.pointer_move(Point::new(30.0, 30.0), false, false, false);
         assert!(e.cancel_gesture());
         assert_eq!(e.preview_size(), None);
         assert_eq!(px(&e, 20, 20), RED, "still where the drag before it left off");
@@ -4369,12 +4415,12 @@ mod tests {
         assert!(e.take_dirty().is_some());
         e.set_tool(ToolKind::Select);
         e.pointer_down(Point::new(0.0, 0.0), false, false);
-        e.pointer_move(Point::new(3.0, 3.0), false, false);
+        e.pointer_move(Point::new(3.0, 3.0), false, false, false);
         e.pointer_up(Point::new(5.0, 5.0), false, false);
         assert!(e.take_dirty().is_none(), "a marquee changes no pixels");
         e.set_tool(ToolKind::Hand);
         e.pointer_down(Point::new(0.0, 0.0), false, false);
-        e.pointer_move(Point::new(30.0, 30.0), false, false);
+        e.pointer_move(Point::new(30.0, 30.0), false, false, false);
         e.pointer_up(Point::new(30.0, 30.0), false, false);
         assert!(e.take_dirty().is_none(), "nor does a pan");
         e.set_tool(ToolKind::Pencil);
@@ -4440,6 +4486,40 @@ mod tests {
     /// The reduced preview: the same picture at a fraction of the size while
     /// the canvas is zoomed out, and the full-size answer on commit however
     /// the previews ran.
+    #[test]
+    fn a_session_draws_its_own_reduced_preview_and_not_the_last_one() {
+        // The page keeps one preview frame and reuses it for every session,
+        // so a session that composites nothing leaves whatever the session
+        // before it drew on the screen. Transform, undo, transform again is
+        // where that shows: the second box would open on the first one's
+        // picture.
+        let mut e = Editor::new(64, 32, Rgba::TRANSPARENT);
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 8;
+        e.set_tool(ToolKind::Brush);
+        click(&mut e, 20.0, 16.0);
+        e.set_zoom_about(0.25, Point::new(0.0, 0.0));
+        assert_eq!(e.preview_step(), 4);
+
+        let mut frame = Raster::new(1, 1);
+        e.begin_transform().unwrap();
+        assert_eq!(e.preview_into(&mut frame), Some(true));
+        e.transform_nudge(20.0, 0.0);
+        assert_eq!(e.preview_into(&mut frame), Some(true));
+        assert!(e.commit_session());
+        assert!(e.undo());
+
+        let moved = frame.clone();
+        // The page draws a frame between the two, which takes the dirty
+        // rectangle with it — so the second session starts with nothing
+        // marked as changed, exactly as it does in the browser.
+        e.take_dirty();
+        e.begin_transform().unwrap();
+        assert_eq!(e.preview_into(&mut frame), Some(true), "the new session composites its own picture");
+        assert_ne!(frame, moved, "or the canvas keeps showing the move that was undone");
+        assert_eq!(frame, e.document().composite().downscaled(4));
+    }
+
     #[test]
     fn a_zoomed_out_preview_composites_at_the_size_the_screen_shows() {
         let mut e = Editor::new(64, 32, Rgba::opaque(200, 120, 60));
@@ -4534,7 +4614,7 @@ mod tests {
 
         // Now paint, and redraw only what the engine says changed.
         e.pointer_down(Point::new(20.0, 10.0), false, false);
-        e.pointer_move(Point::new(40.0, 30.0), false, false);
+        e.pointer_move(Point::new(40.0, 30.0), false, false, false);
         let rect = e.take_dirty().expect("the drag changed something");
         assert!(rect.w < 60 || rect.h < 40, "not the whole canvas: {rect:?}");
         e.composite_into(&mut frame, &rect);
@@ -4562,11 +4642,11 @@ mod tests {
         // A drag dirties the segment it just drew, not the whole stroke.
         e.pointer_down(Point::new(10.0, 10.0), false, false);
         e.take_dirty();
-        e.pointer_move(Point::new(300.0, 10.0), false, false);
+        e.pointer_move(Point::new(300.0, 10.0), false, false, false);
         let long = e.take_dirty().expect("the drag changes something");
         assert!(long.w >= 290, "the whole segment: {long:?}");
         assert!(long.h <= 16, "but only the segment: {long:?}");
-        e.pointer_move(Point::new(300.0, 12.0), false, false);
+        e.pointer_move(Point::new(300.0, 12.0), false, false, false);
         let short = e.take_dirty().expect("and so does the next move");
         assert!(short.w <= 16, "the second segment is short: {short:?}");
         e.pointer_up(Point::new(300.0, 12.0), false, false);
@@ -4610,7 +4690,7 @@ mod tests {
         e.set_tool(ToolKind::SubjectBox);
         assert!(e.selection_rect().is_some(), "changing tool keeps the selection");
         e.pointer_down(Point::new(10.0, 10.0), true, false);
-        e.pointer_move(Point::new(18.0, 18.0), true, false);
+        e.pointer_move(Point::new(18.0, 18.0), true, false, false);
         assert_eq!(e.subject_box(), Some(Rect::new(10, 10, 8, 8)));
         e.pointer_up(Point::new(18.0, 18.0), true, false);
         assert_eq!(e.subject_box(), Some(Rect::new(10, 10, 8, 8)), "the box waits for the model");
@@ -4964,7 +5044,7 @@ mod text_session_tests {
         // A drag: the placement moves, the text stays text, one step called Move.
         assert!(e.pointer_down(Point::new(5.0, 5.0), false, false));
         assert!(e.is_transforming(), "a move of a smart object is a transform underneath");
-        assert!(e.pointer_move(Point::new(8.0, 6.0), false, false));
+        assert!(e.pointer_move(Point::new(8.0, 6.0), false, false, false));
         assert!(e.pointer_up(Point::new(8.0, 6.0), false, false));
         assert!(!e.is_transforming());
         assert_eq!(px(&e, 7, 5), RED);
@@ -4982,7 +5062,7 @@ mod text_session_tests {
 
         // Escape mid-drag puts it back.
         assert!(e.pointer_down(Point::new(8.0, 6.0), false, false));
-        e.pointer_move(Point::new(12.0, 6.0), false, false);
+        e.pointer_move(Point::new(12.0, 6.0), false, false, false);
         assert_eq!(px(&e, 11, 5), RED);
         assert!(e.cancel_gesture());
         assert!(!e.is_transforming());
@@ -5020,7 +5100,7 @@ mod text_session_tests {
         e.place_smart_object("photo", Raster::filled(2, 2, RED));
         e.set_tool(ToolKind::Move);
         assert!(e.pointer_down(Point::new(3.0, 3.0), false, false));
-        e.pointer_move(Point::new(5.0, 3.0), false, false);
+        e.pointer_move(Point::new(5.0, 3.0), false, false, false);
         e.pointer_up(Point::new(5.0, 3.0), false, false);
         assert_eq!(px(&e, 5, 3), RED);
         assert_eq!(px(&e, 3, 3).a, 0);
@@ -5052,5 +5132,60 @@ mod text_session_tests {
         assert_eq!(t.color, RED);
         assert_eq!(t.origin, Point::new(1.0, 1.0));
         assert_eq!(back.document(), e.document());
+    }
+}
+
+#[cfg(test)]
+mod scratch {
+    use super::*;
+    use crate::color::Rgba;
+    use crate::geometry::Point;
+    use crate::raster::Raster;
+
+    #[test]
+    fn dbg_undo_perspective_pixels() {
+        let mut e = Editor::new(16, 16, Rgba::TRANSPARENT);
+        e.set_tool(ToolKind::Select);
+        e.pointer_down(Point::new(4.0, 4.0), false, false);
+        e.pointer_up(Point::new(12.0, 12.0), false, false);
+        e.settings_mut().color = Rgba::opaque(255, 0, 0);
+        assert!(e.fill_selection());
+        e.deselect();
+        let before: Vec<_> = e.document().active_layer().raster.pixels().to_vec();
+        e.begin_transform().unwrap();
+        let h = e.transform_handles().unwrap();
+        e.pointer_down(h[0], false, false);
+        e.pointer_move(Point::new(h[0].x + 3.0, h[0].y + 1.0), false, false, true);
+        e.pointer_up(Point::new(h[0].x + 3.0, h[0].y + 1.0), false, false);
+        e.commit_session();
+        let after: Vec<_> = e.document().active_layer().raster.pixels().to_vec();
+        println!("changed {}", after != before);
+        println!("undo {}", e.undo());
+        let undone: Vec<_> = e.document().active_layer().raster.pixels().to_vec();
+        println!("restored {}", undone == before);
+        e.begin_transform().unwrap();
+        println!("next session {:?}", e.transform_session().map(TransformSession::matrix));
+        println!("next handles {:?}", e.transform_handles());
+    }
+
+    #[test]
+    fn dbg_undo_perspective() {
+        let mut e = Editor::new(16, 16, Rgba::TRANSPARENT);
+        e.place_smart_object("photo", Raster::filled(8, 8, Rgba::opaque(255, 0, 0)));
+        let first = e.layer_placement(e.document().active_index()).unwrap();
+        e.begin_transform().unwrap();
+        let h = e.transform_handles().unwrap();
+        e.pointer_down(h[0], false, false);
+        e.pointer_move(Point::new(h[0].x + 3.0, h[0].y + 1.0), false, false, true);
+        e.pointer_up(Point::new(h[0].x + 3.0, h[0].y + 1.0), false, false);
+        let distorted = e.transform_session().map(TransformSession::matrix).unwrap();
+        assert!(distorted.as_affine().is_none());
+        e.commit_session();
+        println!("after commit {:?}", e.layer_placement(e.document().active_index()));
+        println!("undo {}", e.undo());
+        println!("after undo  {:?}", e.layer_placement(e.document().active_index()));
+        println!("first       {:?}", first);
+        e.begin_transform().unwrap();
+        println!("next session {:?}", e.transform_session().map(TransformSession::matrix));
     }
 }

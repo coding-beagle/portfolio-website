@@ -126,6 +126,212 @@ pub fn noise(raster: &mut Raster, clip: &Rect, amount: f32, mono: bool) {
     });
 }
 
+/// The widest a median may reach, in pixels. It reads `(2r + 1)²` pixels for
+/// every one it writes, and that is what puts a ceiling on it.
+pub const MAX_MEDIAN_RADIUS: f32 = 8.0;
+/// The longest a motion blur may smear, in pixels.
+pub const MAX_MOTION_DISTANCE: f32 = 200.0;
+/// The largest a pixelate cell may be, in pixels.
+pub const MAX_CELL: f32 = 100.0;
+
+/// A copy of everything within a filter's reach of the clip, taken before
+/// the filter writes anything.
+///
+/// This is how the filters here keep the clip-independence rule: what a
+/// pixel becomes is decided by what was around it, not by what a previous
+/// pass of the same filter has already put there, and not by where the
+/// rectangle it was asked for happens to end.
+struct Around {
+    pixels: Raster,
+    area: Rect,
+    whole: Rect,
+}
+
+impl Around {
+    /// The copy, and the rectangle the filter is to write. `None` when
+    /// there is nothing to do.
+    fn new(raster: &Raster, clip: &Rect, reach: i32) -> Option<(Around, Rect)> {
+        let whole = raster.bounds();
+        let target = clip.intersect(&whole);
+        let area = clip.inflate(reach.max(0)).intersect(&whole);
+        if target.is_empty() || area.is_empty() {
+            return None;
+        }
+        let pixels = raster.resized(area.w as u32, area.h as u32, -area.x, -area.y);
+        Some((Around { pixels, area, whole }, target))
+    }
+
+    /// The pixel at a document position, with the edge of the picture
+    /// repeated beyond it. Reading transparency in from outside would draw
+    /// a border round every filtered layer.
+    fn get(&self, x: i32, y: i32) -> Rgba {
+        let x = x.clamp(self.whole.x, self.whole.right() - 1);
+        let y = y.clamp(self.whole.y, self.whole.bottom() - 1);
+        self.pixels.get(x - self.area.x, y - self.area.y)
+    }
+
+    /// [`Around::get`] as premultiplied `[r, g, b, a]`, which is what the
+    /// filters that move alpha about work in.
+    fn premultiplied(&self, x: i32, y: i32) -> [f32; 4] {
+        let p = self.get(x, y);
+        let a = f32::from(p.a) / 255.0;
+        [f32::from(p.r) * a, f32::from(p.g) * a, f32::from(p.b) * a, f32::from(p.a)]
+    }
+}
+
+/// Replaces every pixel with the middle colour of the square around it.
+///
+/// Where a blur mixes the neighbours together, a median picks one of them,
+/// so speckles vanish while edges stay where they are. That is what makes it
+/// the tool for scanner dust and for the flattening that turns a photograph
+/// into something poster-like at a wide radius.
+pub fn median(raster: &mut Raster, clip: &Rect, radius: f32) {
+    let r = radius.round().clamp(0.0, MAX_MEDIAN_RADIUS) as i32;
+    if r < 1 {
+        return;
+    }
+    let Some((src, target)) = Around::new(raster, clip, r) else { return };
+    let mut window: Vec<u8> = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
+    raster.map_at(&target, |p, x, y| {
+        // The channels are taken apart and each one's own middle value
+        // chosen, which is what every median filter of this kind does: it
+        // can invent a colour that was not in the window, and it keeps the
+        // hard edges that matter more.
+        let middle = |channel: usize, window: &mut Vec<u8>| {
+            window.clear();
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let q = src.get(x + dx, y + dy);
+                    window.push([q.r, q.g, q.b][channel]);
+                }
+            }
+            let half = window.len() / 2;
+            *window.select_nth_unstable(half).1
+        };
+        Rgba::new(middle(0, &mut window), middle(1, &mut window), middle(2, &mut window), p.a)
+    });
+}
+
+/// Smears the picture along a line: the average of what a pixel would have
+/// passed over, moving `distance` pixels in the direction `angle` names.
+///
+/// It works on premultiplied colour, alpha and all, for the reason the blur
+/// does: a streak that leaves the edge of the picture has to fade out, not
+/// drag whatever was stored under the transparent pixels along with it.
+pub fn motion_blur(raster: &mut Raster, clip: &Rect, angle: f32, distance: f32) {
+    let distance = distance.clamp(0.0, MAX_MOTION_DISTANCE);
+    let steps = distance.round() as i32;
+    if steps < 1 {
+        return;
+    }
+    let (sin, cos) = angle.to_radians().sin_cos();
+    let half = distance / 2.0;
+    let Some((src, target)) = Around::new(raster, clip, half.ceil() as i32 + 1) else { return };
+    raster.map_at(&target, |_, x, y| {
+        let mut sum = [0f32; 4];
+        // One sample a pixel along the line, from one end of the smear to
+        // the other, so the length of the streak is the distance asked for
+        // whatever direction it runs in.
+        for step in 0..=steps {
+            let t = -half + distance * (step as f32) / (steps as f32);
+            let sx = x + (cos * t).round() as i32;
+            let sy = y + (sin * t).round() as i32;
+            let q = src.premultiplied(sx, sy);
+            for (acc, v) in sum.iter_mut().zip(q) {
+                *acc += v;
+            }
+        }
+        let n = (steps + 1) as f32;
+        unpremultiply([sum[0] / n, sum[1] / n, sum[2] / n, sum[3] / n])
+    });
+}
+
+/// Squares the picture off: every cell of `size` pixels becomes the one
+/// colour its pixels average to.
+///
+/// The cells are laid out from the document's own origin rather than from
+/// the clip's, which is what makes a preview through a selection line up
+/// with the same filter applied to the whole layer.
+pub fn pixelate(raster: &mut Raster, clip: &Rect, size: f32) {
+    let size = size.round().clamp(1.0, MAX_CELL) as i32;
+    if size < 2 {
+        return;
+    }
+    let Some((src, target)) = Around::new(raster, clip, size) else { return };
+    let cell = |v: i32| v.div_euclid(size);
+    let (cx0, cy0) = (cell(target.x), cell(target.y));
+    let (cx1, cy1) = (cell(target.right() - 1), cell(target.bottom() - 1));
+    let across = (cx1 - cx0 + 1) as usize;
+    // Every cell averaged once, rather than once for each pixel that asks.
+    let mut colours = Vec::with_capacity(across * (cy1 - cy0 + 1) as usize);
+    for cy in cy0..=cy1 {
+        for cx in cx0..=cx1 {
+            let mut sum = [0f32; 4];
+            for y in (cy * size)..(cy * size + size) {
+                for x in (cx * size)..(cx * size + size) {
+                    let q = src.premultiplied(x, y);
+                    for (acc, v) in sum.iter_mut().zip(q) {
+                        *acc += v;
+                    }
+                }
+            }
+            let n = (size * size) as f32;
+            colours.push(unpremultiply([sum[0] / n, sum[1] / n, sum[2] / n, sum[3] / n]));
+        }
+    }
+    raster.map_at(&target, |_, x, y| {
+        colours[(cell(y) - cy0) as usize * across + (cell(x) - cx0) as usize]
+    });
+}
+
+/// Lights the picture from one side as though it were stamped into metal:
+/// mid-grey everywhere it is flat, lighter and darker where it changes.
+///
+/// `angle` is where the light comes from and `amount` how deep the relief
+/// is, as a percentage.
+pub fn emboss(raster: &mut Raster, clip: &Rect, angle: f32, amount: f32) {
+    let k = amount / 100.0;
+    let (sin, cos) = angle.to_radians().sin_cos();
+    let (dx, dy) = (cos.round() as i32, -sin.round() as i32);
+    if k.abs() < f32::EPSILON || (dx == 0 && dy == 0) {
+        return;
+    }
+    let Some((src, target)) = Around::new(raster, clip, 1) else { return };
+    raster.map_at(&target, |p, x, y| {
+        let (lit, shade) = (src.get(x - dx, y - dy), src.get(x + dx, y + dy));
+        let ch = |a: u8, b: u8| (MID_GREY + (f32::from(a) - f32::from(b)) * k).round().clamp(0.0, 255.0) as u8;
+        Rgba::new(ch(lit.r, shade.r), ch(lit.g, shade.g), ch(lit.b, shade.b), p.a)
+    });
+}
+
+/// Keeps the edges and throws the flat parts away: dark lines on white,
+/// where the picture changes fastest.
+///
+/// The gradient is the Sobel one, taken a channel at a time rather than on
+/// the brightness alone — a red shape on a green ground of the same
+/// brightness has an edge, and a filter that looked only at luminance would
+/// miss it. (The luminance version, which is the one an automatic selection
+/// wants, is [`crate::autoselect::edges`].)
+pub fn find_edges(raster: &mut Raster, clip: &Rect, amount: f32) {
+    let k = amount / 100.0;
+    let Some((src, target)) = Around::new(raster, clip, 1) else { return };
+    raster.map_at(&target, |p, x, y| {
+        let at = |dx: i32, dy: i32| src.get(x + dx, y + dy);
+        let ch = |pick: fn(&Rgba) -> u8| {
+            let v = |dx, dy| f32::from(pick(&at(dx, dy)));
+            let gx = v(1, -1) + 2.0 * v(1, 0) + v(1, 1) - v(-1, -1) - 2.0 * v(-1, 0) - v(-1, 1);
+            let gy = v(-1, 1) + 2.0 * v(0, 1) + v(1, 1) - v(-1, -1) - 2.0 * v(0, -1) - v(1, -1);
+            // The four Sobel weights on each side, so a step from black to
+            // white comes out as a line of full strength.
+            (255.0 - gx.hypot(gy) / 4.0 * k).round().clamp(0.0, 255.0) as u8
+        };
+        Rgba::new(ch(|q| q.r), ch(|q| q.g), ch(|q| q.b), p.a)
+    });
+}
+
+/// The level an embossed picture settles to where nothing is happening.
+const MID_GREY: f32 = 128.0;
+
 enum Axis {
     X,
     Y,
@@ -315,6 +521,143 @@ mod tests {
                 assert_eq!(now.a, 255);
             }
         }
+    }
+
+    /// A picture with colour, an edge and some transparency in it: enough
+    /// for a filter to have something to do everywhere.
+    fn scene() -> Raster {
+        let mut r = Raster::new(24, 24);
+        let all = r.bounds();
+        r.fill_rect(Rect::new(0, 0, 24, 24), Rgba::opaque(60, 90, 140), &all);
+        r.fill_rect(Rect::new(6, 4, 10, 12), Rgba::opaque(230, 200, 40), &all);
+        r.fill_rect(Rect::new(0, 18, 24, 6), Rgba::TRANSPARENT, &all);
+        r.set(3, 3, Rgba::opaque(255, 255, 255));
+        r
+    }
+
+    /// The rule every filter here has to keep: a pixel comes out the same
+    /// however the picture was cut up to ask for it.
+    fn agrees_whatever_the_clip(what: &str, filter: impl Fn(&mut Raster, &Rect)) {
+        let source = scene();
+        let (w, h) = (source.width() as i32, source.height() as i32);
+        let all = source.bounds();
+        let mut whole = source.clone();
+        filter(&mut whole, &all);
+
+        // The same picture filtered a strip at a time, as a preview through
+        // a selection asks for it.
+        let mut in_strips = source.clone();
+        for left in (0..w).step_by(5) {
+            let mut piece = source.clone();
+            filter(&mut piece, &Rect::new(left, 0, 5, h));
+            for y in 0..h {
+                for x in left..(left + 5).min(w) {
+                    in_strips.set(x, y, piece.get(x, y));
+                }
+            }
+        }
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(in_strips.get(x, y), whole.get(x, y), "{what} at {x},{y} depends on the rectangle it was asked for");
+            }
+        }
+    }
+
+    #[test]
+    fn no_filter_depends_on_the_rectangle_it_was_asked_for() {
+        agrees_whatever_the_clip("median", |r, c| median(r, c, 2.0));
+        agrees_whatever_the_clip("motion blur", |r, c| motion_blur(r, c, 30.0, 12.0));
+        agrees_whatever_the_clip("pixelate", |r, c| pixelate(r, c, 7.0));
+        agrees_whatever_the_clip("emboss", |r, c| emboss(r, c, 135.0, 100.0));
+        agrees_whatever_the_clip("find edges", |r, c| find_edges(r, c, 100.0));
+    }
+
+    #[test]
+    fn a_median_takes_out_a_speckle_and_leaves_the_edge() {
+        let mut r = scene();
+        let all = r.bounds();
+        median(&mut r, &all, 2.0);
+        assert_eq!(r.get(3, 3), Rgba::opaque(60, 90, 140), "the single white pixel is outvoted");
+        assert_eq!(r.get(10, 10), Rgba::opaque(230, 200, 40), "well inside the block, nothing moved");
+        // A blur would have smeared this across several pixels; a median
+        // keeps it one pixel wide.
+        assert_eq!(r.get(5, 10), Rgba::opaque(60, 90, 140));
+        assert_eq!(r.get(6, 10), Rgba::opaque(230, 200, 40), "the edge is still where it was");
+    }
+
+    #[test]
+    fn a_median_of_nothing_does_nothing() {
+        let before = scene();
+        let mut after = before.clone();
+        let all = after.bounds();
+        median(&mut after, &all, 0.4);
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn a_motion_blur_smears_along_its_own_angle() {
+        let mut r = Raster::new(21, 21);
+        let all = r.bounds();
+        r.fill_rect(Rect::new(10, 10, 1, 1), RED, &all);
+        motion_blur(&mut r, &all, 0.0, 9.0);
+        assert!(r.get(13, 10).a > 0, "spread sideways");
+        assert_eq!(r.get(10, 13).a, 0, "and not up or down");
+        assert_eq!((r.get(13, 10).r, r.get(13, 10).g), (255, 0), "no dark halo against transparency");
+        assert!(r.get(10, 10).a < 255, "the pixel itself thinned out");
+    }
+
+    #[test]
+    fn pixelate_lays_its_cells_out_from_the_documents_own_origin() {
+        let mut r = Raster::new(8, 8);
+        let all = r.bounds();
+        r.fill_rect(Rect::new(0, 0, 4, 4), Rgba::opaque(200, 200, 200), &all);
+        pixelate(&mut r, &all, 4.0);
+        // The top-left cell is exactly the light square, so it keeps its
+        // colour; the cell beside it saw nothing and stays empty.
+        assert_eq!(r.get(0, 0), Rgba::opaque(200, 200, 200));
+        assert_eq!(r.get(3, 3), Rgba::opaque(200, 200, 200));
+        assert_eq!(r.get(4, 0).a, 0);
+        // Every pixel of a cell is the same colour, which is the point.
+        let mut one_cell = Raster::new(8, 8);
+        one_cell.fill_rect(Rect::new(2, 2, 3, 3), RED, &all);
+        pixelate(&mut one_cell, &all, 4.0);
+        assert_eq!(one_cell.get(0, 0), one_cell.get(3, 3), "a cell is one colour");
+        assert_ne!(one_cell.get(0, 0), one_cell.get(4, 4), "and the next cell is its own");
+    }
+
+    #[test]
+    fn an_emboss_is_flat_where_the_picture_is_flat() {
+        let mut r = Raster::filled(8, 8, Rgba::opaque(90, 120, 200));
+        let all = r.bounds();
+        emboss(&mut r, &all, 135.0, 100.0);
+        assert_eq!(r.get(4, 4), Rgba::opaque(128, 128, 128), "nothing happening, mid-grey");
+
+        // A step from black to white, lit from one side and then the
+        // other: the same relief, turned over.
+        let step = {
+            let mut step = Raster::filled(8, 8, Rgba::opaque(0, 0, 0));
+            step.fill_rect(Rect::new(4, 0, 4, 8), Rgba::opaque(255, 255, 255), &all);
+            step
+        };
+        let mut lit_right = step.clone();
+        emboss(&mut lit_right, &all, 0.0, 100.0);
+        let mut lit_left = step.clone();
+        emboss(&mut lit_left, &all, 180.0, 100.0);
+        assert!(lit_right.get(4, 4).r < 128, "the step is in shadow: {}", lit_right.get(4, 4));
+        assert!(lit_left.get(4, 4).r > 128, "and lit from the other side it catches the light");
+        assert_eq!(lit_right.get(0, 4), Rgba::opaque(128, 128, 128), "away from it, flat grey");
+        assert_eq!(lit_right.get(0, 4).a, 255, "alpha is left alone");
+    }
+
+    #[test]
+    fn find_edges_keeps_the_edges_and_whitens_the_rest() {
+        let mut r = Raster::filled(12, 12, Rgba::opaque(40, 40, 40));
+        let all = r.bounds();
+        r.fill_rect(Rect::new(6, 0, 6, 12), Rgba::opaque(220, 220, 220), &all);
+        find_edges(&mut r, &all, 100.0);
+        assert_eq!(r.get(1, 6), Rgba::opaque(255, 255, 255), "a flat field comes out white");
+        assert_eq!(r.get(10, 6), Rgba::opaque(255, 255, 255));
+        assert!(r.get(5, 6).r < 100, "and the step is a dark line: {}", r.get(5, 6));
     }
 
     #[test]

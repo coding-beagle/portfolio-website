@@ -102,10 +102,11 @@ npaint/
                    kernels (Floyd-Steinberg, Jarvis, Stucki, Atkinson,
                    Sierra), with levels/strength/greyscale in front of both
     file.rs        NPaint's own file: the whole document as a binary stream
-    filter.rs      the filters that read more than one pixel — blur, and
-                   the unsharp mask and the grain built on it. They are
-                   `adjust::Kind`s that delegate here rather than lookup
-                   tables; see "Filters"
+    filter.rs      the filters that read more than one pixel — the blur and
+                   what is built on it (unsharp mask, grain), the median,
+                   the motion blur, pixelate, emboss and find edges. They
+                   are `adjust::Kind`s that delegate here rather than
+                   lookup tables; see "Filters"
     geometry.rs    Point, Rect
     gradient.rs    a colour worked out from where the pixel is: two
                    colours, two points and a shape (linear, radial,
@@ -161,7 +162,9 @@ npaint/
       text.rs      the text tool: a kind with no gesture of its own — a
                    click opens a text session in editor.rs (see "Text")
       view.rs      zoom (click / alt-click / marquee or scrubby drag) and hand
-    transform.rs   Affine, bilinear resampling, the free-transform session
+    transform.rs   Affine and Projective (a homography — what Ctrl on a
+                   handle makes of a placement), bilinear resampling, the
+                   free-transform session
     editor.rs      the facade: one document + selection + viewport + history + tool
                    + the adjustment/transform "session" (preview, commit, cancel)
     wasm.rs        the wasm_bindgen class `NPaint`; a translation layer, no logic
@@ -793,6 +796,15 @@ The cache lives and dies with the session; `commit_session` and
 rather than the thing keeping it honest.
 (`a_session_composites_from_its_cached_base_and_gets_the_same_picture`.)
 
+Holding a base marks the document changed when it builds a reduced copy, and
+that is not housekeeping: the page keeps **one** preview frame and reuses it
+for every session, and `preview_into` composites only when something is
+dirty. Without the mark, a session opening on a picture nothing has touched
+since the last frame was drawn leaves the *previous* session's preview on
+the screen — transform, undo, transform again, and the box comes up over the
+picture the undo was supposed to have taken away.
+(`a_session_draws_its_own_reduced_preview_and_not_the_last_one`.)
+
 **The reduced preview.** The other half: a 4K document fitted to a window is
 drawn at about a quarter, so fifteen of every sixteen composited pixels are
 thrown away by the downscale before anyone sees them. While a session runs,
@@ -839,6 +851,50 @@ with the grab radius given in document pixels as `8 / zoom` so it is a
 constant size on screen. The page asks `transform_hit` only to choose a
 cursor.
 
+Anywhere outside the box turns it, and the **rotation wheel**
+(`TransformSession::wheel`, `Hit::Wheel`) is where that is written down: a
+ring standing off the middle of the top edge along its outward normal, two
+and a half grab radii out, so it keeps its distance on screen and goes round
+with the box. It does what the space around the box already did; what it
+adds is something to aim at, and a hit of its own, so the page can put the
+turn cursor up and can keep the canvas-edge grab from taking the pixel.
+
+**The 3D transform: Ctrl on a handle.** A placement is a `Projective` — a
+homography — not an `Affine`. Every drag but one composes an affine onto it
+and it stays affine, and `Projective::as_affine` says so, which is what
+keeps the cheaper rendering path and the exact whole-pixel shift. Ctrl is
+what leaves that family: a corner goes wherever the pointer is (Ctrl+Shift
+brings the other end of its edge the other way, which foreshortens it), an
+edge handle slides its edge along itself. Each states where the box's four
+corners are to land and `Projective::from_quad` works out the matrix.
+
+Three things follow from a placement that can be projective, and each is a
+place it is easy to get wrong:
+
+* **Ctrl is read on every pointer move, not at the start of the drag**, so
+  one gesture can scale, distort and scale again. That only works because
+  `Drag::Scale` remembers the matrix and the corners it began with and every
+  move starts again from those — which is also `Editor::pointer_move`'s one
+  extra argument over `pointer_down` and `pointer_up`.
+* **The box no longer decomposes.** There is no angle or scale to read off a
+  homography, so `info`, `set_size`, `flip` and the scaling drags all take
+  the box's own axes from its *corners*. For an affine placement those are
+  the same numbers as before.
+* **Half the plane is behind the viewer.** A homography maps the whole
+  plane, and the half beyond the vanishing line comes out mirrored. So
+  `Projective::image_bounds` clips the source rectangle against that line
+  before measuring where it lands — four mapped corners alone give a box
+  that is inside out — and the renderer drops destination pixels on the
+  wrong side of it. `SmartObject::extent` goes the same way.
+  `from_quad` refuses a quadrilateral that has folded over, so a corner
+  dragged through the shape simply stops following the pointer.
+
+A smart object carries its placement, so a text layer or a placed picture
+can be put in perspective and still re-render from its source. That is what
+format 6 of the file writes (nine numbers rather than six), and what the
+text box on the page is positioned with — a CSS `matrix3d`, the only
+transform that carries the bottom row.
+
 ## Filters
 
 Blur, Sharpen and Add Noise are `adjust::Kind`s like Levels or Curves, and
@@ -875,6 +931,21 @@ approximation `Mask::feather` uses, each a running average so the cost is the
 area rather than the area times the radius. Its prefix sums are `f64`: in
 `f32` they drift far enough over a few thousand pixels that one clip and
 another disagree by a level, which looks exactly like a real clip dependency.
+
+The rest — median, motion blur, pixelate, emboss, find edges — all reach the
+same way, through `Around`: a copy of everything within the filter's reach of
+the clip, taken *before* anything is written, with the edge of the picture
+repeated beyond it. Reading from the copy is what keeps a filter from seeing
+what it has already done, and taking the copy from the clip's surroundings
+rather than the clip is what keeps the answer the same whatever rectangle it
+was asked for. `no_filter_depends_on_the_rectangle_it_was_asked_for` filters
+the same picture whole and then a strip at a time and demands the two agree
+pixel for pixel. Pixelate is the one where the rule bites hardest: its cells
+are laid out from the *document's* origin, never the clip's, or a preview
+through a selection would not line up with the same filter applied to the
+whole layer. Motion blur and pixelate move alpha about, as the blur does, so
+both work in premultiplied colour; median, emboss and find edges keep alpha
+as they found it.
 
 ## Adding things
 
@@ -922,7 +993,8 @@ neither is more than its colours.
 **A filter.** A `Kind` variant in `adjust.rs` as for any adjustment, plus an
 arm in `Kind::is_spatial` and one in `Kind::apply_spatial` pointing at a
 function in `filter.rs`; `Kind::map`, which has only a colour, answers with
-that colour untouched. Give its row in `www/adjust.js` `group: "filter"` so
+that colour untouched. Read its neighbours through `Around` and add it to
+`no_filter_depends_on_the_rectangle_it_was_asked_for`. Give its row in `www/adjust.js` `group: "filter"` so
 it lists under Filter. Read "Filters" first: the clip-independence rule is
 the one that is easy to break and hard to see broken.
 

@@ -1215,6 +1215,14 @@ button.primary {
 .tb-field input {
   width: 4.2em;
 }
+/* What Ctrl does to a handle, where the handles are. It gives way first
+   when the bar runs out of room. */
+.tb-hint {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 .tb-link {
   padding: 2px 6px;
 }

@@ -43,6 +43,10 @@
 //!   group itself, which has no pixels and writes nothing after the kind
 //!   byte. A format-4 file has no groups, so every layer reads back at the
 //!   top level, which is exactly what it was.
+//! * **6** — a smart object's placement is a projective transform, written
+//!   as the nine numbers of its matrix rather than the six of an affine, so
+//!   that an object put in perspective by a 3D transform keeps it. A
+//!   format-5 placement is those six, read as the affine it was.
 
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
@@ -51,11 +55,11 @@ use crate::layer::{Layer, LayerId, LayerKind, SmartObject, Target};
 use crate::raster::Raster;
 use crate::snap::Guides;
 use crate::text::{TextAlign, TextObject, TextStyle};
-use crate::transform::Affine;
+use crate::transform::{Affine, Projective};
 
 const MAGIC: &[u8; 6] = b"NPAINT";
 /// The format this build writes. See the module's version history.
-pub const VERSION: u16 = 5;
+pub const VERSION: u16 = 6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FileError {
@@ -117,8 +121,17 @@ impl Writer {
         self.out.extend_from_slice(&r.to_rgba_bytes());
     }
 
-    fn affine(&mut self, m: &Affine) {
-        for v in [m.a, m.b, m.c, m.d, m.e, m.f] {
+    /// A placement. Format 5 and before could only say affine things, so a
+    /// file written as one of those loses whatever perspective it had.
+    fn placement(&mut self, m: &Projective, version: u16) {
+        if version >= 6 {
+            for v in m.m {
+                self.f64(v);
+            }
+            return;
+        }
+        let a = m.as_affine().unwrap_or(Affine::IDENTITY);
+        for v in [a.a, a.b, a.c, a.d, a.e, a.f] {
             self.f64(v);
         }
     }
@@ -209,7 +222,7 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
             LayerKind::Smart(object) => {
                 w.u8(if object.text.is_some() { 3 } else { 2 });
                 w.raster(&object.source);
-                w.affine(&object.transform);
+                w.placement(&object.transform, version);
                 if let Some(text) = &object.text {
                     w.text(text, version);
                 }
@@ -281,8 +294,16 @@ impl Reader<'_> {
         Raster::from_rgba_bytes(w, h, self.take(n)?).ok_or(FileError::Corrupt("raster bytes"))
     }
 
-    fn affine(&mut self) -> Result<Affine, FileError> {
-        Ok(Affine { a: self.f64()?, b: self.f64()?, c: self.f64()?, d: self.f64()?, e: self.f64()?, f: self.f64()? })
+    fn placement(&mut self, version: u16) -> Result<Projective, FileError> {
+        if version >= 6 {
+            let mut m = [0.0; 9];
+            for v in m.iter_mut() {
+                *v = self.f64()?;
+            }
+            return Ok(Projective { m });
+        }
+        let a = Affine { a: self.f64()?, b: self.f64()?, c: self.f64()?, d: self.f64()?, e: self.f64()?, f: self.f64()? };
+        Ok(a.into())
     }
 
     fn text(&mut self, version: u16) -> Result<TextObject, FileError> {
@@ -372,7 +393,7 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
             }
             kind @ (2 | 3) => {
                 let source = r.raster()?;
-                let transform = r.affine()?;
+                let transform = r.placement(version)?;
                 let mut object = SmartObject::new(source, transform);
                 if kind == 3 {
                     object.text = Some(r.text(version)?);
@@ -459,7 +480,7 @@ mod tests {
         // A curve aimed at one channel: the points and then the channel.
         doc.add_adjustment_layer(Adjustment::from_params("curves", &[0.0, 0.0, 100.0, 150.0, 255.0, 255.0, 2.0]).unwrap(), None);
         doc.place_smart_object("photo", Raster::filled(2, 2, Rgba::BLACK));
-        doc.set_smart_transform(3, Affine::translation(3.0, 1.0)).unwrap();
+        doc.set_smart_transform(3, Affine::translation(3.0, 1.0).into()).unwrap();
         // A text layer, in a style that is nothing like the default.
         let text = TextObject {
             text: "Hi\nthere ✓".to_owned(),
@@ -535,6 +556,28 @@ mod tests {
     }
 
     #[test]
+    fn a_placement_in_perspective_survives_the_round_trip() {
+        use crate::geometry::Point;
+        use crate::transform::Projective;
+        let mut doc = document();
+        let object = doc.layer(3).unwrap().smart_object().expect("the smart object");
+        let (w, h) = (f64::from(object.source.width()), f64::from(object.source.height()));
+        let square = [Point::new(0.0, 0.0), Point::new(w, 0.0), Point::new(w, h), Point::new(0.0, h)];
+        // A trapezoid: the top edge pulled in, as a plane turned away would
+        // leave it. Nothing affine can say this.
+        let quad = [Point::new(2.0, 0.0), Point::new(w - 2.0, 0.0), Point::new(w, h), Point::new(0.0, h)];
+        let placement = Projective::from_quad(square, quad).unwrap();
+        assert!(placement.as_affine().is_none());
+        doc.set_smart_transform(3, placement).unwrap();
+        let (back, _) = load(&save(&doc, &Guides::default())).unwrap();
+        assert_eq!(back.layer(3).unwrap().smart_object().unwrap().transform, placement);
+        // Written as a format-5 file there is nowhere to put it, and the
+        // object comes back placed as squarely as that format could say.
+        let (older, _) = load(&save_as(&doc, &Guides::default(), 5)).unwrap();
+        assert!(older.layer(3).unwrap().smart_object().unwrap().transform.as_affine().is_some());
+    }
+
+    #[test]
     fn a_file_from_an_older_format_still_opens() {
         let bytes = save(&document(), &Guides::default());
         assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), VERSION, "the version is written where the reader looks");
@@ -543,8 +586,10 @@ mod tests {
         // older one that says nothing about a channel comes back on RGB
         // (see `adjust`); 3 added a layer kind; 4 added the Character
         // panel's settings after a text layer, which come back as the
-        // defaults from a format-3 file; 5 added groups, and an older file
-        // has none, so every layer comes back at the top level.
+        // defaults from a format-3 file; 5 added groups, and a file older
+        // than that has none, so every layer comes back at the top level;
+        // 6 made a placement projective, and an older one is the affine it
+        // always was.
         for older in 1..VERSION {
             let bytes = save_as(&document(), &Guides::default(), older);
             let (doc, _) = load(&bytes).expect("an older file still opens");
@@ -554,7 +599,11 @@ mod tests {
             if older < 4 {
                 assert_eq!(text.style.leading, 1.2, "format {older}: the default, not the 1.5 a newer file keeps");
             }
-            assert!(doc.layers().iter().all(|l| l.parent.is_none()), "format {older} has no groups in it");
+            if older < 5 {
+                assert!(doc.layers().iter().all(|l| l.parent.is_none()), "format {older} has no groups in it");
+            }
+            let placed = doc.layers()[3].smart_object().expect("the smart object");
+            assert!(placed.transform.as_affine().is_some(), "format {older} places affinely");
         }
         let (doc, _) = load(&bytes).unwrap();
         assert_eq!(doc.layers()[4].text().unwrap().style.leading, 1.5);

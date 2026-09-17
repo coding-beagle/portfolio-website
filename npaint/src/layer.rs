@@ -29,7 +29,7 @@ use crate::geometry::{Point, Rect};
 use crate::mask::Mask;
 use crate::raster::Raster;
 use crate::text::TextObject;
-use crate::transform::Affine;
+use crate::transform::{Affine, Projective};
 
 /// Identifies a layer for as long as the document lives, independent of its
 /// position in the stack. The page keys its layer list on this so a reorder
@@ -43,8 +43,10 @@ pub use crate::blend::BlendMode;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SmartObject {
     pub source: Raster,
-    /// Source pixel coordinates → document coordinates.
-    pub transform: Affine,
+    /// Source pixel coordinates → document coordinates. Projective rather
+    /// than affine so that a smart object can be put in perspective and
+    /// still re-render from its source.
+    pub transform: Projective,
     /// What the source was drawn from, when it was drawn from text: this
     /// is what makes the layer a text layer. Replacing the contents drops
     /// it, since the picture is no longer the text.
@@ -53,7 +55,7 @@ pub struct SmartObject {
 
 impl SmartObject {
     /// A picture placed by `transform`, with no text behind it.
-    pub fn new(source: Raster, transform: Affine) -> SmartObject {
+    pub fn new(source: Raster, transform: Projective) -> SmartObject {
         SmartObject { source, transform, text: None }
     }
 
@@ -70,14 +72,14 @@ impl SmartObject {
             let now = text.anchor(source.width());
             // The shift is in source pixels, so it goes *before* the
             // transform: `then` applies its argument first.
-            self.transform = self.transform.then(&Affine::translation(was.x - now.x, was.y - now.y));
+            self.transform = self.transform.then(&Affine::translation(was.x - now.x, was.y - now.y).into());
         }
         self.text = Some(text);
         self.source = source;
     }
     /// The object as it lands on a document of the given size.
     pub fn render(&self, width: u32, height: u32) -> Raster {
-        self.source.transformed_into(&self.transform, width, height)
+        self.source.projected_into(&self.transform, width, height)
     }
 
     /// Where the source lands in the document, as whole pixels: the
@@ -85,20 +87,17 @@ impl SmartObject {
     /// the canvas, which is how Reveal All knows there is more to show.
     pub fn extent(&self) -> Rect {
         let (w, h) = (f64::from(self.source.width()), f64::from(self.source.height()));
-        let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)];
-        let mut xs = corners.iter().map(|&(x, y)| self.transform.apply(Point::new(x, y)));
-        let first = xs.next().unwrap_or_default();
-        let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x, first.y);
-        for p in xs {
-            x0 = x0.min(p.x);
-            y0 = y0.min(p.y);
-            x1 = x1.max(p.x);
-            y1 = y1.max(p.y);
-        }
+        let corners = [Point::new(0.0, 0.0), Point::new(w, 0.0), Point::new(w, h), Point::new(0.0, h)];
+        // A placement in perspective sends part of the source behind the
+        // vanishing line, and that part is not drawn; `image_bounds` leaves
+        // it out rather than folding it into the box inside out.
+        let Some((min, max)) = self.transform.image_bounds(corners) else {
+            return Rect::new(0, 0, 1, 1);
+        };
         // The transformed corners are pixel *boundaries*, so the right and
         // bottom ones are exclusive: no +1, unlike `Rect::from_corners`.
-        let (x0, y0) = (x0.floor() as i32, y0.floor() as i32);
-        let (x1, y1) = (x1.ceil() as i32, y1.ceil() as i32);
+        let (x0, y0) = (min.x.floor() as i32, min.y.floor() as i32);
+        let (x1, y1) = (max.x.ceil() as i32, max.y.ceil() as i32);
         Rect::new(x0, y0, (x1 - x0).max(1), (y1 - y0).max(1))
     }
 
@@ -110,7 +109,7 @@ impl SmartObject {
         let dx = ((f64::from(width) - sw * scale) / 2.0).round();
         let dy = ((f64::from(height) - sh * scale) / 2.0).round();
         let transform = Affine::translation(dx, dy).then(&Affine::scaling(scale, scale));
-        SmartObject::new(source, transform)
+        SmartObject::new(source, transform.into())
     }
 }
 
@@ -502,7 +501,7 @@ impl Layer {
     /// empty raster is left empty, and a smart object is re-rendered from
     /// its source after `place` adjusts its transform, rather than being
     /// resampled twice.
-    pub fn map_rasters(&mut self, f: impl Fn(&Raster) -> Raster, place: impl Fn(&Affine) -> Affine, width: u32, height: u32) {
+    pub fn map_rasters(&mut self, f: impl Fn(&Raster) -> Raster, place: impl Fn(&Projective) -> Projective, width: u32, height: u32) {
         match &mut self.kind {
             LayerKind::Pixels => self.raster = f(&self.raster),
             LayerKind::Adjustment(_) | LayerKind::Group => {}
@@ -517,7 +516,7 @@ impl Layer {
     }
 
     /// Moves a smart object's placement and re-renders it.
-    pub fn set_smart_transform(&mut self, transform: Affine, width: u32, height: u32) {
+    pub fn set_smart_transform(&mut self, transform: Projective, width: u32, height: u32) {
         if let LayerKind::Smart(object) = &mut self.kind {
             object.transform = transform;
             self.raster = object.render(width, height);
@@ -648,7 +647,7 @@ mod tests {
         assert_eq!(on_pixels.edit_refusal(), Some(EditRefusal::AdjustmentLayer));
         assert_eq!(on_pixels.raster.width(), 0, "and there are no pixels there anyway");
 
-        let object = SmartObject::new(Raster::filled(1, 1, RED), Affine::IDENTITY);
+        let object = SmartObject::new(Raster::filled(1, 1, RED), Projective::IDENTITY);
         let mut smart = Layer::new_smart(LayerId(3), "photo", object, 2, 2);
         assert_eq!(smart.edit_refusal(), Some(EditRefusal::SmartObject));
         assert_eq!(smart.raster.get(0, 0), RED, "rendered on creation");
@@ -690,7 +689,7 @@ mod tests {
         assert_eq!(layer.raster.get(6, 3).a, 0);
 
         let object = SmartObject::placed(Raster::filled(40, 20, RED), 8, 8);
-        let (sx, sy) = object.transform.scale();
+        let (sx, sy) = object.transform.as_affine().unwrap().scale();
         assert!((sx - 0.2).abs() < 1e-9 && (sy - 0.2).abs() < 1e-9, "a big one is scaled to fit");
         let layer = Layer::new_smart(LayerId(1), "p", object, 8, 8);
         assert_eq!(layer.raster.get(4, 4), RED);
@@ -699,9 +698,9 @@ mod tests {
 
     #[test]
     fn a_smart_object_re_renders_from_its_source_when_moved() {
-        let object = SmartObject::new(Raster::filled(1, 1, RED), Affine::IDENTITY);
+        let object = SmartObject::new(Raster::filled(1, 1, RED), Projective::IDENTITY);
         let mut layer = Layer::new_smart(LayerId(1), "p", object, 4, 4);
-        layer.set_smart_transform(Affine::translation(2.0, 2.0), 4, 4);
+        layer.set_smart_transform(Affine::translation(2.0, 2.0).into(), 4, 4);
         assert_eq!(layer.raster.get(2, 2), RED);
         assert_eq!(layer.raster.get(0, 0).a, 0);
         assert_eq!(layer.smart_object().unwrap().source.get(0, 0), RED, "the source is untouched");
@@ -725,7 +724,7 @@ mod text_tests {
     fn text_layer(align: TextAlign) -> Layer {
         // A 10-wide rendering with 1 of padding: an 8-wide block, placed
         // with its block corner at (5, 5).
-        let mut object = SmartObject::new(Raster::filled(10, 4, RED), Affine::translation(4.0, 4.0));
+        let mut object = SmartObject::new(Raster::filled(10, 4, RED), Affine::translation(4.0, 4.0).into());
         object.text = Some(text("ab", align, 1.0));
         Layer::new_smart(LayerId(1), "ab", object, 40, 40)
     }
@@ -779,11 +778,11 @@ mod text_tests {
     fn set_text_goes_through_the_placement_it_has_been_given() {
         let mut layer = text_layer(TextAlign::Left);
         // Doubled: the block corner (1,1) in source lands at 4 + 2 = 6.
-        layer.set_smart_transform(Affine::translation(4.0, 4.0).then(&Affine::scaling(2.0, 2.0)), 40, 40);
+        layer.set_smart_transform(Affine::translation(4.0, 4.0).then(&Affine::scaling(2.0, 2.0)).into(), 40, 40);
         layer.set_text(text("abcd", TextAlign::Left, 2.0), Raster::filled(20, 6, RED), 40, 40);
         let o = layer.smart_object().unwrap();
         assert_eq!(o.transform.apply(Point::new(2.0, 2.0)), Point::new(6.0, 6.0), "the corner stays put");
-        assert_eq!(o.transform.scale(), (2.0, 2.0), "and so does the scale");
+        assert_eq!(o.transform.as_affine().unwrap().scale(), (2.0, 2.0), "and so does the scale");
     }
 
     #[test]
@@ -792,7 +791,7 @@ mod text_tests {
         pixels.set_text(text("x", TextAlign::Left, 0.0), Raster::filled(1, 1, RED), 2, 2);
         assert!(!pixels.is_text());
         assert_eq!(pixels.name, "a");
-        let mut smart = Layer::new_smart(LayerId(2), "p", SmartObject::new(Raster::new(1, 1), Affine::IDENTITY), 2, 2);
+        let mut smart = Layer::new_smart(LayerId(2), "p", SmartObject::new(Raster::new(1, 1), Projective::IDENTITY), 2, 2);
         smart.set_text(text("x", TextAlign::Left, 0.0), Raster::filled(1, 1, RED), 2, 2);
         assert!(!smart.is_text(), "a plain smart object does not become text by accident");
     }

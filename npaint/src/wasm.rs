@@ -418,11 +418,13 @@ impl NPaint {
     }
 
     /// A smart object's or text layer's placement, source pixels →
-    /// document pixels, as the six numbers of a CSS `matrix()`; empty for
-    /// any other layer.
+    /// document pixels, as the nine numbers of its matrix, row by row;
+    /// empty for any other layer. It is projective rather than affine
+    /// because a 3D transform can put one in perspective, so the page
+    /// builds a CSS `matrix3d` from it rather than a `matrix`.
     pub fn layer_placement(&self, index: usize) -> Result<Vec<f64>, String> {
         self.layer(index)?;
-        Ok(self.editor.layer_placement(index).map(|m| vec![m.a, m.b, m.c, m.d, m.e, m.f]).unwrap_or_default())
+        Ok(self.editor.layer_placement(index).map(|m| m.m.to_vec()).unwrap_or_default())
     }
 
     pub fn set_tolerance(&mut self, tolerance: u8) {
@@ -599,9 +601,9 @@ impl NPaint {
         self.editor.pointer_down(Point::new(x, y), shift, alt)
     }
 
-    pub fn pointer_move(&mut self, x: f64, y: f64, shift: bool, alt: bool, pressure: f64) -> bool {
+    pub fn pointer_move(&mut self, x: f64, y: f64, shift: bool, alt: bool, ctrl: bool, pressure: f64) -> bool {
         self.editor.set_pressure(pressure);
-        self.editor.pointer_move(Point::new(x, y), shift, alt)
+        self.editor.pointer_move(Point::new(x, y), shift, alt, ctrl)
     }
 
     pub fn pointer_up(&mut self, x: f64, y: f64, shift: bool, alt: bool, pressure: f64) -> bool {
@@ -1358,6 +1360,15 @@ impl NPaint {
         }
     }
 
+    /// The rotation wheel's centre as `[x, y]` in screen pixels, or empty
+    /// when not transforming. The page draws it; grabbing it turns the box.
+    pub fn transform_wheel(&self) -> Vec<f64> {
+        match self.editor.transform_wheel() {
+            Some(p) => vec![p.x, p.y],
+            None => Vec::new(),
+        }
+    }
+
     /// `[x, y, width, height, scale_x, scale_y, angle_degrees]`, or empty.
     pub fn transform_info(&self) -> Vec<f64> {
         match self.editor.transform_info() {
@@ -1373,6 +1384,7 @@ impl NPaint {
         match self.editor.transform_hit(Point::new(x, y)) {
             None => String::new(),
             Some(Hit::Inside) => "inside".to_owned(),
+            Some(Hit::Wheel) => "wheel".to_owned(),
             Some(Hit::Rotate) => "rotate".to_owned(),
             Some(Hit::Handle(h)) => match h {
                 Handle::TopLeft => "top-left",
@@ -1675,6 +1687,7 @@ mod tests {
         np.pointer_up(5.0, 5.0, false, false, 1.0);
         np.begin_transform().unwrap();
         assert_eq!(np.transform_handles().len(), 16);
+        assert_eq!(np.transform_wheel().len(), 2);
         assert_eq!(np.transform_info().len(), 7);
         assert_eq!(np.transform_hit(5.5, 5.5), "top-left");
         assert!(np.transform_nudge(1.0, 0.0));
@@ -1703,7 +1716,7 @@ mod tests {
         np.set_scrubby_zoom(false); // the marquee is the option now
         assert!(np.tool_overlay().is_empty());
         np.pointer_down(10.0, 10.0, false, false, 1.0);
-        np.pointer_move(50.0, 30.0, false, false, 1.0);
+        np.pointer_move(50.0, 30.0, false, false, false, 1.0);
         assert_eq!(np.tool_overlay(), vec![10.0, 10.0, 40.0, 20.0]);
         np.pointer_up(50.0, 30.0, false, false, 1.0);
         assert!(np.tool_overlay().is_empty());
@@ -2108,7 +2121,7 @@ mod tests {
         assert_eq!(np.layer_text(0).unwrap(), "");
         assert_eq!(np.layer_text_origin(i).unwrap(), vec![0.0, 0.0]);
         assert!(np.layer_text_origin(0).unwrap().is_empty());
-        assert_eq!(np.layer_placement(i).unwrap(), vec![1.0, 0.0, 0.0, 1.0, 1.0, 2.0], "centred on the click");
+        assert_eq!(np.layer_placement(i).unwrap(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 2.0, 0.0, 0.0, 1.0], "centred on the click");
         assert!(np.layer_placement(0).unwrap().is_empty());
         assert_eq!(np.text_layer_at(2.5, 2.5), 1);
         assert_eq!(np.text_layer_at(3.5, 3.5), -1, "past its right edge");
