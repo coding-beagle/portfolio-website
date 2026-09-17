@@ -1070,6 +1070,14 @@ retina display does not feed the encoder frames the card will never show. The
 box's middle is `pointer-events: none`: the canvas under it has to stay
 paintable, or the shot could not be framed before it is recorded.
 
+The blit lays the viewport's own background colour down before each frame,
+which is not belt and braces. `frame()` clears the view canvas and paints only
+the document rect, so the workspace around the picture is the element's
+background showing through transparent pixels — and `drawImage` composites
+source-over, so blitting those would leave whatever the scratch canvas held
+before. Without the fill the picture smears across the workspace the moment
+the document becomes smaller than the region, which is every crop.
+
 The clips ship with the page, so size is worth a thought — but not much of
 one. A three- to five-second take at 60fps is 60-80 KB, so a clip for all
 twenty-odd tools costs under 2 MB. Length is what drives that; nothing else

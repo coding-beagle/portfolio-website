@@ -284,7 +284,18 @@ export function createRecorder({ canvas, viewport, currentTool, onSaved }) {
     scratch.width = even(src.w * fit);
     scratch.height = even(src.h * fit);
 
+    // The viewport canvas is cleared to transparent and only the document
+    // rect is painted on it, so on screen the workspace around the picture is
+    // the element's own background showing through. `drawImage` composites
+    // source-over, so blitting those transparent pixels would leave whatever
+    // the scratch canvas held before — the picture would smear across the
+    // workspace the moment the document got smaller than the region, which is
+    // every crop. Laying the backdrop down first is what the screen does.
+    const backdrop = getComputedStyle(viewport).backgroundColor || "#1e1e1e";
+
     const blit = () => {
+      scratchCtx.fillStyle = backdrop;
+      scratchCtx.fillRect(0, 0, scratch.width, scratch.height);
       scratchCtx.drawImage(canvas, src.x, src.y, src.w, src.h, 0, 0, scratch.width, scratch.height);
       frameId = requestAnimationFrame(blit);
     };
