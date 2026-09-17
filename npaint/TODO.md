@@ -1,13 +1,12 @@
-Sorted by priority:
+Sorted by priority (top = highest to bottom):
 
 # Features:
+
+Create webm's for demoing filters and adjustment layers, layer masks and layer clipping? How do we record the ones that take a while (e.g. median, etc?)
 
 Change mirror axis via ruler? UX requires thought
 
 Photo / Pixel Art / Vector mode split?
-
-Writing .psd
-psd.rs only loads. Layers and masks alone would make the format two-way.
 
 Layer effects
 Drop shadow, stroke, outer glow as a non-destructive per-layer struct. Text

@@ -1,7 +1,7 @@
-//! Reading Photoshop's `.psd`, so that a document can arrive from somewhere
-//! other than NPaint.
+//! Photoshop's `.psd`, so that a document can arrive from somewhere other
+//! than NPaint and leave for somewhere else.
 //!
-//! This is a *reader*, not an implementation of the format. What it takes
+//! This is not an implementation of the format. What the reader takes
 //! is the part everyone's files are made of: an 8-bit RGB or greyscale
 //! document, its layers with their names, positions, opacity, blend mode,
 //! visibility, clipping and layer masks, stored raw or run-length encoded. What it
@@ -33,12 +33,22 @@
 //! * **Layer effects, adjustment layers, text as text, vector shapes and
 //!   smart objects**, which arrive as the pixels Photoshop last rendered
 //!   for them — which is what the layer's channels hold anyway.
+//!
+//! [`save`] goes the other way, and the asymmetry is the whole of it: a
+//! reader may ignore what it does not understand, and a writer may not.
+//! So it writes the same part of the format the reader takes — an 8-bit RGB
+//! document, its layers, groups, masks, blend modes, opacity, visibility and
+//! clipping, run-length encoded — and anything with no place there is turned
+//! into pixels rather than dropped, with [`export_note`] saying what that
+//! cost. Every file ends with a flattened copy of the picture, so even a
+//! reader that gives up on the layers opens the artwork; this one's own
+//! round trip is what the tests check the writer with.
 
 use crate::blend::BlendMode;
 use crate::color::Rgba;
 use crate::document::Document;
 use crate::geometry::Rect;
-use crate::layer::{Layer, LayerId};
+use crate::layer::{Layer, LayerId, LayerKind};
 use crate::raster::Raster;
 
 const SIGNATURE: &[u8] = b"8BPS";
@@ -296,6 +306,8 @@ struct MaskInfo {
     rect: Rect,
     /// What the mask is outside its own rectangle.
     default: u8,
+    /// A mask that is there but switched off.
+    disabled: bool,
 }
 
 fn read_record(r: &mut Reader) -> Result<Record, PsdError> {
@@ -384,11 +396,14 @@ fn read_mask_info(e: &mut Reader) -> Result<Option<MaskInfo>, PsdError> {
     let bottom = m.i32()?;
     let right = m.i32()?;
     let default = m.u8()?;
+    // Bit 1 is the mask switched off; the rest are positioning and invert,
+    // neither of which the engine's document-sized masks can be.
+    let disabled = m.u8()? & 0x02 != 0;
     let rect = Rect::new(left, top, right - left, bottom - top);
     if rect.is_empty() {
         return Ok(None);
     }
-    Ok(Some(MaskInfo { rect, default }))
+    Ok(Some(MaskInfo { rect, default, disabled }))
 }
 
 /// The layer's channels, decoded and keyed by channel id.
@@ -503,7 +518,7 @@ fn build_layer(record: &Record, planes: &[(i16, Vec<u8>)], width: u32, height: u
     layer.clipped = record.clipped;
     if let (Some(info), Some(bytes)) = (record.mask.as_ref(), plane(-2)) {
         layer.mask = Some(mask_raster(info, bytes, width, height));
-        layer.mask_enabled = true;
+        layer.mask_enabled = !info.disabled;
     }
     Some(layer)
 }
@@ -520,7 +535,7 @@ fn build_group(record: &Record, id: LayerId, width: u32, height: u32, mask: Opti
     group.clipped = record.clipped;
     if let (Some(info), Some(bytes)) = (record.mask.as_ref(), mask) {
         group.mask = Some(mask_raster(info, bytes, width, height));
-        group.mask_enabled = true;
+        group.mask_enabled = !info.disabled;
     }
     group
 }
@@ -734,6 +749,484 @@ impl<'a> Reader<'a> {
             let _ = self.skip(1);
         }
         Ok(Some((key, data)))
+    }
+}
+
+// ---- Writing --------------------------------------------------------------------
+
+/// A document written out as a `.psd`, and anything the user should be told
+/// about what the format could not hold. The counterpart of [`Import`].
+pub struct Export {
+    pub bytes: Vec<u8>,
+    /// One sentence for the status bar, when something was given up.
+    pub note: Option<String>,
+}
+
+/// Writes a document as an 8-bit RGB `.psd`.
+///
+/// Layers, groups, masks, blend modes, opacity, visibility and clipping go
+/// out as themselves. What has no place in the format is resolved into
+/// pixels rather than dropped — an adjustment layer is flattened into what
+/// it was doing — and the file ends with a flattened copy of the whole
+/// picture, so a reader that gives up on the layers still opens the
+/// artwork. Everything is run-length encoded: raw channels would be four
+/// bytes a pixel a layer. [`export_note`] is what the user should be told.
+pub fn save(document: &Document) -> Export {
+    let baked;
+    let layers: &[Layer] = match bake_adjustments(document) {
+        Some(flat) => {
+            baked = flat;
+            &baked
+        }
+        None => document.layers(),
+    };
+
+    let mut w = Writer::new();
+    w.bytes(SIGNATURE);
+    w.u16(1); // a .psd; 2 would be a .psb
+    w.bytes(&[0; 6]); // reserved
+    w.u16(4); // RGBA
+    w.u32(document.height());
+    w.u32(document.width());
+    w.u16(8);
+    w.u16(3); // RGB
+    w.section(&[]); // colour mode data: nothing for an RGB file
+    w.section(&[]); // image resources: guides and thumbnails, none of which go out
+    w.section(&layer_section(layers));
+    w.bytes(&composite_section(&document.composite()));
+    Export { bytes: w.bytes, note: export_note(document) }
+}
+
+/// What a `.psd` of this document cannot hold, as the sentences [`save`]
+/// would come back with — without writing the file, so that the page can
+/// warn before it asks for one.
+pub fn export_note(document: &Document) -> Option<String> {
+    let mut notes = Vec::new();
+    if document.layers().iter().any(Layer::is_adjustment) {
+        notes.push(
+            "Photoshop's adjustment layers are not something NPaint can write, so everything under the topmost one goes out as a single flattened layer.".to_owned(),
+        );
+    }
+    if document.layers().iter().any(|layer| matches!(layer.kind, LayerKind::Smart(_))) {
+        notes.push("Smart objects and text layers go out as the pixels they show.".to_owned());
+    }
+    if document.layers().iter().any(|layer| layer.offscreen.is_some()) {
+        notes.push("Pixels held outside the canvas are not in the file.".to_owned());
+    }
+    join(notes)
+}
+
+/// A document's layers with its adjustment layers resolved into pixels, or
+/// `None` when there were none and nothing had to be given up.
+///
+/// An adjustment layer in a `.psd` is a Photoshop descriptor, a format of
+/// its own that this writer has no way to build — and leaving one out would
+/// change the picture, since what it does is change everything under it. So
+/// it is flattened instead: everything up to and including the topmost
+/// adjustment layer becomes one layer holding what those layers composited
+/// to, and the layers above it go out as themselves. The picture is exact;
+/// what is lost is the separation underneath.
+fn bake_adjustments(document: &Document) -> Option<Vec<Layer>> {
+    let highest = document.layers().iter().rposition(Layer::is_adjustment)?;
+    // The cut may only fall between whole top-level items, and not between
+    // a clipping base and the layers clipped to it — see
+    // `Document::split_point`, which is the same rule from the other end.
+    let mut at = highest;
+    while let Some(parent) = document.parent_index(at) {
+        at = parent;
+    }
+    let mut cut = at + 1;
+    while document.layers().get(cut).is_some_and(Layer::clips_below) {
+        cut = document.subtree(cut).end;
+    }
+
+    let mut flat = Raster::new(document.width(), document.height());
+    document.composite_below(cut, &mut flat, &document.bounds());
+    let free = document.layers().iter().map(|layer| layer.id().0).max().unwrap_or(0) + 1;
+    let mut layers = Vec::with_capacity(document.layers().len() - cut + 1);
+    layers.push(Layer::new(LayerId(free), "Background", flat));
+    layers.extend(document.layers()[cut..].iter().cloned());
+    Some(layers)
+}
+
+/// One row of the layer section, in the order a `.psd` writes them: a
+/// folder is its opening marker, its contents, and then its own record.
+enum Entry<'a> {
+    /// The "bounding section divider" that goes under a folder's contents.
+    Open,
+    /// The folder itself, over them.
+    Close(&'a Layer),
+    Layer(&'a Layer),
+}
+
+/// The layer and mask information section: every record, then every
+/// record's channels in the same order.
+fn layer_section(layers: &[Layer]) -> Vec<u8> {
+    let mut entries = Vec::new();
+    order(layers, None, 0..layers.len(), &mut entries);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let written: Vec<(Vec<u8>, Vec<u8>)> = entries.iter().map(write_entry).collect();
+
+    let mut info = Writer::new();
+    // Negative says the first alpha channel of the flattened copy is the
+    // picture's own transparency, which is what this writer's is.
+    info.i16(-(written.len() as i16));
+    for (record, _) in &written {
+        info.bytes(record);
+    }
+    for (_, data) in &written {
+        info.bytes(data);
+    }
+    info.pad(2);
+
+    let mut out = Writer::new();
+    out.section(&info.bytes);
+    out.u32(0); // no global layer mask
+    out.bytes
+}
+
+/// The entries for the layers inside `parent` that lie in `range`,
+/// bottom-first. A group's contents are the run between the previous
+/// sibling and the group's own row, which is how the document stores them
+/// and how a `.psd` writes them.
+fn order<'a>(layers: &'a [Layer], parent: Option<LayerId>, range: std::ops::Range<usize>, out: &mut Vec<Entry<'a>>) {
+    let mut cursor = range.start;
+    for index in range {
+        let layer = &layers[index];
+        if layer.parent != parent {
+            continue;
+        }
+        let contents = cursor..index;
+        cursor = index + 1;
+        if layer.is_group() {
+            out.push(Entry::Open);
+            order(layers, Some(layer.id()), contents, out);
+            out.push(Entry::Close(layer));
+        } else {
+            out.push(Entry::Layer(layer));
+        }
+    }
+}
+
+/// One entry as its record and its channel data.
+fn write_entry(entry: &Entry) -> (Vec<u8>, Vec<u8>) {
+    let (layer, divider) = match entry {
+        // The marker has no layer of its own: it is a row of nothing whose
+        // only job is to say where the folder above it begins.
+        Entry::Open => return group_marker(),
+        Entry::Close(layer) => (*layer, Some(if layer.collapsed { 2u32 } else { 1 })),
+        Entry::Layer(layer) => (*layer, None),
+    };
+
+    // A folder has no pixels of its own, so its record carries an empty
+    // rectangle and four empty channels — which is what Photoshop writes.
+    let rect = if divider.is_some() {
+        Rect::default()
+    } else {
+        // A layer with nothing on it still has to be a layer when the file
+        // is read back, and an empty rectangle would not be one.
+        layer.raster.content_bounds().unwrap_or(Rect::new(0, 0, 1, 1))
+    };
+    let mask = layer.mask.as_ref().map(|mask| (mask.bounds(), mask_plane(mask)));
+
+    let mut channels: Vec<(i16, Vec<u8>)> = Vec::with_capacity(5);
+    // Alpha first, then the colours, in the order Photoshop writes them.
+    for id in [-1i16, 0, 1, 2] {
+        channels.push((id, channel_bytes(&plane(&layer.raster, rect, id), rect.w as usize, rect.h as usize)));
+    }
+    if let Some((bounds, bytes)) = &mask {
+        channels.push((-2, channel_bytes(bytes, bounds.w as usize, bounds.h as usize)));
+    }
+
+    let mut record = Writer::new();
+    record.rect(rect);
+    record.u16(channels.len() as u16);
+    for (id, bytes) in &channels {
+        record.i16(*id);
+        record.u32(bytes.len() as u32);
+    }
+    record.bytes(BIM);
+    record.bytes(&blend_key(layer.blend));
+    record.u8((layer.opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+    record.u8(u8::from(layer.clipped));
+    // Bit 1 is "hidden", so the sense is the other way about; bit 3 says
+    // the two bits above it are meaningful, which Photoshop always sets.
+    record.u8(if layer.visible { 0x08 } else { 0x0a });
+    record.u8(0); // filler
+
+    let mut extra = Writer::new();
+    match &mask {
+        Some((bounds, _)) => extra.section(&mask_info(*bounds, layer.mask_enabled)),
+        None => extra.u32(0),
+    }
+    extra.u32(0); // blending ranges
+    extra.pascal_padded(&layer.name, 4);
+    extra.additional(b"luni", &unicode_bytes(&layer.name));
+    if let Some(kind) = divider {
+        extra.additional(b"lsct", &kind.to_be_bytes());
+    }
+    extra.pad(2);
+    record.section(&extra.bytes);
+
+    let mut data = Writer::new();
+    for (_, bytes) in &channels {
+        data.bytes(bytes);
+    }
+    (record.bytes, data.bytes)
+}
+
+/// The row under a folder's contents that says where the folder begins: no
+/// pixels, no mask, and a section divider of kind 3. Photoshop names it
+/// `</Layer group>` and so does this.
+fn group_marker() -> (Vec<u8>, Vec<u8>) {
+    let mut record = Writer::new();
+    record.rect(Rect::default());
+    record.u16(4);
+    let mut data = Writer::new();
+    for id in [-1i16, 0, 1, 2] {
+        record.i16(id);
+        record.u32(2); // the compression tag alone: there are no rows
+        data.u16(1);
+    }
+    record.bytes(BIM);
+    record.bytes(b"norm");
+    record.u8(255);
+    record.u8(0);
+    record.u8(0x08);
+    record.u8(0);
+    let mut extra = Writer::new();
+    extra.u32(0); // no mask
+    extra.u32(0); // no blending ranges
+    extra.pascal_padded("</Layer group>", 4);
+    extra.additional(b"lsct", &3u32.to_be_bytes());
+    extra.pad(2);
+    record.section(&extra.bytes);
+    (record.bytes, data.bytes)
+}
+
+/// The layer mask record: where the mask is, what it is outside that, and
+/// whether it is switched on.
+fn mask_info(bounds: Rect, enabled: bool) -> Vec<u8> {
+    let mut m = Writer::new();
+    m.rect(bounds);
+    m.u8(0); // black outside the rectangle — but the rectangle is the canvas
+    m.u8(if enabled { 0 } else { 0x02 });
+    m.u16(0); // padding, so the record is the 20 bytes a reader expects
+    m.bytes
+}
+
+/// One channel of `raster` inside `rect`, row-major. Anything outside the
+/// raster reads as transparent, which is what `Raster::get` gives.
+fn plane(raster: &Raster, rect: Rect, channel: i16) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rect.area() as usize);
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            let pixel = raster.get(x, y);
+            out.push(match channel {
+                0 => pixel.r,
+                1 => pixel.g,
+                2 => pixel.b,
+                _ => pixel.a,
+            });
+        }
+    }
+    out
+}
+
+/// A layer mask as the single grey channel a `.psd` holds it in.
+fn mask_plane(mask: &Raster) -> Vec<u8> {
+    mask.pixels().iter().map(|&pixel| crate::layer::mask_cover(pixel)).collect()
+}
+
+/// One channel as the file holds it: run-length encoded a row at a time,
+/// behind the table of row lengths.
+fn channel_bytes(plane: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut lengths = Vec::with_capacity(height);
+    let mut packed = Vec::new();
+    for y in 0..height {
+        lengths.push(pack_bits(&plane[y * width..(y + 1) * width], &mut packed) as u16);
+    }
+    let mut out = Writer::new();
+    out.u16(1); // run-length encoded
+    for length in lengths {
+        out.u16(length);
+    }
+    out.bytes(&packed);
+    out.bytes
+}
+
+/// The image data section: the flattened picture, every channel in turn,
+/// behind one table of row lengths for all of them.
+fn composite_section(raster: &Raster) -> Vec<u8> {
+    let rect = raster.bounds();
+    let height = rect.h as usize;
+    let mut lengths = Vec::with_capacity(4 * height);
+    let mut packed = Vec::new();
+    for channel in [0i16, 1, 2, -1] {
+        let plane = plane(raster, rect, channel);
+        for y in 0..height {
+            lengths.push(pack_bits(&plane[y * rect.w as usize..(y + 1) * rect.w as usize], &mut packed) as u16);
+        }
+    }
+    let mut out = Writer::new();
+    out.u16(1);
+    for length in lengths {
+        out.u16(length);
+    }
+    out.bytes(&packed);
+    out.bytes
+}
+
+/// PackBits: repeated runs as a count and a byte, everything else copied
+/// through. The inverse of [`unpack_bits`]; returns how many bytes it added.
+fn pack_bits(src: &[u8], out: &mut Vec<u8>) -> usize {
+    let was = out.len();
+    let mut at = 0;
+    while at < src.len() {
+        // Two identical bytes cost the same either way, so a run has to be
+        // three before it is worth breaking the literals for.
+        let run = run_at(src, at);
+        if run >= 3 {
+            out.push((1 - run as i32) as u8);
+            out.push(src[at]);
+            at += run;
+            continue;
+        }
+        let mut end = at;
+        while end < src.len() && end - at < 128 && run_at(src, end) < 3 {
+            end += 1;
+        }
+        out.push((end - at - 1) as u8);
+        out.extend_from_slice(&src[at..end]);
+        at = end;
+    }
+    out.len() - was
+}
+
+/// How many times the byte at `at` repeats, up to the 128 one run may hold.
+fn run_at(src: &[u8], at: usize) -> usize {
+    src[at..].iter().take_while(|&&byte| byte == src[at]).count().min(128)
+}
+
+/// Photoshop's four-letter key for a blend mode — the inverse of
+/// [`blend_of`], which is why every mode here has to stay in step with it.
+fn blend_key(mode: BlendMode) -> [u8; 4] {
+    *match mode {
+        BlendMode::Normal => b"norm",
+        BlendMode::Darken => b"dark",
+        BlendMode::Multiply => b"mul ",
+        BlendMode::ColorBurn => b"idiv",
+        BlendMode::Lighten => b"lite",
+        BlendMode::Screen => b"scrn",
+        BlendMode::ColorDodge => b"div ",
+        BlendMode::Overlay => b"over",
+        BlendMode::SoftLight => b"sLit",
+        BlendMode::HardLight => b"hLit",
+        BlendMode::Difference => b"diff",
+        BlendMode::Exclusion => b"smud",
+        BlendMode::Hue => b"hue ",
+        BlendMode::Saturation => b"sat ",
+        BlendMode::Color => b"colr",
+        BlendMode::Luminosity => b"lum ",
+        BlendMode::PassThrough => b"pass",
+    }
+}
+
+/// The body of a `luni` block: a big-endian UTF-16 string behind its length
+/// in code units.
+fn unicode_bytes(name: &str) -> Vec<u8> {
+    let units: Vec<u16> = name.encode_utf16().collect();
+    let mut out = Vec::with_capacity(4 + units.len() * 2);
+    out.extend_from_slice(&(units.len() as u32).to_be_bytes());
+    for unit in units {
+        out.extend_from_slice(&unit.to_be_bytes());
+    }
+    out
+}
+
+/// A cursor's worth of big-endian bytes going the other way — the
+/// counterpart of [`Reader`].
+struct Writer {
+    bytes: Vec<u8>,
+}
+
+impl Writer {
+    fn new() -> Writer {
+        Writer { bytes: Vec::new() }
+    }
+
+    fn bytes(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
+
+    fn u8(&mut self, value: u8) {
+        self.bytes.push(value);
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes(&value.to_be_bytes());
+    }
+
+    fn i16(&mut self, value: i16) {
+        self.bytes(&value.to_be_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes(&value.to_be_bytes());
+    }
+
+    fn i32(&mut self, value: i32) {
+        self.bytes(&value.to_be_bytes());
+    }
+
+    /// A rectangle as Photoshop's four bounds, whose right and bottom edges
+    /// are one past the last pixel.
+    fn rect(&mut self, rect: Rect) {
+        self.i32(rect.y);
+        self.i32(rect.x);
+        self.i32(rect.bottom());
+        self.i32(rect.right());
+    }
+
+    /// `body` behind its own length.
+    fn section(&mut self, body: &[u8]) {
+        self.u32(body.len() as u32);
+        self.bytes(body);
+    }
+
+    /// Zeroes until the length is a multiple of `to`.
+    fn pad(&mut self, to: usize) {
+        while !self.bytes.len().is_multiple_of(to) {
+            self.u8(0);
+        }
+    }
+
+    /// A Pascal string — one length byte, then the characters — padded out
+    /// so the whole thing is a multiple of `to`.
+    ///
+    /// This one is the legacy name, which is a single byte a character and
+    /// at most 255 of them; the real name goes out in the `luni` block
+    /// beside it, and that is the one a reader should prefer.
+    fn pascal_padded(&mut self, text: &str, to: usize) {
+        let ascii: Vec<u8> = text.chars().map(|c| if c.is_ascii() { c as u8 } else { b'?' }).take(255).collect();
+        self.u8(ascii.len() as u8);
+        self.bytes(&ascii);
+        let used = ascii.len() + 1;
+        for _ in 0..(to - used % to) % to {
+            self.u8(0);
+        }
+    }
+
+    /// An `8BIM`-tagged extra block, padded out to an even length.
+    fn additional(&mut self, key: &[u8; 4], body: &[u8]) {
+        self.bytes(BIM);
+        self.bytes(key);
+        self.section(body);
+        if !body.len().is_multiple_of(2) {
+            self.u8(0);
+        }
     }
 }
 
@@ -1418,6 +1911,28 @@ mod tests {
             let composite = document.composite();
             assert_eq!((composite.width(), composite.height()), (w, h), "{name}: the composite is the wrong size");
 
+            // And what the writer makes of it is a file this reader opens
+            // again unchanged. Nothing Photoshop wrote arrives as an
+            // adjustment layer or a smart object, so there is nothing here
+            // the writer has to give up and the two stacks must match.
+            let export = save(&document);
+            assert_eq!(export.note, None, "{name}: writing it gave something up");
+            let there_and_back = match load(&export.bytes) {
+                Ok(import) => import.document,
+                Err(e) => panic!("{name}: what the writer wrote would not open: {e}"),
+            };
+            assert_eq!(there_and_back.layers().len(), document.layers().len(), "{name}: lost a layer through the .psd writer");
+            for (before, after) in document.layers().iter().zip(there_and_back.layers()) {
+                assert_eq!(before.name, after.name, "{name}: through the .psd writer");
+                assert_eq!(before.blend, after.blend, "{name}: {:?} through the .psd writer", before.name);
+                assert_eq!(before.visible, after.visible, "{name}: {:?} through the .psd writer", before.name);
+                assert_eq!(before.clipped, after.clipped, "{name}: {:?} through the .psd writer", before.name);
+                assert_eq!(before.raster, after.raster, "{name}: {:?} came back different through the .psd writer", before.name);
+                assert_eq!(before.mask, after.mask, "{name}: {:?}'s mask came back different through the .psd writer", before.name);
+                assert_eq!(before.kind.name(), after.kind.name(), "{name}: {:?} through the .psd writer", before.name);
+            }
+            assert_eq!(described(&there_and_back), described(&document), "{name}: the stack came back arranged differently");
+
             // And it is a document the rest of the engine accepts: NPaint's
             // own file writes it and reads it back unchanged.
             let guides = crate::snap::Guides::default();
@@ -1446,5 +1961,292 @@ mod tests {
         let mut out = Vec::new();
         unpack_bits(&[0x80, 0xFE, 7], 4, &mut out);
         assert_eq!(out, vec![7, 7, 7, 0], "-128 does nothing; -2 repeats three times");
+    }
+
+    // ---- Writing ----------------------------------------------------------------
+    //
+    // The reader above is what checks the writer: a document that goes out
+    // and comes back the same has been written in a way this reader — and
+    // so, in the shape of the format, Photoshop — understands.
+
+    use crate::adjust::Kind;
+    use crate::layer::Target;
+
+    fn pixel_layer(id: u32, name: &str, colour: Rgba, width: u32, height: u32) -> Layer {
+        Layer::new(LayerId(id), name, Raster::filled(width, height, colour))
+    }
+
+    fn document_of(width: u32, height: u32, layers: Vec<Layer>) -> Document {
+        let top = layers.len() - 1;
+        Document::from_parts(width, height, layers, top).expect("a sound stack")
+    }
+
+    /// Everything the writer says about a layer, for comparing two stacks
+    /// without a page of assertions each time. The group a layer is in is
+    /// named rather than numbered: ids are the document's own and a file
+    /// hands out fresh ones on the way back in.
+    fn described(document: &Document) -> Vec<String> {
+        document
+            .layers()
+            .iter()
+            .map(|layer| {
+                let parent = layer.parent.and_then(|id| document.index_of(id)).map(|at| document.layers()[at].name.as_str());
+                format!(
+                    "{} {} {:?} {} {} {} {} {}",
+                    layer.name,
+                    layer.kind.name(),
+                    layer.blend,
+                    (layer.opacity * 255.0).round(),
+                    layer.visible,
+                    layer.clipped,
+                    parent.unwrap_or("-"),
+                    layer.mask.is_some(),
+                )
+            })
+            .collect()
+    }
+
+    fn round_trip(document: &Document) -> Import {
+        let export = save(document);
+        load(&export.bytes).expect("what the writer wrote, the reader reads")
+    }
+
+    #[test]
+    fn a_stack_of_layers_goes_out_and_comes_back_the_same() {
+        let mut bottom = pixel_layer(1, "Background", Rgba::opaque(200, 30, 30), 8, 8);
+        bottom.opacity = 0.5;
+        let mut top = pixel_layer(2, "Caf\u{e9} \u{2014} sketch", Rgba::opaque(0, 0, 255), 8, 8);
+        top.blend = BlendMode::Multiply;
+        top.visible = false;
+        let mut clipped = pixel_layer(3, "Clipped", Rgba::opaque(0, 255, 0), 8, 8);
+        clipped.clipped = true;
+        let document = document_of(8, 8, vec![bottom, top, clipped]);
+
+        let import = round_trip(&document);
+        assert_eq!(import.note, None, "nothing had to be given up");
+        assert_eq!(described(&import.document), described(&document));
+        for (before, after) in document.layers().iter().zip(import.document.layers()) {
+            assert_eq!(before.raster, after.raster, "{:?} came back with different pixels", before.name);
+        }
+        assert_eq!(import.document.composite(), document.composite());
+    }
+
+    #[test]
+    fn a_layer_smaller_than_the_canvas_keeps_where_it_sat() {
+        // Written at its own rectangle, as a `.psd` layer is, and placed
+        // back at that corner on the way in.
+        let mut layer = pixel_layer(1, "Patch", Rgba::TRANSPARENT, 8, 8);
+        layer.raster.fill_rect(Rect::new(2, 3, 3, 2), Rgba::opaque(10, 20, 30), &Rect::new(0, 0, 8, 8));
+        let document = document_of(8, 8, vec![layer]);
+
+        let import = round_trip(&document);
+        let back = &import.document.layers()[0].raster;
+        assert_eq!(back.get(2, 3), Rgba::opaque(10, 20, 30));
+        assert_eq!(back.get(4, 4), Rgba::opaque(10, 20, 30));
+        assert_eq!(back.get(1, 3), Rgba::TRANSPARENT);
+        assert_eq!(back.get(5, 4), Rgba::TRANSPARENT);
+    }
+
+    #[test]
+    fn an_empty_layer_is_still_a_layer_when_it_comes_back() {
+        let document = document_of(4, 4, vec![pixel_layer(1, "Nothing on it", Rgba::TRANSPARENT, 4, 4)]);
+        let import = round_trip(&document);
+        assert_eq!(import.document.layers().len(), 1);
+        assert_eq!(import.document.layers()[0].name, "Nothing on it");
+        assert_eq!(import.document.layers()[0].raster, Raster::new(4, 4));
+    }
+
+    #[test]
+    fn groups_go_out_as_folders_and_come_back_nested() {
+        // Outer { Inner { Deep }, Beside }, with a plain layer under it all.
+        let mut inner = Layer::new_group(LayerId(4), "Inner");
+        inner.blend = BlendMode::Screen;
+        let mut outer = Layer::new_group(LayerId(5), "Outer");
+        outer.collapsed = true;
+        outer.opacity = 0.25;
+        let mut deep = pixel_layer(2, "Deep", Rgba::opaque(0, 128, 0), 8, 8);
+        deep.parent = Some(LayerId(4));
+        let mut beside = pixel_layer(3, "Beside", Rgba::opaque(0, 0, 128), 8, 8);
+        beside.parent = Some(LayerId(5));
+        inner.parent = Some(LayerId(5));
+        let document = document_of(8, 8, vec![pixel_layer(1, "Floor", Rgba::opaque(9, 9, 9), 8, 8), deep, inner, beside, outer]);
+
+        let import = round_trip(&document);
+        assert_eq!(import.note, None);
+        assert_eq!(described(&import.document), described(&document), "the nesting and the settings both came back");
+        assert!(layer_named(&import, "Outer").collapsed, "a shut folder comes back shut");
+        assert_eq!(layer_named(&import, "Outer").blend, BlendMode::PassThrough, "which is what a group defaults to");
+        assert_eq!(import.document.composite(), document.composite());
+    }
+
+    #[test]
+    fn a_mask_goes_out_with_its_layer_switched_on_or_off() {
+        let mut on = pixel_layer(1, "Masked", Rgba::opaque(255, 255, 255), 6, 6);
+        let mut mask = Raster::filled(6, 6, Rgba::opaque(0, 0, 0));
+        mask.fill_rect(Rect::new(1, 1, 3, 3), Rgba::opaque(255, 255, 255), &Rect::new(0, 0, 6, 6));
+        on.mask = Some(mask.clone());
+        let mut off = pixel_layer(2, "Mask off", Rgba::opaque(0, 0, 0), 6, 6);
+        off.mask = Some(mask.clone());
+        off.mask_enabled = false;
+        let document = document_of(6, 6, vec![on, off]);
+
+        let import = round_trip(&document);
+        let back = layer_named(&import, "Masked");
+        assert_eq!(back.mask.as_ref().expect("a mask"), &mask);
+        assert!(back.mask_enabled);
+        assert!(!layer_named(&import, "Mask off").mask_enabled, "a mask that was switched off comes back switched off");
+        assert_eq!(import.document.composite(), document.composite());
+    }
+
+    #[test]
+    fn an_adjustment_layer_is_flattened_and_the_note_says_so() {
+        let mut document = document_of(
+            8,
+            8,
+            vec![pixel_layer(1, "Floor", Rgba::opaque(200, 100, 50), 8, 8), pixel_layer(2, "Over", Rgba::opaque(0, 0, 60), 8, 8)],
+        );
+        document.add_adjustment_layer(Kind::Invert.into(), None);
+        let over = document.add_layer_from("Above it", Raster::filled(8, 8, Rgba::new(255, 255, 255, 40))).unwrap();
+        assert!(over > 0);
+        let before = document.composite();
+
+        let export = save(&document);
+        let import = load(&export.bytes).unwrap();
+        assert!(export.note.unwrap_or_default().contains("adjustment layers"), "the user is told what was given up");
+        assert_eq!(import.document.composite(), before, "the picture is exactly what it was");
+        assert_eq!(import.document.layers().len(), 2, "everything under the adjustment became one layer");
+        assert_eq!(import.document.layers()[0].name, "Background");
+        assert_eq!(import.document.layers()[1].name, "Above it");
+    }
+
+    #[test]
+    fn an_adjustment_layer_at_the_top_of_the_stack_flattens_the_lot() {
+        let mut document = document_of(4, 4, vec![pixel_layer(1, "Floor", Rgba::opaque(200, 100, 50), 4, 4)]);
+        document.add_adjustment_layer(Kind::Invert.into(), None);
+        let before = document.composite();
+
+        let import = load(&save(&document).bytes).unwrap();
+        assert_eq!(import.document.layers().len(), 1);
+        assert_eq!(import.document.composite(), before);
+    }
+
+    #[test]
+    fn an_adjustment_layer_inside_a_group_takes_the_whole_group_with_it() {
+        // The cut may only fall between top-level items, so an adjustment
+        // anywhere inside a group flattens the group it is in as well.
+        let mut deep = pixel_layer(2, "Deep", Rgba::opaque(0, 128, 0), 8, 8);
+        deep.parent = Some(LayerId(3));
+        let mut document = document_of(
+            8,
+            8,
+            vec![
+                pixel_layer(1, "Floor", Rgba::opaque(200, 100, 50), 8, 8),
+                deep,
+                Layer::new_group(LayerId(3), "Folder"),
+                pixel_layer(4, "Above it", Rgba::new(0, 0, 255, 60), 8, 8),
+            ],
+        );
+        document.set_active(1).unwrap();
+        document.add_adjustment_layer(Kind::Invert.into(), None);
+        assert_eq!(document.layers()[2].parent, Some(LayerId(3)), "the adjustment went inside the folder");
+        let before = document.composite();
+
+        let import = load(&save(&document).bytes).unwrap();
+        assert_eq!(import.document.composite(), before, "the picture is exactly what it was");
+        assert_eq!(
+            import.document.layers().iter().map(|layer| layer.name.as_str()).collect::<Vec<_>>(),
+            vec!["Background", "Above it"]
+        );
+    }
+
+    #[test]
+    fn a_layer_clipped_to_what_the_adjustment_flattened_is_flattened_with_it() {
+        // Cutting between a clipping base and what is clipped to it would
+        // leave neither side a picture, so the cut moves up past them.
+        // The folder holding the adjustment is what the layer above clips
+        // to, so the cut cannot fall between them.
+        let mut deep = pixel_layer(2, "Deep", Rgba::new(0, 0, 255, 200), 8, 8);
+        deep.parent = Some(LayerId(3));
+        let mut clipped = pixel_layer(4, "Clipped", Rgba::opaque(0, 255, 0), 8, 8);
+        clipped.clipped = true;
+        let mut document = document_of(
+            8,
+            8,
+            vec![pixel_layer(1, "Floor", Rgba::opaque(200, 100, 50), 8, 8), deep, Layer::new_group(LayerId(3), "Folder"), clipped],
+        );
+        document.set_active(1).unwrap();
+        document.add_adjustment_layer(Kind::Invert.into(), None);
+        let before = document.composite();
+
+        let import = load(&save(&document).bytes).unwrap();
+        assert_eq!(import.document.composite(), before, "the picture is exactly what it was");
+        assert_eq!(import.document.layers().len(), 1, "the base and what clips to it came down together");
+    }
+
+    #[test]
+    fn a_smart_object_goes_out_as_its_pixels() {
+        let mut document = document_of(8, 8, vec![pixel_layer(1, "Floor", Rgba::opaque(1, 2, 3), 8, 8)]);
+        document.place_smart_object("Placed", Raster::filled(4, 4, Rgba::opaque(7, 8, 9)));
+        let export = save(&document);
+        let import = load(&export.bytes).unwrap();
+        assert!(export.note.unwrap_or_default().contains("Smart objects"));
+        assert_eq!(layer_named(&import, "Placed").kind.name(), "pixels");
+        assert_eq!(import.document.composite(), document.composite());
+    }
+
+    /// The file with its layer section emptied: what a reader that cannot
+    /// make sense of the layers is left with.
+    fn without_layers(bytes: &[u8]) -> Vec<u8> {
+        let at = 26 + 4 + 4; // the header, the colour mode data, the image resources
+        let len = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        let mut out = bytes[..at].to_vec();
+        out.extend_from_slice(&be32(0));
+        out.extend_from_slice(&bytes[at + 4 + len..]);
+        out
+    }
+
+    #[test]
+    fn the_file_carries_a_flattened_copy_of_the_whole_picture() {
+        let mut top = pixel_layer(2, "Over", Rgba::new(0, 0, 255, 128), 8, 8);
+        top.blend = BlendMode::Multiply;
+        let document = document_of(8, 8, vec![pixel_layer(1, "Floor", Rgba::opaque(200, 100, 50), 8, 8), top]);
+
+        let import = load(&without_layers(&save(&document).bytes)).unwrap();
+        assert_eq!(import.document.layers().len(), 1, "it opened flattened");
+        assert_eq!(import.document.layers()[0].raster, document.composite());
+    }
+
+    #[test]
+    fn a_mask_being_edited_is_written_as_a_mask_and_not_as_pixels() {
+        // The target says which raster the tools are pointed at; it is the
+        // editor's business and has nothing to do with what a file holds.
+        let mut layer = pixel_layer(1, "Masked", Rgba::opaque(255, 0, 0), 4, 4);
+        layer.mask = Some(Raster::filled(4, 4, Rgba::opaque(128, 128, 128)));
+        layer.set_target(Target::Mask);
+        let document = document_of(4, 4, vec![layer]);
+        let import = round_trip(&document);
+        assert_eq!(import.document.layers()[0].raster.get(0, 0), Rgba::opaque(255, 0, 0));
+        assert_eq!(import.document.layers()[0].mask.as_ref().unwrap().get(0, 0), Rgba::opaque(128, 128, 128));
+    }
+
+    #[test]
+    fn packbits_packs_what_it_unpacks() {
+        let cases: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![7],
+            vec![1, 2, 3, 4, 5],
+            vec![9; 300],                                        // longer than one run may be
+            (0..255u8).collect(),                                // no run anywhere
+            [vec![4; 5], vec![1, 2, 3], vec![8; 129]].concat(),   // runs and literals together
+        ];
+        for case in cases {
+            let mut packed = Vec::new();
+            let len = pack_bits(&case, &mut packed);
+            assert_eq!(len, packed.len());
+            let mut out = Vec::new();
+            unpack_bits(&packed, case.len(), &mut out);
+            assert_eq!(out, case, "{} bytes did not survive packing", case.len());
+            assert!(packed.len() <= case.len() + case.len() / 128 + 1, "packing made it bigger");
+        }
     }
 }

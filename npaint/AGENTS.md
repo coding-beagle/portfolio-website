@@ -367,9 +367,33 @@ last section, so a zip-compressed channel or an arrangement the reader does
 not know ends in the picture opening as one layer with a note saying why,
 rather than an error. `Import::note` is that sentence and the page puts it in
 the status bar. What is refused outright — 16-bit, CMYK, Lab, `.psb` — is
-refused by name, because there is nothing honest to convert it into. There is
-no `.psd` *writer*, and adding one is a bigger job than the reader: a reader
-may ignore what it does not understand and a writer may not.
+refused by name, because there is nothing honest to convert it into.
+
+**Writing them.** `psd::save` goes the other way, and File > Export
+Photoshop File is where the page asks for it. A writer is the harder half —
+a reader may ignore what it does not understand and a writer may not — so it
+writes the part of the format the reader takes and nothing else: an 8-bit
+RGB document, its layers, groups, masks, blend modes, opacity, visibility
+and clipping, every channel run-length encoded. Groups go out in the three
+rows Photoshop writes them as, which is the same arrangement read back in.
+
+What has no place in a `.psd` is turned into pixels rather than dropped,
+because a file that does not look like the document would be worse than one
+that has lost some structure. A smart object or a text layer goes out as the
+pixels it shows. An **adjustment layer** would need a Photoshop descriptor,
+a format of its own, so everything up to and including the topmost one is
+composited into a single layer with the adjustment baked in and the layers
+above it written as they are: the picture is exact and what is lost is the
+separation underneath. `psd::export_note` is the sentence saying which of
+those happened, and the page puts it in a confirmation before it writes
+anything — `.npaint` remains the format that keeps everything, and an export
+does not clear the unsaved mark.
+
+Every file ends with a flattened copy of the whole picture, which is what a
+reader that cannot follow the layers falls back to — including this one, so
+the round trip through `psd::load` is what the tests check the writer with.
+`files_photoshop_actually_wrote` takes each real file in `test_psds/` out
+through the writer and back, and the layers have to come back identical.
 
 **Autosave.** `www/recovery.js` keeps one copy of the document — the same
 gzipped stream `File > Save` writes — in IndexedDB, and the page offers it
@@ -1519,8 +1543,11 @@ prompt and then pressing Ctrl+Z twice puts the smart object back.
 
 No polygonal lasso — the freehand one is there, and a polygon wants clicks
 that accumulate across gestures, which the `begin`/`update`/`finish` model
-has no place for yet; no `.psd` *writer*, and the reader's own limits are in
-"Photoshop files"; a group's knockout and "blend interior" settings are not
+has no place for yet; the `.psd` writer holds layers, groups and masks and
+nothing beyond them — no layer effects, no adjustment layers, no text as
+text, no paths, no image resources, so a document's guides, a layer's locks
+and the pixels a layer keeps off the canvas do not survive the trip, and the reader's own
+limits are in "Photoshop files"; a group's knockout and "blend interior" settings are not
 read, and a group is either pass-through or isolated with nothing in
 between; a layer can be in only one group and there is no way to move a
 group's contents without moving the group;

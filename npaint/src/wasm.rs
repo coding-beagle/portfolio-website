@@ -704,6 +704,19 @@ impl NPaint {
         Ok(())
     }
 
+    /// The document as a Photoshop file. An export rather than a save: it
+    /// leaves the document counting as modified, and `psd_export_note` says
+    /// what the format could not hold.
+    pub fn export_psd(&mut self) -> Vec<u8> {
+        self.editor.export_psd()
+    }
+
+    /// What a `.psd` of this document would not hold, or an empty string
+    /// when it would hold all of it.
+    pub fn psd_export_note(&self) -> String {
+        self.editor.psd_export_note().unwrap_or_default()
+    }
+
     /// Opens a Photoshop file, replacing the document. Returns a sentence
     /// about anything that had to be approximated, or an empty string when
     /// nothing did.
@@ -2147,6 +2160,25 @@ mod tests {
         assert!(np.open_psd(b"not one").unwrap_err().contains("not a Photoshop file"));
         // The frame still matches the document it refused to replace.
         assert_eq!(np.frame_len(), 2 * 2 * 4);
+    }
+
+    #[test]
+    fn a_photoshop_file_written_here_opens_here() {
+        let mut np = NPaint::new(4, 4, "#ff0000").unwrap();
+        np.add_layer();
+        np.rename_layer(1, "Over").unwrap();
+        np.set_layer_blend(1, "multiply").unwrap();
+        assert_eq!(np.psd_export_note(), "", "a stack of plain layers goes out whole");
+        let bytes = np.export_psd();
+        assert!(np.is_modified(), "an export is not a save");
+
+        let mut other = NPaint::new(1, 1, "#000000").unwrap();
+        assert_eq!(other.open_psd(&bytes).unwrap(), "");
+        assert_eq!(other.width(), 4);
+        assert_eq!(other.layer_count(), 2);
+        assert_eq!(other.layer_name(1).unwrap(), "Over");
+        assert_eq!(other.layer_blend(1).unwrap(), "multiply");
+        assert_eq!(other.frame_len(), 4 * 4 * 4);
     }
 
     #[test]

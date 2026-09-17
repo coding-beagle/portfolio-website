@@ -575,6 +575,18 @@ export class NPaint {
         }
     }
     /**
+     * The document as a Photoshop file. An export rather than a save: it
+     * leaves the document counting as modified, and `psd_export_note` says
+     * what the format could not hold.
+     * @returns {Uint8Array}
+     */
+    export_psd() {
+        const ret = wasm.npaint_export_psd(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * @returns {boolean}
      */
     fill() {
@@ -1683,6 +1695,23 @@ export class NPaint {
             throw takeFromExternrefTable0(ret[1]);
         }
         return ret[0] !== 0;
+    }
+    /**
+     * What a `.psd` of this document would not hold, or an empty string
+     * when it would hold all of it.
+     * @returns {string}
+     */
+    psd_export_note() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_psd_export_note(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @param {number} index

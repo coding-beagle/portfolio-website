@@ -428,6 +428,25 @@ impl Editor {
         file::save(&self.document, &self.settings.guides)
     }
 
+    /// The document as a Photoshop file, for taking the work somewhere
+    /// else.
+    ///
+    /// This is an export and not a save: a `.psd` cannot carry a smart
+    /// object's source, an adjustment layer or the pixels a layer keeps off
+    /// the canvas, so the document goes on counting as modified and
+    /// `.npaint` stays the format that keeps everything.
+    /// [`Editor::psd_export_note`] is what the user should be told first.
+    pub fn export_psd(&mut self) -> Vec<u8> {
+        self.cancel_session();
+        self.abort_gesture();
+        crate::psd::save(&self.document).bytes
+    }
+
+    /// What a `.psd` of this document would not hold, if anything.
+    pub fn psd_export_note(&self) -> Option<String> {
+        crate::psd::export_note(&self.document)
+    }
+
     /// Opens a Photoshop file, replacing the document.
     ///
     /// Returns what the user should be told about how it got here, if

@@ -2490,6 +2490,7 @@ function menuDefinitions() {
         { sep: true },
         { label: "Save…", shortcut: "Ctrl+S", action: saveDocument },
         { label: "Export Image…", shortcut: "Ctrl+Shift+S", action: showExportDialog },
+        { label: "Export Photoshop File…", action: exportPsd },
       ],
     },
     { title: "Edit", items: editItems() },
@@ -3300,6 +3301,22 @@ async function saveDocument() {
   autosavedState = np.document_state();
   clearRecovery();
   message(`Saved ${base}.npaint (${Math.round(blob.size / 1024)} kB). Open it again with File > Open.`);
+}
+
+/** Writes the document as a `.psd`, for taking the work to Photoshop or
+ *  anything else that reads one. An export and not a save: it leaves the
+ *  document counting as modified and the recovery copy where it is, because
+ *  a `.psd` does not hold everything a `.npaint` does — the engine says what
+ *  it would lose, and the user is asked before anything is written. */
+function exportPsd() {
+  const lost = np.psd_export_note();
+  if (lost && !window.confirm(`${lost}\n\nWrite the .psd anyway?`)) return;
+  const name = window.prompt("Export as", `${docName}.psd`);
+  if (name === null) return;
+  const base = name.replace(/\.psd$/i, "").trim() || docName;
+  const blob = new Blob([np.export_psd()], { type: "image/vnd.adobe.photoshop" });
+  download(blob, `${base}.psd`);
+  message(`Exported ${base}.psd (${Math.round(blob.size / 1024)} kB).${lost ? ` ${lost}` : ""}`);
 }
 
 // ---- Autosave and recovery -----------------------------------------------------

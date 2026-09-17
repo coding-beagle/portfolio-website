@@ -306,7 +306,9 @@ impl Document {
             }
         }
         let mut start = self.subtree(at).start;
-        while start > 0 && self.layers[at].clips_below() {
+        // One past the top of the stack is a cut like any other — there is
+        // simply no layer above it to keep whole.
+        while start > 0 && self.layers.get(at).is_some_and(Layer::clips_below) {
             at = start - 1;
             start = self.subtree(at).start;
         }
