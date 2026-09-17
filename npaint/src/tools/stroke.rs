@@ -1,6 +1,7 @@
-//! Freehand strokes: the brush, the pencil, the eraser and the clone stamp.
+//! Freehand strokes: the brush, the pencil, the eraser, the clone stamp and
+//! the healing brush.
 //!
-//! All four are the same gesture — stamp a dab at every pixel the pointer
+//! All five are the same gesture — stamp a dab at every pixel the pointer
 //! passes — and differ only in what the stamp does. The stroke is built up as
 //! a coverage mask and applied to a copy of the layer taken at the start,
 //! so overlapping stamps within one stroke do not compound: a 50% brush lays
@@ -21,6 +22,14 @@
 //! across strokes, so a run of separate strokes rebuilds one continuous
 //! copy; without it every stroke starts from the anchor again.
 //!
+//! The healing brush is that same copy with the seam taken out of it. While
+//! the pointer is down it is the clone stamp exactly; when the pointer comes
+//! up, the whole of what the stroke covered is blended into its surroundings
+//! in the gradient domain (see [`crate::heal`]), so the patch keeps its
+//! texture and takes on the tone of where it landed. Photoshop's does the
+//! same thing at the same moment, and for the same reason: the blend is over
+//! the whole stroke, which is not something a dab at a time can give.
+//!
 //! Three settings shape the path before it is stamped. *Smoothing* makes
 //! the brush trail the pointer — each event moves the brush only part of
 //! the way towards it — which rounds off the jitter of a hand; the stroke
@@ -30,6 +39,7 @@
 //! copies never compound where they meet.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
+use crate::color::Rgba;
 use crate::geometry::{Point, Rect};
 use crate::raster::Raster;
 
@@ -44,6 +54,17 @@ pub enum StrokeMode {
     /// Paints what is at the same offset from the pointer as the source
     /// anchor was when the stroke began.
     Clone,
+    /// The clone stamp, with the copy blended into its surroundings when the
+    /// stroke ends so that no seam shows.
+    Heal,
+}
+
+impl StrokeMode {
+    /// Whether the mode paints pixels read from elsewhere in the picture,
+    /// which is what needs a source anchor and an offset.
+    fn copies_pixels(self) -> bool {
+        matches!(self, StrokeMode::Clone | StrokeMode::Heal)
+    }
 }
 
 #[derive(Debug)]
@@ -63,6 +84,10 @@ struct InProgress {
     base: Raster,
     /// Where the stroke has been: alpha 255 for covered pixels.
     mask: Raster,
+    /// Everything the stroke has stamped, clipped — the healing brush's
+    /// working area, and cheaper to accumulate here than to find by
+    /// searching the mask when the stroke ends.
+    covered: Rect,
     /// Clone only: the pixels to copy from, as they were when the stroke
     /// began, and how far they are from the pointer.
     source: Option<CloneSource>,
@@ -136,6 +161,7 @@ impl StrokeTool {
         }
         g.last = to;
         let region = segment.intersect(&clip);
+        g.covered = g.covered.union(&region);
         let layer = ctx.document.active_surface_mut();
         let color = ctx.settings.color;
         let opacity = ctx.settings.opacity;
@@ -159,7 +185,7 @@ impl StrokeTool {
                         // Off the edge of the source the copy has nothing to
                         // lay down, and `Raster::get` says so with a
                         // transparent pixel that leaves `before` as it was.
-                        StrokeMode::Clone => match &g.source {
+                        StrokeMode::Clone | StrokeMode::Heal => match &g.source {
                             Some(src) => src.pixels.get(x + src.dx, y + src.dy).scaled_alpha(opacity).over(before),
                             None => before,
                         },
@@ -171,6 +197,91 @@ impl StrokeTool {
         }
         self.touched = Some(region);
     }
+
+    /// The healing brush's second half: the whole of what the stroke copied,
+    /// pulled into tone with what surrounds it, once the pointer is up.
+    ///
+    /// The grid handed to the solver is the stroke's area grown by a pixel,
+    /// so its outermost ring is picture the stroke never touched and is
+    /// where the correction is pinned; everything inside is solved for. The
+    /// answer is added to the copied pixels, which are then laid over the
+    /// layer exactly as the clone stamp laid them, coverage and opacity and
+    /// all — so a soft rim stays soft and a selection still holds.
+    fn blend_seam(&mut self, ctx: &mut ToolContext) {
+        let opacity = ctx.settings.opacity;
+        let bounds = ctx.document.bounds();
+        let Some(g) = self.gesture.as_ref() else { return };
+        let Some(source) = g.source.as_ref() else { return };
+        if g.covered.is_empty() {
+            return;
+        }
+        let grid = g.covered.inflate(1);
+        let (width, height) = (grid.w as usize, grid.h as usize);
+        // Both sides of the difference come from the one sampled picture, so
+        // that "all layers" compares like with like: where the copy is read
+        // from, and where it is going. Past the edge of the picture there is
+        // nothing to match, so the nearest pixel that is in it stands in.
+        let read = |x: i32, y: i32| {
+            let inside_x = x.clamp(bounds.x, bounds.right() - 1);
+            let inside_y = y.clamp(bounds.y, bounds.bottom() - 1);
+            let here = source.pixels.get(inside_x, inside_y);
+            (here, source.pixels.get(inside_x + source.dx, inside_y + source.dy))
+        };
+        let mut known = vec![[0.0f32; 3]; width * height];
+        let mut unknown = vec![false; width * height];
+        for row in 0..height {
+            for column in 0..width {
+                let (x, y) = (grid.x + column as i32, grid.y + row as i32);
+                let i = row * width + column;
+                unknown[i] = g.covered.contains(x, y) && g.mask.get(x, y).a > 0;
+                let (here, copied) = read(x, y);
+                // Transparent on either side is no colour to match, and a
+                // difference taken against one would be a difference against
+                // whatever happens to be stored under it.
+                if here.a > 0 && copied.a > 0 {
+                    known[i] = [
+                        f32::from(here.r) - f32::from(copied.r),
+                        f32::from(here.g) - f32::from(copied.g),
+                        f32::from(here.b) - f32::from(copied.b),
+                    ];
+                }
+            }
+        }
+        let correction = crate::heal::harmonic_fill(&known, &unknown, width, height);
+        let layer = ctx.document.active_surface_mut();
+        for row in 0..height {
+            for column in 0..width {
+                let i = row * width + column;
+                if !unknown[i] {
+                    continue;
+                }
+                let (x, y) = (grid.x + column as i32, grid.y + row as i32);
+                let copied = source.pixels.get(x + source.dx, y + source.dy);
+                let before = g.base.get(x, y);
+                if copied.a == 0 {
+                    continue;
+                }
+                let healed = Rgba::new(
+                    level(f32::from(copied.r) + correction[i][0]),
+                    level(f32::from(copied.g) + correction[i][1]),
+                    level(f32::from(copied.b) + correction[i][2]),
+                    copied.a,
+                );
+                let full = healed.scaled_alpha(opacity).over(before);
+                let cover = g.mask.get(x, y).a;
+                let after =
+                    if cover == 255 { full } else { before.lerp(full, f32::from(cover) / 255.0) };
+                layer.set(x, y, after);
+            }
+        }
+        let covered = g.covered;
+        self.touched = Some(self.touched.map_or(covered, |already| already.union(&covered)));
+    }
+}
+
+/// A corrected channel back in the 0..=255 a picture is kept in.
+fn level(value: f32) -> u8 {
+    value.clamp(0.0, 255.0).round() as u8
 }
 
 /// How far apart the discs along a stroke are stamped, in pixels. Coverage
@@ -201,11 +312,12 @@ impl Tool for StrokeTool {
             StrokeMode::Pencil => ToolKind::Pencil,
             StrokeMode::Eraser => ToolKind::Eraser,
             StrokeMode::Clone => ToolKind::Clone,
+            StrokeMode::Heal => ToolKind::Heal,
         }
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
-        if self.mode == StrokeMode::Clone {
+        if self.mode.copies_pixels() {
             // Alt-click marks where to copy from; it paints nothing, and the
             // offset the last anchor gave is no longer the one in force.
             if ev.alt {
@@ -217,7 +329,7 @@ impl Tool for StrokeTool {
                 return Gesture::Passive;
             }
         }
-        let source = if self.mode == StrokeMode::Clone { self.clone_source(ctx, ev.pos) } else { None };
+        let source = if self.mode.copies_pixels() { self.clone_source(ctx, ev.pos) } else { None };
         let layer = ctx.document.active_surface();
         // With Shift, the stroke starts where the last one ended, so the
         // first stamp draws a straight line from there to the click.
@@ -226,6 +338,7 @@ impl Tool for StrokeTool {
             last: from,
             base: layer.clone(),
             mask: Raster::new(layer.width(), layer.height()),
+            covered: Rect::default(),
             source,
         });
         // A click without movement still lays down one dab.
@@ -248,6 +361,9 @@ impl Tool for StrokeTool {
         }
         // The stroke ends where the pointer is, smoothing or no smoothing.
         self.stamp_to(ctx, ev.pos, ev.pressure);
+        if self.mode == StrokeMode::Heal {
+            self.blend_seam(ctx);
+        }
         self.previous_end = self.gesture.take().map(|g| g.last);
         true
     }
@@ -672,6 +788,83 @@ mod tests {
         rig.settings.clone_anchor = Some(Point::new(29.0, 15.0));
         rig.stroke(&[(5.0, 15.0)]);
         assert_eq!(rig.px(5, 15), GREEN, "unchanged: the source is empty there");
+    }
+
+    /// A picture in two tones: a dark field on the left with a brighter mark
+    /// in it, and a lighter field on the right to copy the mark onto. A
+    /// hundred levels between the two fields, fifty between field and mark.
+    fn two_tones(rig: &mut Rig) {
+        let all = Rect::new(0, 0, 60, 60);
+        rig.doc = Document::new(60, 60, Rgba::opaque(200, 200, 200));
+        let raster = &mut rig.doc.active_layer_mut().raster;
+        raster.fill_rect(Rect::new(0, 0, 20, 60), Rgba::opaque(100, 100, 100), &all);
+        raster.fill_rect(Rect::new(9, 29, 3, 3), Rgba::opaque(150, 150, 150), &all);
+        rig.settings.size = 9;
+        rig.settings.clone_anchor = Some(Point::new(10.0, 30.0));
+    }
+
+    #[test]
+    fn the_healing_brush_takes_the_tone_it_lands_in_and_keeps_the_detail() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        two_tones(&mut rig);
+        rig.stroke(&[(40.0, 30.0)]);
+        assert_eq!(rig.px(38, 30).r, 100, "the clone stamp brings the dark field with it");
+        assert_eq!(rig.px(40, 30).r, 150, "mark and all");
+
+        let mut rig = Rig::new(StrokeMode::Heal);
+        two_tones(&mut rig);
+        rig.stroke(&[(40.0, 30.0)]);
+        let (field, mark) = (i32::from(rig.px(38, 30).r), i32::from(rig.px(40, 30).r));
+        assert!((field - 200).abs() <= 1, "the field is gone into its surroundings: {field}");
+        assert!((mark - 250).abs() <= 1, "the mark is still fifty levels above it: {mark}");
+    }
+
+    #[test]
+    fn the_healing_brush_is_the_clone_stamp_until_the_stroke_ends() {
+        let mut rig = Rig::new(StrokeMode::Heal);
+        two_tones(&mut rig);
+        {
+            let mut ctx = ToolContext {
+                document: &mut rig.doc,
+                selection: &mut rig.selection,
+                viewport: &mut rig.viewport,
+                settings: &mut rig.settings,
+            };
+            rig.tool.begin(&mut ctx, PointerEvent::at(40.0, 30.0));
+        }
+        assert_eq!(rig.px(40, 30).r, 150, "a plain copy while the pointer is still down");
+        {
+            let mut ctx = ToolContext {
+                document: &mut rig.doc,
+                selection: &mut rig.selection,
+                viewport: &mut rig.viewport,
+                settings: &mut rig.settings,
+            };
+            rig.tool.finish(&mut ctx, PointerEvent::at(40.0, 30.0));
+        }
+        assert!((i32::from(rig.px(40, 30).r) - 250).abs() <= 1, "and blended when it comes up");
+    }
+
+    #[test]
+    fn healing_onto_nothing_is_a_plain_copy() {
+        let mut rig = Rig::new(StrokeMode::Heal);
+        with_green_band(&mut rig);
+        rig.settings.size = 5;
+        rig.settings.clone_anchor = Some(Point::new(3.0, 5.0));
+        rig.stroke(&[(20.0, 5.0)]);
+        assert_eq!(rig.px(20, 5), GREEN, "nothing round it to take a tone from");
+    }
+
+    #[test]
+    fn the_healing_brush_stays_inside_the_selection() {
+        let mut rig = Rig::new(StrokeMode::Heal);
+        let all = Rect::new(0, 0, 30, 30);
+        rig.doc.active_layer_mut().raster.fill_rect(Rect::new(0, 0, 15, 30), GREEN, &all);
+        rig.selection = Selection::Rect(Rect::new(10, 0, 8, 30));
+        rig.settings.clone_anchor = Some(Point::new(3.0, 15.0));
+        rig.stroke(&[(8.0, 15.0), (25.0, 15.0)]);
+        assert_eq!(rig.px(12, 15), GREEN);
+        assert_eq!(rig.px(19, 15), Rgba::TRANSPARENT);
     }
 
     #[test]

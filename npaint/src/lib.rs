@@ -27,6 +27,7 @@ pub mod file;
 pub mod filter;
 pub mod geometry;
 pub mod gradient;
+pub mod heal;
 pub mod history;
 pub mod layer;
 pub mod mask;

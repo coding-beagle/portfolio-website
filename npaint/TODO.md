@@ -6,16 +6,11 @@ Change mirror axis via ruler? UX requires thought
 
 Photo / Pixel Art / Vector mode split?
 
-Healing brush
-The clone stamp plus a gradient-domain (Poisson) blend of the patch into its
-surroundings. `StrokeMode::Clone` in tools/stroke.rs already has the anchor,
-the offset and the source snapshot; the blend is what is missing.
-
 Content-aware fill
 Multi-scale PatchMatch: pyramid, and at each level an EM loop of
 nearest-neighbour patch search then vote. Pure function of pixels and a mask,
 no dependencies, no model to download. Same nearest-neighbour field is what a
-patch tool would run on, so it follows the healing brush.
+patch tool would run on, so it is the next thing after the healing brush.
 Speed is the risk, not the algorithm — single-threaded wasm, no
 SharedArrayBuffer. Cap the working resolution, restrict the search to a
 dilated band round the hole, and abandon a patch compare once its running

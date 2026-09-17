@@ -108,6 +108,10 @@ npaint/
                    are `adjust::Kind`s that delegate here rather than
                    lookup tables; see "Filters"
     geometry.rs    Point, Rect
+    heal.rs        the healing brush's blend: the smooth correction that
+                   makes a cloned patch sit in its surroundings without a
+                   seam, found on a ladder of halved grids — see
+                   "The healing brush"
     gradient.rs    a colour worked out from where the pixel is: two
                    colours, two points and a shape (linear, radial,
                    reflected, angle)
@@ -147,15 +151,17 @@ npaint/
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
       movetool.rs  move (translate the selection or the layer)
-      stroke.rs    brush, pencil, eraser, clone stamp (one gesture, four
-                   stamps, a tip from brush.rs, and a hardness the pencil
-                   ignores). The clone stamp is the one that reads pixels
+      stroke.rs    brush, pencil, eraser, clone stamp, healing brush (one
+                   gesture, five stamps, a tip from brush.rs, and a hardness
+                   the pencil ignores). The clone stamp is the one that reads pixels
                    to write them: Alt-click anchors the source, and the
                    stroke copies from a fixed offset. `clone_offset_for` is
                    that offset, and `Editor::clone_source_offset` and
                    `clone_source_patch` are the same answer for the preview
                    the page draws inside the brush ring, so what is shown
-                   and what is stamped cannot drift apart
+                   and what is stamped cannot drift apart. The healing
+                   brush is the same stroke with `heal.rs` run over what it
+                   covered once the pointer is up
       bucket.rs    paint bucket: the wand's patch, filled
       eyedropper.rs the eyedropper, and the Alt-click under every brush
       shape.rs     line, rectangle, ellipse (rubber-band)
@@ -262,6 +268,9 @@ make run_npaint       # serves build/ on :8790
 
 cargo run --release --example bench    # times the composite at 4K
 ```
+
+`examples/adjbench.rs` and `examples/healbench.rs` are the same idea for the
+adjustment previews and the healing brush's blend.
 
 One test reads from outside the crate: `files_photoshop_actually_wrote` in
 `src/psd.rs` opens every `.psd` in `npaint/test_psds/` (or `NPAINT_PSD_DIR`)
@@ -700,6 +709,54 @@ Three settings shape the path before the tip is stamped, all in
   dab by it while `pressure_size` is on. The page reports 1 for anything
   that is not a pen, since a mouse claims a pressure of 0.5 while its
   button is down.
+
+## The healing brush
+
+The clone stamp copies pixels; the healing brush copies them and then makes
+them belong. A patch taken from elsewhere is right in its *texture* and wrong
+in its *tone*, so the seam shows wherever the two places differ in brightness
+or colour. The cure is Poisson's: keep the patch's derivatives, solve for its
+intensities, with the surroundings as the boundary condition.
+
+`src/heal.rs` writes that as a **correction** rather than as a solve of the
+pixels themselves. If the answer keeps the patch's Laplacian exactly then the
+difference between answer and patch is harmonic, so all that is wanted is the
+function that is harmonic inside the stroke and equals (surroundings - patch)
+at its edge. `harmonic_fill` is that function, and because it is smooth it
+carries every bit of the patch's detail through untouched.
+
+Three things about it are worth knowing before changing it:
+
+* **It runs when the pointer comes up, not during the stroke.** While the
+  pointer is down the healing brush *is* the clone stamp — the same
+  `StrokeMode` arm, the same pixels — and `StrokeTool::blend_seam` blends
+  the whole of what the stroke covered in one go at the end. Photoshop does
+  the same, and for the same reason: the blend is over the whole stroke, and
+  a dab at a time cannot give it. `InProgress::covered` is the area,
+  accumulated as the stroke goes rather than searched for at the end.
+* **Gauss-Seidel alone is useless here.** It settles fine detail in a few
+  sweeps and long wavelengths at a rate that goes as the square of the
+  region's width, so a stroke a thousand pixels long would want millions of
+  them. So the answer is found on a halved grid first, and that one on a
+  halved grid again, down to a few cells across where one sweep crosses the
+  region; each level starts from the one below and needs a handful of sweeps
+  of its own. Axes halve separately, so a long thin stroke is coarsened
+  along its length rather than stopping at its width. A brush-sized region
+  is under a millisecond; a scribble over 3 megapixels is 200 ms
+  (`examples/healbench.rs`).
+* **Exact where the grid halves evenly, and a hair off where it does not.**
+  A grid whose sides do not halve all the way down leaves a half-width block
+  at one end of each coarse row, and the five-point Laplacian over centres
+  that are not evenly spaced no longer leaves a ramp alone; the answer comes
+  back tilted by a fraction of a percent of the range of its edge. The fine
+  grid's own boundary is met exactly either way, and that is what decides
+  whether a seam shows. Both halves have a test.
+
+What the difference is taken between matters: both sides come from the one
+sampled raster the stroke took when it began — where the copy is read from
+and where it is going — so that "all layers" compares like with like. A pixel
+that is transparent on either side has no tone to match and contributes
+nothing, which is why healing onto an empty layer is simply a copy.
 
 ## Text
 

@@ -61,6 +61,7 @@ pub enum ToolKind {
     Pencil,
     Eraser,
     Clone,
+    Heal,
     Bucket,
     Gradient,
     Eyedropper,
@@ -87,6 +88,7 @@ impl ToolKind {
         ToolKind::Pencil,
         ToolKind::Eraser,
         ToolKind::Clone,
+        ToolKind::Heal,
         ToolKind::Bucket,
         ToolKind::Gradient,
         ToolKind::Eyedropper,
@@ -113,6 +115,7 @@ impl ToolKind {
             ToolKind::Pencil => "pencil",
             ToolKind::Eraser => "eraser",
             ToolKind::Clone => "clone",
+            ToolKind::Heal => "heal",
             ToolKind::Bucket => "bucket",
             ToolKind::Gradient => "gradient",
             ToolKind::Eyedropper => "eyedropper",
@@ -138,6 +141,7 @@ impl ToolKind {
             ToolKind::Pencil => "Pencil",
             ToolKind::Eraser => "Eraser",
             ToolKind::Clone => "Clone Stamp",
+            ToolKind::Heal => "Healing Brush",
             ToolKind::Bucket => "Paint Bucket",
             ToolKind::Gradient => "Gradient",
             ToolKind::Eyedropper => "Eyedropper",
@@ -207,6 +211,7 @@ impl ToolKind {
             ToolKind::Pencil => Box::new(StrokeTool::new(StrokeMode::Pencil)),
             ToolKind::Eraser => Box::new(StrokeTool::new(StrokeMode::Eraser)),
             ToolKind::Clone => Box::new(StrokeTool::new(StrokeMode::Clone)),
+            ToolKind::Heal => Box::new(StrokeTool::new(StrokeMode::Heal)),
             ToolKind::Bucket => Box::new(BucketTool::default()),
             ToolKind::Gradient => Box::new(GradientTool::default()),
             ToolKind::Eyedropper => Box::new(EyedropperTool),
@@ -271,9 +276,9 @@ pub struct ToolSettings {
     /// The box the subject tool has drawn out, in document pixels, waiting
     /// for the page to run the model over it.
     pub subject_box: Option<Rect>,
-    /// Where the clone stamp copies from, in document pixels, as the last
-    /// Alt-click left it. The page draws a mark there; `None` is a clone
-    /// stamp with nothing to clone yet.
+    /// Where the clone stamp and the healing brush copy from, in document
+    /// pixels, as the last Alt-click left it. The page draws a mark there;
+    /// `None` is a clone stamp with nothing to clone yet.
     pub clone_anchor: Option<Point>,
     /// Whether the clone stamp keeps one offset across separate strokes
     /// rather than starting again from the anchor each time.

@@ -35,6 +35,7 @@ const ICON = {
   pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
   eraser: '<path d="M5 15l8-8 6 6-6 6H9z"/><path d="M9 19h11"/>',
   clone: '<path d="M8 3h8v5H8z"/><path d="M4 13c0-2.2 2-3 4-5h8c2 2 4 2.8 4 5z"/><path d="M4 13h16v3H4z"/><path d="M10 16v5h4v-5"/>',
+  heal: '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-45 12 12)"/><rect x="9" y="9" width="6" height="6" transform="rotate(-45 12 12)"/>',
   line: '<path d="M5 19L19 5"/>',
   rectangle: '<rect x="4" y="6" width="16" height="12"/>',
   ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
@@ -101,6 +102,12 @@ const TOOLS = [
     label: "Clone stamp",
     key: "S",
     hint: "Alt+click what you want to copy from, then paint it in somewhere else. Aligned keeps the same offset for every stroke.",
+  },
+  {
+    name: "heal",
+    label: "Healing brush",
+    key: "J",
+    hint: "Alt+click a clean patch, then paint over the blemish: the copy takes the tone of what is round it when you let go.",
   },
   {
     name: "bucket",
@@ -443,7 +450,7 @@ function draw(now, ants, transforming) {
   if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
   if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
   if (tool === "subject") drawSubjectBox(px, py, zoom);
-  if (tool === "clone") drawClonePreview(px, py, zoom);
+  if (COPYING_TOOLS.has(tool)) drawClonePreview(px, py, zoom);
   if (ants.length) drawAnts(now, ants, px, py, zoom);
   drawGuides(px, py, zoom);
 
@@ -630,7 +637,8 @@ const clonePatch = document.createElement("canvas");
 const clonePatchCtx = clonePatch.getContext("2d");
 
 /**
- * The clone stamp's source: the pixels it is about to lay down, drawn inside
+ * The source of a clone stamp or healing brush: the pixels it is about to lay
+ * down, drawn inside
  * the brush ring where they will land, and a crosshair where they are being
  * read from. Without it the offset is invisible until the paint is down and
  * the only way to line a copy up is to try it and undo.
@@ -840,7 +848,10 @@ function drawGuides(px, py, zoom) {
 }
 
 /** The tools whose size is worth seeing before the stroke starts. */
-const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "clone", "quickselect", "refine"]);
+const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "clone", "heal", "quickselect", "refine"]);
+
+/** The tools that lay down pixels read from elsewhere in the picture. */
+const COPYING_TOOLS = new Set(["clone", "heal"]);
 const showsBrushRing = () => BRUSH_TOOLS.has(tool);
 
 /**
@@ -1164,7 +1175,7 @@ const SELECTION_TOOLS = new Set(["select", "ellipse-select", "lasso", "crop", "w
 const TOOL_GROUPS = [
   ["select", "ellipse-select", "lasso", "crop", "wand", "quickselect", "subject", "refine"],
   ["move"],
-  ["brush", "pencil", "eraser", "bucket", "gradient", "eyedropper"],
+  ["brush", "pencil", "eraser", "clone", "heal", "bucket", "gradient", "eyedropper"],
   ["line", "rectangle", "ellipse"],
   ["text"],
   ["zoom", "hand"],
@@ -1217,11 +1228,12 @@ function zoomHint() {
 /** Shows the options that apply to the current tool. */
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
-  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "clone" || tool === "bucket" || tool === "gradient";
-  const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser" || tool === "clone";
+  const copying = COPYING_TOOLS.has(tool);
+  const hasOpacity = tool === "brush" || tool === "eraser" || copying || tool === "bucket" || tool === "gradient";
+  const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser" || copying;
   // The pencil is hard whatever the slider says, and chalk and spatter
   // have their grain and their dots in place of a soft rim.
-  const hasHardness = (tool === "brush" || tool === "eraser" || tool === "clone") && np.brush_tip_has_hardness();
+  const hasHardness = (tool === "brush" || tool === "eraser" || copying) && np.brush_tip_has_hardness();
   const isText = tool === "text";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
   const subject = tool === "subject";
@@ -1279,9 +1291,9 @@ function syncOptions() {
   // brush paints the selection by hand and has only a size.
   $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect" || tool === "bucket");
   $("opt-sample-wrap").hidden = !(tool === "wand" || tool === "bucket");
-  $("opt-aligned-wrap").hidden = tool !== "clone";
+  $("opt-aligned-wrap").hidden = !copying;
   $("opt-aligned").checked = np.clone_aligned();
-  $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket" || tool === "clone");
+  $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket" || copying);
   $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select" || tool === "lasso");
   $("opt-subject").hidden = !(auto || subject);
   $("opt-quality-wrap").hidden = !(auto || subject);
