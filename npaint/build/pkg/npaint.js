@@ -2553,8 +2553,8 @@ export class NPaint {
     }
     /**
      * What the pointer would grab at a screen position: a handle name
-     * (`"top-left"`, `"top"`, ...), `"inside"`, `"rotate"` or `"outside"`.
-     * Empty when not transforming.
+     * (`"top-left"`, `"top"`, ...), `"inside"`, or `"rotate"` for anywhere
+     * outside the box. Empty when not transforming.
      * @param {number} x
      * @param {number} y
      * @returns {string}

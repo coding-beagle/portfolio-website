@@ -4029,8 +4029,11 @@ function canvasRect() {
  */
 function edgeAt(x, y) {
   // An open transform owns its box: a handle sitting on the canvas edge, or
-  // hanging just past it, must beat the canvas resize grab.
-  if (np.is_transforming() && np.transform_hit(x, y) !== "outside") return null;
+  // hanging just past it, must beat the canvas resize grab. Outside the box
+  // — where the drag would turn it — the edge still wins, as it does with no
+  // transform open.
+  const hit = np.is_transforming() ? np.transform_hit(x, y) : "";
+  if (hit && hit !== "rotate") return null;
   const r = canvasRect();
   const left = x <= r.x && x >= r.x - EDGE_GRAB;
   const right = x >= r.x + r.w && x <= r.x + r.w + EDGE_GRAB;
@@ -4307,7 +4310,7 @@ function bindPointer() {
 
 /** The inputs that actually swallow letters, as opposed to sliders and boxes. */
 const TEXT_ENTRY = new Set(["text", "number", "search", "email", "url", "password", "tel"]);
-/** The keys a slider or a checkbox uses itself, which it should keep. */
+/** The keys a slider, a checkbox or a dropdown uses itself, which it should keep. */
 const CONTROL_KEYS = new Set([
   "ArrowLeft",
   "ArrowRight",
@@ -4323,14 +4326,17 @@ const CONTROL_KEYS = new Set([
 
 /**
  * Whether a key belongs to the field it was pressed in rather than to the
- * editor. A text box takes everything; a tolerance slider or an "All layers"
- * checkbox takes only the keys it works with, so clicking one does not leave
- * every shortcut dead until you click somewhere else.
+ * editor. A text box takes everything; a tolerance slider, an "All layers"
+ * checkbox or the symmetry dropdown takes only the keys it works with, so
+ * clicking one does not leave every shortcut dead until you click somewhere
+ * else — a dropdown keeps the focus after it is used, so giving it every key
+ * put the whole keyboard out of action.
  */
 function typingInField(e) {
   const t = e.target;
   if (!t) return false;
-  if (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return true;
+  if (t.isContentEditable || t.tagName === "TEXTAREA") return true;
+  if (t.tagName === "SELECT") return CONTROL_KEYS.has(e.key);
   if (t.tagName !== "INPUT") return false;
   if (TEXT_ENTRY.has((t.type || "text").toLowerCase())) return true;
   return CONTROL_KEYS.has(e.key);

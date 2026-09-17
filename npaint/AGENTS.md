@@ -11,6 +11,67 @@ portfolio's desktop scene (`app/src/subdomains.js`).
 
 Features in the works are located in TODO.md
 
+# General coding principles
+
+KISS — keep it simple
+
+Keep code simple and focused on solving the immediate problem. Avoid unnecessary abstraction, premature optimization, or over-engineering.
+Descriptive variable names
+
+Use descriptive variable names that clearly indicate purpose. Avoid single-letter names except for common loop counters (i, j, k).
+Comments explain why, not what
+
+Code comments should explain why something is done, not what is being done. The code itself should be self-documenting through clear naming and structure. Comments should provide context, rationale, or explain non-obvious decisions.
+Write for the reader, not the chat
+
+Commit messages, changelog entries, PR bodies, docstrings, and comments are read by people who were never in the conversation that produced the code. Document the code, not the making of it.
+
+Cut:
+
+    Chat back-references — "here's the change we discussed", "as requested", "per your last message", "the refactor from earlier". There is no shared "we" and no "earlier" for the reader.
+    Stream-of-consciousness — "First I tried X, but that failed, so now this does Y". State what the code does and why; drop the diary.
+    Self-congratulation and filler — "successfully implemented", "comprehensive update to", "significantly improved". Name the actual change instead.
+    Diff restatements — a changelog or commit body that narrates the diff line by line. Say what changed and why a reader should care, in as few lines as that takes.
+
+BAD:  Successfully implemented the comprehensive caching improvements we discussed.
+GOOD: Cache build artifacts between runs. Cuts CI from ~9 min to ~90 s.
+
+# BAD:  Originally this used a loop but per the earlier discussion we switched to a dict.
+# GOOD: """Return the user for `user_id`, or None if unknown."""
+
+Maximum line length: 100 characters
+
+Keep lines to a maximum of 100 characters. Break long lines appropriately to maintain readability.
+No magic values
+
+Replace hardcoded numbers and strings with named constants that explain their meaning and purpose. Magic values make code difficult to understand and maintain.
+
+MAX_RETRY_ATTEMPTS = 3          # not: if retries > 3
+DEFAULT_TIMEOUT_MS = 5000       # not: sleep(5000)
+GRAVITY_M_S2 = 9.81             # not: force = mass * 9.81
+
+Delete dead code immediately
+
+Remove commented-out code, unused functions, and obsolete branches immediately rather than leaving them "just in case." Dead code creates confusion, maintenance burden, and false positives in searches. If you need it later, it's in version control history.
+Minimize dependencies
+
+Each external dependency introduces maintenance burden, security risks, and potential breaking changes. Before adding a new dependency:
+
+    Can this be solved with the standard library?
+    Is the dependency actively maintained?
+    Is the functionality worth the added complexity?
+    What's the transitive dependency cost?
+
+Prefer standard-library solutions for common tasks. When dependencies are necessary, use well-maintained, focused libraries over large frameworks.
+Prefer immutability
+
+Use immutable data structures by default; only make data mutable when necessary for performance. Immutability prevents unexpected side effects, makes code easier to reason about, and simplifies concurrent programming.
+
+    Use tuple instead of list when data won't change.
+    Avoid modifying function arguments.
+    Return new objects instead of modifying existing ones.
+
+
 ## Layout
 
 ```
@@ -339,8 +400,47 @@ page draws. A tool that says nothing gets the whole document, so correctness
 never depends on a tool answering — but a tool that reports *less* than it
 touched leaves stale pixels on screen, which is the one way to get this
 wrong. Grow the rectangle by whatever the brush rim or the antialiasing may
-reach. Everything structural — a layer added, reordered, hidden, an undo, a
-transform — calls `Editor::touch_all` and redraws the lot.
+reach. Everything structural — a layer added, reordered, hidden, an undo,
+committing a session — calls `Editor::touch_all` and redraws the lot.
+
+Anything dragged is redrawn the same way — put the pixels back where they
+were, lay them down where they are now, and report that union — rather than
+rebuilding the surface and saying the whole document changed. `MoveTool`
+does it with `Raster::merge_translated_in`, and a free transform's *preview*,
+which is the one gesture that is not a tool, with
+`TransformSession::render_into` over the rectangle
+`Editor::transform_shown` remembers from last time. Which of the two runs is
+not the tool in hand: the move tool drags a smart object or a text layer by
+its placement, so that is a transform session, and everything else is a
+`MoveTool` gesture.
+
+At 4K a pointer event went from 34 ms to 1 ms for a line of type and from
+53 ms to 8 ms for a 1200x800 item — the difference between the pixels
+following the pointer and stuttering behind it.
+
+A layer that covers the whole canvas has no rectangle to be clipped to:
+every pixel of it really does change. That drag takes the other saving
+instead, the one the adjustment dialogs take — it is shown on the
+**reduced copy** (see "What 'dirty' means" above and `Editor::preview_step`)
+while the canvas is zoomed out far enough that the screen cannot tell, and
+the document itself is moved once, when the pointer comes up. At a quarter
+zoom a full-canvas 4K drag costs 4 ms a pointer event instead of 65.
+
+Both kinds of drag do it, and both are held by `Editor::hold_preview_base`,
+so the page needs to know nothing about it: `NPaint::render_preview` already
+draws the reduced composite stretched over the canvas and clears the frame's
+dirty rectangle, exactly as it does for a slider. A transform previews
+through a reduced twin of its session (`TransformSession::reduced` and
+`follow`); the move tool splits the copy's pixels once and shifts them, with
+`tools::movetool::drag_offset` deciding how far for both the preview and the
+tool, so that what is shown and where it lands cannot drift apart. The scale
+is frozen for as long as a drag is showing on the copy, since rebuilding it
+would take the document's own pixels, which are still where the drag began.
+
+A placement that is only a shift by whole pixels resamples to exactly the
+pixels it started with, so `TransformSession::render_into` copies them
+instead — which is what dragging a placed picture is, and what took a 4K
+smart object from 227 ms a pointer event to 64.
 
 `Editor::enforce_limits`, `Selection::apply` and `layer::keep_alpha` take
 the same rectangle, so the selection is enforced over the dab rather than

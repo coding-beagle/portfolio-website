@@ -2,9 +2,7 @@ Sorted by priority:
 
 # Bugs
 
-No ergonomic rotation in transforms
-
-Brush draw symmetry overrides undos ?
+Canvas resizing (via drag) should keep the viewport panning consistent
 
 # Features:
 

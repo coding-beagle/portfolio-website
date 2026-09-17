@@ -2,7 +2,7 @@
 //! pixels. A transform session with only translation, committed on release.
 
 use super::{Gesture, PointerEvent, Tool, ToolContext, ToolKind};
-use crate::geometry::Point;
+use crate::geometry::{Point, Rect};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::snap::Snap;
@@ -10,6 +10,10 @@ use crate::snap::Snap;
 #[derive(Debug, Default)]
 pub struct MoveTool {
     gesture: Option<Moving>,
+    /// What the last call redrew, for [`Tool::dirtied`]. Kept here rather
+    /// than on the gesture because the pointer coming up ends the gesture
+    /// and the answer is wanted after that.
+    dirty: Option<Rect>,
 }
 
 #[derive(Debug)]
@@ -24,32 +28,57 @@ struct Moving {
     /// no-op and updates only happen on whole-pixel changes.
     offset: (i32, i32),
     /// Where the moving pixels were, for snapping their edges and centre to
-    /// the guides. `None` when there is nothing visible to snap.
-    bounds: Option<crate::geometry::Rect>,
+    /// the guides, and for working out what a shift of them redraws. `None`
+    /// when there is nothing visible to move.
+    bounds: Option<Rect>,
+}
+
+/// `bounds` where an offset puts it.
+fn shifted(bounds: Rect, (dx, dy): (i32, i32)) -> Rect {
+    Rect::new(bounds.x + dx, bounds.y + dy, bounds.w, bounds.h)
+}
+
+/// How far a drag from `start` to `now` has shifted the pixels, in whole
+/// document pixels, with the edges and centre of `bounds` pulled onto the
+/// guides.
+///
+/// The editor's reduced preview of a move works this out for itself rather
+/// than through the gesture, and the two have to land in the same place or
+/// the pixels would jump when the pointer comes up. They agree because this
+/// is the only place that decides it.
+pub fn drag_offset(start: Point, now: Point, bounds: Option<Rect>, snap: Option<&Snap>) -> (i32, i32) {
+    let mut dx = now.x - start.x;
+    let mut dy = now.y - start.y;
+    if let (Some(snap), Some(b)) = (snap, bounds) {
+        let (x0, y0) = (f64::from(b.x) + dx, f64::from(b.y) + dy);
+        let (x1, y1) = (f64::from(b.right()) + dx, f64::from(b.bottom()) + dy);
+        let (sx, sy) = snap.offset(&[x0, x1, (x0 + x1) / 2.0], &[y0, y1, (y0 + y1) / 2.0]);
+        dx += sx;
+        dy += sy;
+    }
+    (dx.round() as i32, dy.round() as i32)
 }
 
 impl MoveTool {
     fn apply(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> bool {
         let Some(g) = self.gesture.as_mut() else { return false };
-        let mut dx = ev.pos.x - g.start.x;
-        let mut dy = ev.pos.y - g.start.y;
         let snap = Snap::new(&ctx.settings.guides, ctx.document.bounds(), ctx.viewport.zoom());
-        if let (Some(snap), Some(b)) = (snap, g.bounds) {
-            let (x0, y0) = (f64::from(b.x) + dx, f64::from(b.y) + dy);
-            let (x1, y1) = (f64::from(b.right()) + dx, f64::from(b.bottom()) + dy);
-            let (sx, sy) = snap.offset(&[x0, x1, (x0 + x1) / 2.0], &[y0, y1, (y0 + y1) / 2.0]);
-            dx += sx;
-            dy += sy;
-        }
-        let dx = dx.round() as i32;
-        let dy = dy.round() as i32;
+        let (dx, dy) = drag_offset(g.start, ev.pos, g.bounds, snap.as_ref());
         if (dx, dy) == g.offset {
             return false;
         }
+        let previous = g.offset;
         g.offset = (dx, dy);
-        let mut out = g.stationary.clone();
-        out.merge_over(&g.moving.translated(dx, dy));
-        *ctx.document.active_surface_mut() = out;
+        // Only where the moving pixels were and where they have gone can
+        // have changed: put the layer back over the first and lay them down
+        // again on the second, rather than rebuilding the whole surface.
+        // On a 4K document that is the difference between the pixels
+        // keeping up with the pointer and lagging behind it.
+        let dirty = g.bounds.map_or_else(Rect::default, |b| shifted(b, previous).union(&shifted(b, (dx, dy))));
+        let surface = ctx.document.active_surface_mut();
+        surface.copy_from(&g.stationary, &dirty);
+        surface.merge_translated_in(&g.moving, dx, dy, &dirty);
+        self.dirty = Some(dirty);
         let bounds = ctx.document.bounds();
         *ctx.selection = g.selection.translated(dx, dy, bounds);
         true
@@ -67,6 +96,7 @@ impl Tool for MoveTool {
         let selection = ctx.selection.clone();
         let bounds = moving.content_bounds();
         self.gesture = Some(Moving { start: ev.pos, moving, stationary, selection, offset: (0, 0), bounds });
+        self.dirty = Some(Rect::default());
         Gesture::EditsActiveLayer
     }
 
@@ -80,7 +110,12 @@ impl Tool for MoveTool {
         changed
     }
 
+    fn dirtied(&self) -> Option<Rect> {
+        self.dirty
+    }
+
     fn cancel(&mut self, ctx: &mut ToolContext) {
+        self.dirty = None;
         if let Some(g) = self.gesture.take() {
             let mut back = g.stationary;
             back.merge_over(&g.moving);
@@ -181,6 +216,42 @@ mod tests {
         tool.finish(&mut ctx, PointerEvent::at(13.0, 5.0));
         assert_eq!(d.active_layer().raster.get(19, 10), RED);
         assert_eq!(d.active_layer().raster.get(18, 10), Rgba::TRANSPARENT);
+    }
+
+    #[test]
+    fn a_drag_redraws_only_where_the_pixels_were_and_where_they_have_gone() {
+        // The page recomposites, re-uploads and re-mips whatever this
+        // reports, so a drag on a large document must not claim all of it.
+        let all = Rect::new(0, 0, 100, 100);
+        let item = |d: &mut Document| d.active_layer_mut().raster.fill_rect(Rect::new(10, 10, 8, 8), RED, &all);
+
+        let mut d = Document::new(100, 100, Rgba::TRANSPARENT);
+        item(&mut d);
+        let mut sel = Selection::None;
+        let mut vp = Viewport::default();
+        let mut settings = ToolSettings::default();
+        let mut tool = MoveTool::default();
+        let mut ctx = ToolContext { document: &mut d, selection: &mut sel, viewport: &mut vp, settings: &mut settings };
+        tool.begin(&mut ctx, PointerEvent::at(50.0, 50.0));
+        assert_eq!(tool.dirtied(), Some(Rect::default()), "nothing drawn yet");
+        tool.update(&mut ctx, PointerEvent::at(55.0, 50.0));
+        // Where the item was (10, 10, 8, 8) and where it now is (15, 10, 8, 8).
+        assert_eq!(tool.dirtied(), Some(Rect::new(10, 10, 13, 8)));
+        // Carry on in steps, and end up with what one straight drag gives:
+        // patching frame by frame must leave no trace of the frames before.
+        for at in [61.0, 58.0, 70.0, 64.0] {
+            tool.update(&mut ctx, PointerEvent::at(at, 50.0 + at / 10.0));
+        }
+        tool.finish(&mut ctx, PointerEvent::at(64.0, 56.4));
+
+        let mut straight = Document::new(100, 100, Rgba::TRANSPARENT);
+        item(&mut straight);
+        let mut sel2 = Selection::None;
+        let mut tool2 = MoveTool::default();
+        let mut ctx2 = ToolContext { document: &mut straight, selection: &mut sel2, viewport: &mut vp, settings: &mut settings };
+        tool2.begin(&mut ctx2, PointerEvent::at(50.0, 50.0));
+        tool2.finish(&mut ctx2, PointerEvent::at(64.0, 56.4));
+        assert_eq!(d.active_layer().raster, straight.active_layer().raster);
     }
 
     #[test]

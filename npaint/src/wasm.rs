@@ -1312,14 +1312,13 @@ impl NPaint {
     }
 
     /// What the pointer would grab at a screen position: a handle name
-    /// (`"top-left"`, `"top"`, ...), `"inside"`, `"rotate"` or `"outside"`.
-    /// Empty when not transforming.
+    /// (`"top-left"`, `"top"`, ...), `"inside"`, or `"rotate"` for anywhere
+    /// outside the box. Empty when not transforming.
     pub fn transform_hit(&self, x: f64, y: f64) -> String {
         match self.editor.transform_hit(Point::new(x, y)) {
             None => String::new(),
             Some(Hit::Inside) => "inside".to_owned(),
             Some(Hit::Rotate) => "rotate".to_owned(),
-            Some(Hit::Outside) => "outside".to_owned(),
             Some(Hit::Handle(h)) => match h {
                 Handle::TopLeft => "top-left",
                 Handle::Top => "top",

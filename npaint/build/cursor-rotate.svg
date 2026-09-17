@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">
+  <!-- The rotate cursor for outside a transform box; CSS has no such cursor
+       to ask for. White over black so it reads on any picture. -->
+  <g fill="none" stroke="#000" stroke-width="4" stroke-linecap="round">
+    <path d="M12 4.5A7.5 7.5 0 1 1 4.5 12" />
+  </g>
+  <path d="M12 1L12 8L16.5 4.5Z" fill="#000" stroke="#000" stroke-width="2" stroke-linejoin="round" />
+  <g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+    <path d="M12 4.5A7.5 7.5 0 1 1 4.5 12" />
+  </g>
+  <path d="M12 2L12 7L15.5 4.5Z" fill="#fff" />
+</svg>

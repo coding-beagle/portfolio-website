@@ -1088,7 +1088,9 @@ button.primary {
   cursor: move;
 }
 .viewport.cursor-rotate canvas {
-  cursor: alias;
+  /* Outside the transform box the drag turns it, so say so: CSS has no
+     rotate cursor of its own. */
+  cursor: url("cursor-rotate.svg") 12 12, alias;
 }
 .viewport.cursor-nwse canvas {
   cursor: nwse-resize;

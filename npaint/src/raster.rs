@@ -654,6 +654,30 @@ impl Raster {
         self.composite_over(other, 1.0);
     }
 
+    /// [`Raster::merge_over`], inside `clip` only.
+    pub fn merge_over_in(&mut self, other: &Raster, clip: &Rect) {
+        self.composite_blend(other, 1.0, BlendMode::Normal, clip);
+    }
+
+    /// `other` shifted by `(dx, dy)`, composited over `self` inside `clip`.
+    /// What the move tool lays down each time the pointer moves, without a
+    /// shifted copy of the whole layer being built to do it.
+    pub fn merge_translated_in(&mut self, other: &Raster, dx: i32, dy: i32, clip: &Rect) {
+        // Where the shifted buffer actually reaches; rows outside it have no
+        // source to read and are left as they are.
+        let reach = Rect::new(dx, dy, other.width as i32, other.height as i32);
+        let area = clip.intersect(&self.bounds()).intersect(&reach);
+        if area.is_empty() {
+            return;
+        }
+        let from = Rect::new(area.x - dx, area.y - dy, area.w, area.h);
+        self.for_each_row(&area, |row, y| {
+            for (p, o) in row.iter_mut().zip(other.row(&from, y - dy)) {
+                *p = o.over(*p);
+            }
+        });
+    }
+
     /// The buffer scaled to a new size — Image Size. Enlarging samples
     /// bilinearly; shrinking averages the source pixels each output pixel
     /// covers, so a photo scaled down does not shimmer with aliasing.

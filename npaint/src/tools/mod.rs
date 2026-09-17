@@ -13,7 +13,7 @@ mod bucket;
 mod eyedropper;
 mod gradient;
 mod lasso;
-mod movetool;
+pub mod movetool;
 mod select;
 mod shape;
 mod stroke;

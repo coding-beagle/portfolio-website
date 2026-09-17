@@ -113,28 +113,39 @@ impl Raster {
     /// object's source, which is whatever size the picture was, lands on the
     /// document.
     pub fn transformed_into(&self, m: &Affine, width: u32, height: u32) -> Raster {
-        let Some(inv) = m.inverse() else {
-            return Raster::new(width, height);
-        };
         let mut out = Raster::new(width, height);
+        let all = out.bounds();
+        self.transform_over(&mut out, m, &all);
+        out
+    }
+
+    /// This buffer resampled through `m` and composited over `out`, inside
+    /// `clip`. Redrawing part of a placement costs that part, which is what
+    /// lets a free transform redraw where its box was and where it has gone
+    /// rather than the whole document on every pointer event.
+    pub fn transform_over(&self, out: &mut Raster, m: &Affine, clip: &Rect) {
+        let Some(inv) = m.inverse() else { return };
+        let area = clip.intersect(&out.bounds());
+        if area.is_empty() {
+            return;
+        }
         // Only destination pixels the source's bounds can reach need
         // sampling: transform the source corners and take their extent.
         let (w, h) = (self.width() as f64, self.height() as f64);
         let corners = [Point::new(0.0, 0.0), Point::new(w, 0.0), Point::new(0.0, h), Point::new(w, h)].map(|p| m.apply(p));
-        let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min).floor().max(0.0) as i32;
-        let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min).floor().max(0.0) as i32;
-        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(width)) as i32;
-        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(height)) as i32;
+        let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min).floor().max(f64::from(area.x)) as i32;
+        let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min).floor().max(f64::from(area.y)) as i32;
+        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(area.right())) as i32;
+        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).ceil().min(f64::from(area.bottom())) as i32;
         for y in y0..y1 {
             for x in x0..x1 {
                 let src = inv.apply(Point::new(f64::from(x) + 0.5, f64::from(y) + 0.5));
                 let p = self.sample_bilinear(src.x - 0.5, src.y - 0.5);
                 if p.a > 0 {
-                    out.set(x, y, p);
+                    out.blend(x, y, p, &area);
                 }
             }
         }
-        out
     }
 
     /// Bilinear sample at a continuous position where integer coordinates
@@ -240,6 +251,24 @@ impl Handle {
     }
 }
 
+/// The whole-pixel shift `m` comes to, when a shift is all it is: no turn,
+/// no scale, and both offsets landing on a pixel.
+fn whole_pixel_shift(m: &Affine) -> Option<(i32, i32)> {
+    let square = m.a == 1.0 && m.b == 0.0 && m.c == 0.0 && m.d == 1.0;
+    let whole = m.e.fract() == 0.0 && m.f.fract() == 0.0;
+    // A placement further off than this is nowhere near the canvas, and the
+    // general path deals with it rather than an overflowing cast.
+    let near = m.e.abs() < f64::from(i32::MAX) && m.f.abs() < f64::from(i32::MAX);
+    (square && whole && near).then_some((m.e as i32, m.f as i32))
+}
+
+/// `m` as it applies to a document of every `step`th pixel: shrink into the
+/// full-size frame, place, and shrink the answer back down again.
+fn reduced_matrix(m: &Affine, step: u32) -> Affine {
+    let up = f64::from(step.max(1));
+    Affine::scaling(up.recip(), up.recip()).then(m).then(&Affine::scaling(up, up))
+}
+
 /// What the pointer is doing to the box.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Drag {
@@ -257,7 +286,6 @@ pub enum Hit {
     Handle(Handle),
     Inside,
     Rotate,
-    Outside,
 }
 
 #[derive(Clone, Debug)]
@@ -335,6 +363,36 @@ impl TransformSession {
         self.matrix
     }
 
+    /// This session at `step`-to-one: the same pixels and the same placement
+    /// in a document of every `step`th pixel. A drag previews on one of
+    /// these while the canvas is zoomed out far enough that the screen
+    /// cannot tell, so that dragging a layer the size of a 4K canvas costs a
+    /// sixteenth of the pixels a frame. [`TransformSession::follow`] keeps
+    /// it in step with the drag; the document itself is left alone until the
+    /// session commits, which is the one full-size pass.
+    pub fn reduced(&self, step: u32) -> TransformSession {
+        let s = step.max(1) as i32;
+        // The box only ever covers pixels that are in the buffer, so these
+        // are never negative and plain division rounds the way it should.
+        let up = |v: i32| (v + s - 1) / s;
+        let (x0, y0) = (self.bounds.x / s, self.bounds.y / s);
+        let (x1, y1) = (up(self.bounds.right()), up(self.bounds.bottom()));
+        TransformSession {
+            moving: self.moving.downscaled(step),
+            stationary: self.stationary.downscaled(step),
+            bounds: Rect::new(x0, y0, x1 - x0, y1 - y0),
+            matrix: reduced_matrix(&self.matrix, step),
+            drag: None,
+            selection: None,
+        }
+    }
+
+    /// Takes `matrix` at this session's scale: what a reduced twin does on
+    /// every pointer event, so that what is previewed is the drag itself.
+    pub fn follow(&mut self, matrix: &Affine, step: u32) {
+        self.matrix = reduced_matrix(matrix, step);
+    }
+
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
     }
@@ -387,14 +445,10 @@ impl TransformSession {
         if self.contains(p) {
             return Hit::Inside;
         }
-        // Just outside a corner is the rotate zone.
-        let ring = tolerance * 4.0;
-        let near_corner = self.corners().iter().any(|c| c.distance_to(p) <= ring);
-        if near_corner {
-            Hit::Rotate
-        } else {
-            Hit::Outside
-        }
+        // Anywhere outside the box turns it. A ring round the corners is a
+        // small target to aim at and gives nothing at all when overshot,
+        // and the further out the grip, the finer the angle it sets.
+        Hit::Rotate
     }
 
     fn contains(&self, p: Point) -> bool {
@@ -413,18 +467,17 @@ impl TransformSession {
         self.drag = Some(Drag::Move { start: p, origin: self.matrix });
     }
 
-    /// Begins a drag. Returns whether anything was hit.
-    pub fn pointer_down(&mut self, p: Point, tolerance: f64) -> bool {
-        self.drag = match self.hit(p, tolerance) {
-            Hit::Handle(handle) => Some(Drag::Scale { handle, anchor: self.box_point(handle.opposite().unit()) }),
-            Hit::Inside => Some(Drag::Move { start: p, origin: self.matrix }),
+    /// Begins a drag: a handle scales, inside the box moves, outside it
+    /// turns. Every point on the canvas does one of the three.
+    pub fn pointer_down(&mut self, p: Point, tolerance: f64) {
+        self.drag = Some(match self.hit(p, tolerance) {
+            Hit::Handle(handle) => Drag::Scale { handle, anchor: self.box_point(handle.opposite().unit()) },
+            Hit::Inside => Drag::Move { start: p, origin: self.matrix },
             Hit::Rotate => {
                 let c = self.centre();
-                Some(Drag::Rotate { last_angle: (p.y - c.y).atan2(p.x - c.x) })
+                Drag::Rotate { last_angle: (p.y - c.y).atan2(p.x - c.x) }
             }
-            Hit::Outside => None,
-        };
-        self.drag.is_some()
+        });
     }
 
     /// Continues a drag. `shift` keeps scaling proportional and snaps
@@ -568,14 +621,39 @@ impl TransformSession {
     /// The layer as it looks with the transform applied.
     pub fn render(&self) -> Raster {
         let mut out = self.stationary.clone();
-        let same_size = (self.moving.width(), self.moving.height()) == (out.width(), out.height());
-        let moved = if self.matrix == Affine::IDENTITY && same_size {
-            self.moving.clone()
-        } else {
-            self.moving.transformed_into(&self.matrix, out.width(), out.height())
-        };
-        out.merge_over(&moved);
+        let all = out.bounds();
+        self.render_into(&mut out, &all);
         out
+    }
+
+    /// [`TransformSession::render`] into a buffer that already holds an
+    /// earlier rendering of this session, redrawing only `clip`. Everything
+    /// outside `clip` is left alone, so the caller has to have covered
+    /// wherever the moving pixels have been since.
+    pub fn render_into(&self, out: &mut Raster, clip: &Rect) {
+        out.copy_from(&self.stationary, clip);
+        match whole_pixel_shift(&self.matrix) {
+            // Resampling a placement that is only a shift by whole pixels
+            // gives back exactly the pixels it started from, so they are
+            // laid down as they are. This is the common case — dragging a
+            // placed picture about — and it is where the bilinear pass
+            // costs the most, since nothing has moved off its own pixel.
+            Some((dx, dy)) => out.merge_translated_in(&self.moving, dx, dy, clip),
+            None => self.moving.transform_over(out, &self.matrix, clip),
+        }
+    }
+
+    /// Where in the document the moved pixels can land: the box's corners
+    /// where they are now, grown by a pixel for the resampling at its edge.
+    /// Nothing [`TransformSession::render`] draws falls outside it, so it is
+    /// all a preview has to redraw.
+    pub fn rendered_bounds(&self) -> Rect {
+        let corners = self.corners();
+        let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min).floor() as i32;
+        let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min).floor() as i32;
+        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max).ceil() as i32;
+        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max).ceil() as i32;
+        Rect::new(x0, y0, x1 - x0, y1 - y0).inflate(1)
     }
 
     /// Where the selection rect should be after the transform: the bounding
@@ -673,6 +751,52 @@ mod tests {
     }
 
     #[test]
+    fn redrawing_part_of_a_transform_agrees_with_redrawing_all_of_it() {
+        // A preview redraws only where the box was and where it has gone.
+        // What it leaves behind has to be what a whole rendering would have
+        // put there, or the picture keeps a smear of the last frame.
+        fn check(session: &mut TransformSession, change: impl Fn(&mut TransformSession), what: &str) {
+            let mut patched = session.render();
+            let was = session.rendered_bounds();
+            change(session);
+            let dirty = was.union(&session.rendered_bounds());
+            session.render_into(&mut patched, &dirty);
+            assert_eq!(patched, session.render(), "{what}");
+        }
+        // Over an empty document, as a smart object is, and over pixels that
+        // stay put, as a selection's transform is.
+        let opaque = Raster::filled(20, 20, Rgba::opaque(0, 0, 255));
+        for stationary in [Raster::new(20, 20), opaque] {
+            let make = || TransformSession::placed(layer(), stationary.clone(), Affine::translation(2.0, 1.0)).unwrap();
+            check(&mut make(), |s| s.translate(3.0, -2.0), "moved");
+            check(&mut make(), |s| s.rotate(0.4), "turned");
+            check(&mut make(), |s| s.set_size(11.0, 3.0), "scaled");
+        }
+        check(&mut TransformSession::new(&layer(), None).unwrap(), |s| s.translate(3.0, -2.0), "a layer moved");
+    }
+
+    #[test]
+    fn a_whole_pixel_shift_lays_the_pixels_down_untouched() {
+        // The fast path has to give what the resampling would have, or a
+        // placed picture would come out subtly different from a dragged one.
+        let source = layer();
+        let mut s = TransformSession::placed(source.clone(), Raster::filled(20, 20, Rgba::opaque(0, 0, 255)), Affine::IDENTITY).unwrap();
+        s.translate(3.0, -2.0);
+        let resampled = {
+            let mut out = Raster::filled(20, 20, Rgba::opaque(0, 0, 255));
+            let all = out.bounds();
+            source.transform_over(&mut out, &Affine::translation(3.0, -2.0), &all);
+            out
+        };
+        assert_eq!(s.render(), resampled, "the shift and the resampling agree");
+        assert_eq!(s.render().get(7, 2), RED, "and the pixels went where they were sent");
+
+        // Half a pixel is not a shift, and still goes through the resampling.
+        s.translate(0.5, 0.0);
+        assert_ne!(s.render(), resampled);
+    }
+
+    #[test]
     fn session_starts_on_the_content_or_the_selection() {
         let s = TransformSession::new(&layer(), None).unwrap();
         assert!(close(s.handles()[0], Point::new(4.0, 4.0)));
@@ -685,7 +809,7 @@ mod tests {
     #[test]
     fn moving_drags_the_pixels_and_the_selection() {
         let mut s = TransformSession::new(&layer(), Some(Rect::new(4, 4, 6, 4))).unwrap();
-        assert!(s.pointer_down(Point::new(6.0, 6.0), 0.5));
+        s.pointer_down(Point::new(6.0, 6.0), 0.5);
         assert!(matches!(s.drag, Some(Drag::Move { .. })));
         s.pointer_move(Point::new(9.0, 8.0), false, false);
         s.pointer_up();
@@ -700,7 +824,7 @@ mod tests {
     #[test]
     fn scaling_by_a_corner_keeps_the_opposite_corner() {
         let mut s = TransformSession::new(&layer(), None).unwrap();
-        assert!(s.pointer_down(Point::new(10.0, 8.0), 0.5)); // bottom-right
+        s.pointer_down(Point::new(10.0, 8.0), 0.5); // bottom-right
         s.pointer_move(Point::new(16.0, 12.0), false, false);
         let h = s.handles();
         assert!(close(h[0], Point::new(4.0, 4.0)), "top-left stayed: {:?}", h[0]);
@@ -714,7 +838,7 @@ mod tests {
     #[test]
     fn edge_handles_scale_one_axis() {
         let mut s = TransformSession::new(&layer(), None).unwrap();
-        assert!(s.pointer_down(Point::new(10.0, 6.0), 0.5)); // right edge
+        s.pointer_down(Point::new(10.0, 6.0), 0.5); // right edge
         s.pointer_move(Point::new(13.0, 2.0), false, false);
         let (sx, sy) = s.matrix().scale();
         assert!((sx - 1.5).abs() < 1e-9, "sx {sx}");
@@ -748,7 +872,7 @@ mod tests {
         let c = s.centre();
         // Just outside the bottom-right corner.
         assert_eq!(s.hit(Point::new(11.0, 9.0), 0.5), Hit::Rotate);
-        assert!(s.pointer_down(Point::new(11.0, 9.0), 0.5));
+        s.pointer_down(Point::new(11.0, 9.0), 0.5);
         // Sweep a quarter turn around the centre.
         let r = Point::new(11.0, 9.0).distance_to(c);
         let a0 = (9.0 - c.y).atan2(11.0 - c.x);
@@ -764,7 +888,7 @@ mod tests {
         let guides = Guides { h: vec![], v: vec![30.0], enabled: true };
         let snap = Snap::new(&guides, Rect::new(0, 0, 100, 100), 1.0).unwrap();
         let mut s = TransformSession::new(&layer(), Some(Rect::new(4, 4, 6, 4))).unwrap();
-        assert!(s.pointer_down(Point::new(6.0, 6.0), 0.5));
+        s.pointer_down(Point::new(6.0, 6.0), 0.5);
         // Right edge would be at 27; the guide at 30 pulls it the last 3.
         // Dragged 20 down as well, so the canvas top is out of reach.
         s.pointer_move_snapped(Point::new(23.0, 26.0), false, false, Some(&snap));
@@ -788,11 +912,17 @@ mod tests {
     }
 
     #[test]
-    fn hit_testing_outside_starts_nothing() {
+    fn anywhere_outside_the_box_turns_it() {
         let mut s = TransformSession::new(&layer(), None).unwrap();
-        assert_eq!(s.hit(Point::new(0.0, 19.0), 0.5), Hit::Outside);
-        assert!(!s.pointer_down(Point::new(0.0, 19.0), 0.5));
-        assert!(!s.pointer_move(Point::new(1.0, 19.0), false, false));
+        // Well clear of the box, not just in a ring round a corner.
+        let far = Point::new(0.0, 19.0);
+        assert_eq!(s.hit(far, 0.5), Hit::Rotate);
+        s.pointer_down(far, 0.5);
+        let c = s.centre();
+        let r = far.distance_to(c);
+        let turned = (far.y - c.y).atan2(far.x - c.x) + 30f64.to_radians();
+        assert!(s.pointer_move(Point::new(c.x + r * turned.cos(), c.y + r * turned.sin()), false, false));
+        assert!((s.info().angle_degrees - 30.0).abs() < 1e-6, "{}", s.info().angle_degrees);
     }
 
     #[test]

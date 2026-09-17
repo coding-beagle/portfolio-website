@@ -15,12 +15,13 @@ use crate::document::{Document, DocumentError, Drop};
 use crate::file::{self, FileError};
 use crate::geometry::{Point, Rect};
 use crate::history::{Aside, History, Snapshot};
-use crate::layer::{keep_alpha, EditRefusal, Layer, Target, LayerId};
+use crate::layer::{keep_alpha, EditRefusal, Layer, LayerId, SmartObject, Target};
 use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::snap::Snap;
 use crate::text::TextObject;
+use crate::tools::movetool::drag_offset;
 use crate::tools::{sample_color, Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
 use crate::transform::{Affine, Hit, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
@@ -91,6 +92,33 @@ struct SmallPreview {
 /// Where the first kept layer sits in a [`SmallPreview`]: above the one
 /// layer everything below it was flattened into.
 const SMALL_EDITED: usize = 1;
+
+/// A move-tool drag shown on the reduced copy while the canvas is zoomed
+/// out. The pixels are split once, at that scale, and every pointer event
+/// lays them down again where the drag has got to; the document itself is
+/// moved once, by the tool, when the pointer comes up.
+///
+/// This is for the drag that has no rectangle to be clipped to — a layer
+/// the size of the canvas, where every pixel changes. With a selection the
+/// moving pixels are only the selected ones, whose rectangle is already
+/// small, so that drag is shown on the document as usual.
+struct ReducedMove {
+    /// Where the drag began, in document pixels — the same space the tool
+    /// measures its own gesture in, so that the offset previewed here and
+    /// the one the tool settles on are worked out from the same numbers
+    /// even if the view is panned or zoomed mid-drag.
+    start: Point,
+    step: u32,
+    /// Where the drag has got to, so an event that lands on the same whole
+    /// pixel redraws nothing.
+    offset: (i32, i32),
+    /// The moving pixels and the rest of the surface, at the reduced scale.
+    moving: Raster,
+    stationary: Raster,
+    /// The moving pixels' extent in the document, at full size: snapping
+    /// pulls the same edges onto the same guides as the tool itself will.
+    bounds: Option<Rect>,
+}
 
 /// A live edit that the page previews and then commits or cancels: an
 /// adjustment dialog, an adjustment layer's dialog, a free transform of the
@@ -240,6 +268,17 @@ pub struct Editor {
     /// by its placement: it commits itself when the pointer comes up, as a
     /// step called Move.
     moving_smart: bool,
+    /// Where the open transform's pixels were drawn last time, so that the
+    /// next preview redraws only there and where they have gone. Without it
+    /// every drag of a text layer recomposites the whole document.
+    transform_shown: Option<Rect>,
+    /// The open transform at the reduced scale, while the canvas is zoomed
+    /// out far enough that the screen cannot tell: what the drag draws,
+    /// leaving the document itself untouched until the session commits.
+    /// `None` when the drag is being shown at full size.
+    transform_small: Option<TransformSession>,
+    /// The move tool's drag, while it is being shown on the reduced copy.
+    reduced_move: Option<ReducedMove>,
     /// The pen pressure the next pointer event carries. See
     /// [`Editor::set_pressure`].
     pressure: f64,
@@ -279,6 +318,9 @@ impl Editor {
             preview_base: None,
             transform_base: None,
             moving_smart: false,
+            transform_shown: None,
+            transform_small: None,
+            reduced_move: None,
             pressure: 1.0,
             gesture_base: None,
             gesture_aside: None,
@@ -459,6 +501,69 @@ impl Editor {
         self.refresh_small_preview();
     }
 
+    /// Whether a drag is being shown on the reduced copy rather than on the
+    /// document itself.
+    fn drag_on_the_copy(&self) -> bool {
+        self.transform_small.is_some() || self.reduced_move.is_some()
+    }
+
+    /// Holds a reduced copy of the document for a transform to draw its drag
+    /// on, when the canvas is zoomed out far enough that the screen cannot
+    /// tell. At a step of one there is nothing to save, and the drag is
+    /// shown on the document itself as usual.
+    fn hold_reduced_drag(&mut self, session: &TransformSession) {
+        if self.preview_step() == 1 {
+            return;
+        }
+        self.hold_preview_base(self.document.active_index());
+        match self.preview_base.as_ref().and_then(|b| b.small.as_ref()) {
+            Some(small) => self.transform_small = Some(session.reduced(small.step)),
+            // No reduced copy could be built, so there is nothing to draw on
+            // and no reason to keep the base either.
+            None => self.preview_base = None,
+        }
+    }
+
+    /// Splits the reduced copy's pixels for a move-tool drag to shift, or
+    /// `None` when no reduced copy could be held.
+    fn hold_reduced_move(&mut self, start: Point) -> Option<ReducedMove> {
+        let bounds = self.document.active_surface().content_bounds();
+        self.hold_preview_base(self.document.active_index());
+        let Some(small) = self.preview_base.as_ref().and_then(|b| b.small.as_ref()) else {
+            self.preview_base = None;
+            return None;
+        };
+        let (moving, stationary) = small.selection.split(small.document.active_surface());
+        Some(ReducedMove { start, step: small.step, offset: (0, 0), moving, stationary, bounds })
+    }
+
+    /// Lays the moving pixels down on the reduced copy where the drag has
+    /// got to. The offset is worked out at full size, from the same function
+    /// the tool itself uses, so that what is previewed is where the pixels
+    /// will land.
+    fn move_on_the_copy(&mut self, now: Point) -> bool {
+        let Some(&ReducedMove { start, step, offset, bounds, .. }) = self.reduced_move.as_ref() else {
+            return false;
+        };
+        let snap = Snap::new(&self.settings.guides, self.document.bounds(), self.viewport.zoom());
+        let (dx, dy) = drag_offset(start, now, bounds, snap.as_ref());
+        if (dx, dy) == offset {
+            return false;
+        }
+        {
+            let Some(small) = self.preview_base.as_mut().and_then(|b| b.small.as_mut()) else { return false };
+            let Some(drag) = self.reduced_move.as_mut() else { return false };
+            drag.offset = (dx, dy);
+            let step = step as i32;
+            let clip = small.document.bounds();
+            let surface = small.document.active_surface_mut();
+            surface.copy_from(&drag.stationary, &clip);
+            surface.merge_translated_in(&drag.moving, dx / step, dy / step, &clip);
+        }
+        self.touch_all();
+        true
+    }
+
     /// How much a preview may be shrunk at the current zoom without the
     /// screen being able to tell: the largest power of two that still puts
     /// at least one preview pixel behind every screen pixel. This is the
@@ -482,6 +587,13 @@ impl Editor {
         let step = self.preview_step();
         let Some(base) = self.preview_base.as_ref() else { return false };
         if base.small.as_ref().is_some_and(|s| s.step == step) {
+            return false;
+        }
+        // A drag already showing on the copy keeps the scale it started at:
+        // rebuilding would take the document's own pixels, which are still
+        // where the drag began, and what draws on it is at the old scale.
+        // Zooming mid-drag is rare and settles on the next one.
+        if self.drag_on_the_copy() {
             return false;
         }
         if step == 1 {
@@ -639,7 +751,8 @@ impl Editor {
         match &mut self.session {
             Some(Session::Transform(t)) | Some(Session::TransformSelection { session: t, .. }) => {
                 let tolerance = HANDLE_GRAB_PX / self.viewport.zoom();
-                return t.pointer_down(ev.pos, tolerance);
+                t.pointer_down(ev.pos, tolerance);
+                return true;
             }
             Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. } | Session::Text { .. }) => return false,
             None => {}
@@ -672,6 +785,15 @@ impl Editor {
         let confined = self.tool.kind().confined_to_selection();
         self.gesture_base = (confined && (self.selection.needs_base() || self.keeps_alpha()))
             .then(|| self.document.active_surface().clone());
+        if self.tool.kind() == ToolKind::Move && self.selection.is_none() && self.preview_step() > 1 {
+            if let Some(reduced) = self.hold_reduced_move(ev.pos) {
+                self.reduced_move = Some(reduced);
+                self.record(snapshot, self.tool.kind().label());
+                self.gesture = Some(Gesture::EditsActiveLayer);
+                self.touch_all();
+                return true;
+            }
+        }
         let mut ctx = ToolContext {
             document: &mut self.document,
             selection: &mut self.selection,
@@ -707,6 +829,9 @@ impl Editor {
             }
             return changed;
         }
+        if self.reduced_move.is_some() {
+            return self.move_on_the_copy(ev.pos);
+        }
         if self.gesture.is_none() {
             return false;
         }
@@ -741,6 +866,24 @@ impl Editor {
                 return true;
             }
             return false;
+        }
+        if let Some(reduced) = self.reduced_move.take() {
+            // Back to the frame, and the document moves once: the same
+            // gesture, handed to the tool, from where it began to here.
+            self.preview_base = None;
+            let to = self.event(screen, shift, alt);
+            let from = PointerEvent { pos: reduced.start, screen: self.viewport.doc_to_screen(reduced.start), ..to };
+            let mut ctx = ToolContext {
+                document: &mut self.document,
+                selection: &mut self.selection,
+                viewport: &mut self.viewport,
+                settings: &mut self.settings,
+            };
+            self.tool.begin(&mut ctx, from);
+            let changed = self.tool.finish(&mut ctx, to);
+            self.gesture = None;
+            self.touch_all();
+            return changed;
         }
         if self.gesture.is_none() {
             return false;
@@ -809,6 +952,15 @@ impl Editor {
     }
 
     fn abort_gesture(&mut self) -> bool {
+        // A drag shown on the reduced copy never touched the document, so
+        // dropping the copy is the whole of putting it back.
+        if self.reduced_move.take().is_some() {
+            self.preview_base = None;
+            self.gesture = None;
+            self.history.discard_last();
+            self.touch_all();
+            return true;
+        }
         let Some(gesture) = self.gesture.take() else { return false };
         let mut ctx = ToolContext {
             document: &mut self.document,
@@ -1600,22 +1752,28 @@ impl Editor {
             // A smart object or text layer moves by its placement, whole.
             let Some(object) = layer.smart_object() else { return false };
             let moved = Affine::translation(f64::from(dx), f64::from(dy)).then(&object.transform);
+            let was = object.extent();
             let snapshot = Snapshot::of_whole_layer(&self.document, index).expect("the active layer exists");
             self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
             let (w, h) = (self.document.width(), self.document.height());
             self.document.active_layer_mut().set_smart_transform(moved, w, h);
-            self.touch_all();
+            let now = self.document.active_layer().smart_object().map_or(was, SmartObject::extent);
+            self.touch(was.union(&now));
             return true;
         }
         let snapshot = Snapshot::of_active_layer(&self.document);
         self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
         let surface = self.document.active_surface();
         let (moving, mut out) = self.selection.split(surface);
+        // Where the moved pixels were and where they have gone: a nudge held
+        // down repeats at the keyboard's rate, and on a large document
+        // recompositing all of it for each one cannot keep up.
+        let dirty = moving.content_bounds().map_or_else(Rect::default, |b| b.union(&Rect::new(b.x + dx, b.y + dy, b.w, b.h)));
         out.merge_over(&moving.translated(dx, dy));
         *self.document.active_surface_mut() = out;
         let bounds = self.document.bounds();
         self.selection = self.selection.translated(dx, dy, bounds);
-        self.touch_all();
+        self.touch(dirty);
         true
     }
 
@@ -1866,6 +2024,8 @@ impl Editor {
     /// Keeps whatever is currently previewed as one undo step.
     pub fn commit_session(&mut self) -> bool {
         self.preview_base = None;
+        self.transform_shown = None;
+        self.transform_small = None;
         let Some(session) = self.session.take() else { return false };
         match session {
             Session::Adjust { base, clip, last } => {
@@ -1935,6 +2095,8 @@ impl Editor {
     /// Puts the layer back the way it was before the session.
     pub fn cancel_session(&mut self) -> bool {
         self.preview_base = None;
+        self.transform_shown = None;
+        self.transform_small = None;
         let Some(session) = self.session.take() else { return false };
         match session {
             Session::Adjust { base, .. } => *self.document.active_surface_mut() = base,
@@ -1994,6 +2156,8 @@ impl Editor {
         }
         .ok_or(SessionError::Empty)?;
         self.transform_base = Some(layer.clone());
+        self.transform_shown = Some(session.rendered_bounds());
+        self.hold_reduced_drag(&session);
         self.session = Some(Session::Transform(session));
         Ok(())
     }
@@ -2111,11 +2275,36 @@ impl Editor {
 
     /// Shows the transform where it now stands: the pixels re-rendered onto
     /// the layer, or the outline re-read into the selection.
+    ///
+    /// Only where the box was and where it is now can have changed, and that
+    /// is all the composite is asked for: a line of type dragged across a 4K
+    /// document costs its own rectangle, not eight million pixels a frame.
     fn refresh_transform(&mut self) {
         match &self.session {
             Some(Session::Transform(t)) => {
-                let rendered = t.render();
-                *self.document.active_surface_mut() = rendered;
+                let shown = t.rendered_bounds();
+                let was = self.transform_shown.replace(shown);
+                let small = self.preview_base.as_mut().and_then(|b| b.small.as_mut());
+                if let (Some(twin), Some(small)) = (self.transform_small.as_mut(), small) {
+                    // Zoomed out: the drag is drawn on the reduced copy, all
+                    // of which is a fraction of the rectangle the full-size
+                    // one would cost, and the document is left alone until
+                    // the session commits.
+                    twin.follow(&t.matrix(), small.step);
+                    *small.document.active_surface_mut() = twin.render();
+                } else {
+                    match was {
+                        // The surface still holds the last rendering, so only
+                        // where the box was and where it is now is redrawn.
+                        Some(was) => {
+                            let dirty = was.union(&shown);
+                            t.render_into(self.document.active_surface_mut(), &dirty);
+                            self.touch(dirty);
+                            return;
+                        }
+                        None => *self.document.active_surface_mut() = t.render(),
+                    }
+                }
             }
             Some(Session::TransformSelection { session, .. }) => {
                 let rendered = session.render();
@@ -3562,6 +3751,111 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_smart_object_dirties_its_own_rectangle_and_not_the_document() {
+        // Moving a text layer runs a transform session, one preview per
+        // pointer event. Marking the whole composite there made every drag
+        // cost a full recomposite, which on a large document is slow enough
+        // to see as a stutter behind the box the page draws.
+        let mut e = Editor::new(200, 200, Rgba::TRANSPARENT);
+        e.place_smart_object("photo", Raster::filled(10, 10, RED));
+        e.set_tool(ToolKind::Move);
+        e.take_dirty();
+
+        assert!(e.pointer_down(Point::new(95.0, 95.0), false, false));
+        assert!(e.pointer_move(Point::new(105.0, 95.0), false, false));
+        let dirty = e.take_dirty().expect("the drag changed something");
+        assert!(dirty.w < 200 && dirty.h < 200, "only the object's own rectangle: {dirty:?}");
+        assert!(dirty.x <= 95 && dirty.right() >= 105, "covers where it was and where it has gone: {dirty:?}");
+
+        e.pointer_up(Point::new(105.0, 95.0), false, false);
+        assert_eq!(px(&e, 105, 100), RED);
+        assert_eq!(px(&e, 95, 100).a, 0);
+    }
+
+    #[test]
+    fn zoomed_out_a_drag_is_previewed_on_the_reduced_copy() {
+        // Dragging a layer the size of the canvas changes every pixel of it,
+        // so there is no rectangle to clip the work to. Zoomed out there is
+        // a cheaper answer the screen cannot tell from the real one: run the
+        // drag on the copy the adjustment dialogs preview into, and leave
+        // the document itself until the pointer comes up.
+        let mut e = Editor::new(64, 64, Rgba::TRANSPARENT);
+        e.place_smart_object("photo", Raster::filled(64, 64, RED));
+        e.set_zoom_about(0.25, Point::new(0.0, 0.0));
+        assert_eq!(e.preview_step(), 4, "a quarter zoom shows one pixel in four");
+        let before = e.document().active_surface().clone();
+
+        e.set_tool(ToolKind::Move);
+        assert!(e.pointer_down(Point::new(8.0, 8.0), false, false));
+        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false));
+        assert_eq!(e.preview_size(), Some([16, 16, 4]), "the copy is a quarter on a side");
+        assert_eq!(e.document().active_surface(), &before, "the document itself is untouched");
+
+        // What the page draws is the drag, at the reduced size.
+        let mut shown = Raster::new(16, 16);
+        assert_eq!(e.preview_into(&mut shown), Some(true));
+        assert_eq!(shown.get(8, 2), RED, "the object is there");
+        assert_eq!(shown.get(1, 2).a, 0, "and has left where it was");
+
+        // The pointer coming up does the one full-size pass.
+        e.pointer_up(Point::new(12.0, 8.0), false, false);
+        assert_eq!(e.preview_size(), None, "back to the frame");
+        assert_eq!(px(&e, 40, 20), RED);
+        assert_eq!(px(&e, 4, 20).a, 0, "moved by the 16 document pixels the drag came to");
+        assert!(e.document().active_layer().is_smart(), "still a smart object");
+        assert!(e.undo());
+        assert_eq!(px(&e, 4, 20), RED, "and one undo step puts it back");
+    }
+
+    #[test]
+    fn zoomed_out_the_move_tool_drags_a_whole_layer_on_the_reduced_copy() {
+        // A layer the size of the canvas changes every pixel of it when it
+        // moves, so there is no rectangle to clip the work to. Zoomed out the
+        // drag is shown on the copy, and the document is moved once — by the
+        // tool, with the same gesture — when the pointer comes up.
+        let mut e = Editor::new(64, 64, Rgba::WHITE);
+        e.add_layer();
+        let all = Rect::new(0, 0, 64, 64);
+        paint(&mut e, |r| r.fill_rect(all, RED, &all));
+        e.set_zoom_about(0.25, Point::new(0.0, 0.0));
+        let before = e.document().active_surface().clone();
+
+        e.set_tool(ToolKind::Move);
+        assert!(e.pointer_down(Point::new(8.0, 8.0), false, false));
+        assert!(e.pointer_move(Point::new(12.0, 8.0), false, false));
+        // A fifth of a screen pixel is under a document pixel at this zoom.
+        assert!(!e.pointer_move(Point::new(12.01, 8.0), false, false), "the same whole pixel is not a change");
+        assert_eq!(e.preview_size(), Some([16, 16, 4]), "the copy is a quarter on a side");
+        assert_eq!(e.document().active_surface(), &before, "the document itself is untouched");
+
+        // A quarter zoom makes the four screen pixels dragged sixteen
+        // document pixels, which is four on the copy.
+        let mut shown = Raster::new(16, 16);
+        assert_eq!(e.preview_into(&mut shown), Some(true));
+        assert_eq!(shown.get(8, 8), RED, "the layer is drawn where the drag has got to");
+        assert_eq!(shown.get(1, 8), Rgba::WHITE, "and has left where it was");
+
+        e.pointer_up(Point::new(12.0, 8.0), false, false);
+        assert_eq!(e.preview_size(), None, "back to the frame");
+        assert_eq!(px(&e, 20, 20), RED, "landed where the preview showed it");
+        assert_eq!(px(&e, 4, 20), Rgba::WHITE);
+
+        // Abandoning a drag leaves nothing behind: the document was never
+        // drawn on, so dropping the copy is the whole of putting it back.
+        let steps = e.history_labels().len();
+        e.pointer_down(Point::new(8.0, 8.0), false, false);
+        e.pointer_move(Point::new(30.0, 30.0), false, false);
+        assert!(e.cancel_gesture());
+        assert_eq!(e.preview_size(), None);
+        assert_eq!(px(&e, 20, 20), RED, "still where the drag before it left off");
+        assert_eq!(px(&e, 4, 20), Rgba::WHITE);
+        assert_eq!(e.history_labels().len(), steps, "and no step was kept");
+
+        assert!(e.undo());
+        assert_eq!(px(&e, 4, 20), RED, "the move was one undo step");
+    }
+
+    #[test]
     fn a_smart_object_refuses_the_brush_until_rasterized() {
         let mut e = Editor::new(4, 4, Rgba::TRANSPARENT);
         paint(&mut e, |r| r.set(1, 1, RED));
@@ -3655,7 +3949,10 @@ mod tests {
         assert_eq!(e.history_labels(), vec!["Select", "Move Selection"], "a run of outline nudges is one step");
 
         assert!(e.nudge_layer(1, 0));
+        e.take_dirty();
         assert!(e.nudge_layer(1, 0));
+        let dirty = e.take_dirty().expect("the nudge moved pixels");
+        assert!(dirty.w < 10 && dirty.h < 10, "only where the pixels were and are: {dirty:?}");
         assert_eq!(px(&e, 4, 2), RED);
         assert_eq!(px(&e, 2, 2), Rgba::TRANSPARENT);
         assert_eq!(e.selection_rect(), Some(Rect::new(4, 2, 5, 5)), "the outline came along");
