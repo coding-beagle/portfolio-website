@@ -8,6 +8,15 @@
 // tool without a clip, so each tool is probed at most once per page load and
 // the answer is remembered in `probed`.
 //
+// That probe used to happen on the first hover, which made the first card for
+// each tool arrive a beat late. The whole set is well under two megabytes, so
+// instead every attached tool is fetched once the page has gone idle and kept
+// as a blob URL in `sources`; a hover then only has to point the video at a
+// clip that is already in memory. The fetch is what probes, so a tool whose
+// clip 404s is settled before it is ever hovered. Hovering before the
+// prefetch reaches that tool still works — it falls back to the URL and the
+// browser's own cache.
+//
 // See `demos/README.md` for how the clips are made.
 //
 // Only pointers that can actually hover get a card. On a touch screen a
@@ -26,6 +35,68 @@ const probed = new Map();
 
 /** Bumped by `refreshDemo` to get past the browser's cache: name -> number. */
 const version = new Map();
+
+/** Prefetched clips, as blob URLs: name -> string. */
+const sources = new Map();
+
+/** Every tool wired up by `attachToolHelp`, in the order they were wired. */
+const wanted = [];
+
+/** How many clips are fetched at once, so the prefetch stays off the critical path. */
+const PREFETCH_CONCURRENCY = 4;
+
+let prefetchScheduled = false;
+
+/** The URL a tool's clip is at right now — versioned after a retake. */
+function demoUrl(name) {
+  const v = version.get(name);
+  return v ? `demos/${name}.webm?v=${v}` : `demos/${name}.webm`;
+}
+
+async function prefetchOne(name) {
+  if (sources.has(name) || probed.get(name) === false) return;
+  try {
+    const res = await fetch(demoUrl(name));
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    if (!blob.size) throw new Error("empty");
+    // Two fetches for one tool can overlap — a retake lands while the idle
+    // pass is still working through the list — and the loser drops its copy
+    // rather than replacing a blob URL the card may already be playing.
+    if (sources.has(name)) return;
+    sources.set(name, URL.createObjectURL(blob));
+    probed.set(name, true);
+  } catch {
+    // A missing clip is the common case for a tool without a demo, and the
+    // card is meant to be text-only there. Anything else that goes wrong
+    // leaves the hover to try the URL itself.
+    probed.set(name, false);
+  }
+}
+
+async function prefetchAll() {
+  const queue = wanted.slice();
+  const worker = async () => {
+    for (let name = queue.shift(); name !== undefined; name = queue.shift()) await prefetchOne(name);
+  };
+  await Promise.all(Array.from({ length: PREFETCH_CONCURRENCY }, worker));
+}
+
+/**
+ * Queues the whole set to be fetched once the page has stopped being busy.
+ * Called after every `attachToolHelp`, but only the first one schedules —
+ * the buttons are all wired in the same task, so one pass covers them.
+ */
+function schedulePrefetch() {
+  if (prefetchScheduled) return;
+  // Metered or explicitly frugal connections keep the old behaviour: fetch a
+  // clip when someone actually asks to see it.
+  if (navigator.connection?.saveData) return;
+  prefetchScheduled = true;
+  const run = () => prefetchAll();
+  if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 500);
+}
 
 const canHover = () => window.matchMedia?.("(hover: hover)").matches ?? true;
 const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -109,9 +180,8 @@ function show(button, def) {
   } else {
     video.dataset.tool = def.name;
     video.hidden = known !== true;
-    const v = version.get(def.name);
-    const src = v ? `demos/${def.name}.webm?v=${v}` : `demos/${def.name}.webm`;
-    if (!video.src.endsWith(src)) video.src = src;
+    const src = sources.get(def.name) ?? demoUrl(def.name);
+    if (video.src !== src && !video.src.endsWith(src)) video.src = src;
     // Reduced motion gets the first frame and no loop; the hint carries the
     // rest. `preload="none"` means nothing is fetched until one of these.
     if (stillMotion()) video.load();
@@ -142,6 +212,14 @@ function cancel() {
 export function refreshDemo(name) {
   probed.delete(name);
   version.set(name, Date.now());
+  const stale = sources.get(name);
+  if (stale) {
+    sources.delete(name);
+    URL.revokeObjectURL(stale);
+  }
+  // The retake has to come off the server, so it is fetched again rather than
+  // left to the next hover — which is what makes the new clip show at once.
+  prefetchOne(name);
   if (shownFor && video.dataset.tool === name) {
     const button = shownFor;
     hide();
@@ -182,6 +260,9 @@ export function attachToolHelp(button, def) {
     cancel();
     hide();
   });
+
+  wanted.push(def.name);
+  schedulePrefetch();
   return true;
 }
 
