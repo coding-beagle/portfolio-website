@@ -9,6 +9,7 @@
 
 import init, { NPaint } from "./pkg/npaint.js";
 import { createMenuBar, showContextMenu, closeMenus } from "./menu.js";
+import { createCommandPalette } from "./commands.js";
 import { createColorPicker } from "./colorpicker.js";
 import { ADJUSTMENTS, createAdjustDialog } from "./adjust.js";
 import { createGradientEditor, paintGradient, toFlat, fromFlat, loadStops } from "./gradient.js";
@@ -33,6 +34,7 @@ const ICON = {
   brush: '<path d="M4 20c2-.5 3-2 3.5-4l8.5-8.5 2.5 2.5L10 18.5c-2 .5-3.5 1.5-6 1.5z"/><path d="M15 6l3-3 3 3-3 3"/>',
   pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
   eraser: '<path d="M5 15l8-8 6 6-6 6H9z"/><path d="M9 19h11"/>',
+  clone: '<path d="M8 3h8v5H8z"/><path d="M4 13c0-2.2 2-3 4-5h8c2 2 4 2.8 4 5z"/><path d="M4 13h16v3H4z"/><path d="M10 16v5h4v-5"/>',
   line: '<path d="M5 19L19 5"/>',
   rectangle: '<rect x="4" y="6" width="16" height="12"/>',
   ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
@@ -94,6 +96,12 @@ const TOOLS = [
   { name: "brush", label: "Brush", key: "B", hint: "Paint with the foreground colour at the chosen opacity. Shift+click draws a straight line from the last stroke. Alt+click picks a colour." },
   { name: "pencil", label: "Pencil", key: "P", hint: "Hard, fully opaque strokes. Shift+click draws a straight line from the last stroke. Alt+click picks a colour." },
   { name: "eraser", label: "Eraser", key: "E", hint: "Erase to transparent. Shift+click erases a straight line from the last stroke." },
+  {
+    name: "clone",
+    label: "Clone stamp",
+    key: "S",
+    hint: "Alt+click what you want to copy from, then paint it in somewhere else. Aligned keeps the same offset for every stroke.",
+  },
   {
     name: "bucket",
     label: "Paint bucket",
@@ -185,6 +193,7 @@ let frameFailed = false;
 // Set while a canvas edge is being dragged: which edge, and where it is now.
 let resizing = null;
 let dpr = 1;
+let commandPalette; // the command palette
 let picker; // the colour picker
 let pickerTarget = "fg"; // which swatch the picker is editing
 // While the picker is open on something that is not one of the swatches —
@@ -434,6 +443,7 @@ function draw(now, ants, transforming) {
   if (showPixelGrid && zoom >= 8) drawPixelGrid(px, py, zoom, w, h);
   if (tool === "crop" && !transforming) drawCropShade(px, py, zoom);
   if (tool === "subject") drawSubjectBox(px, py, zoom);
+  if (tool === "clone") drawClonePreview(px, py, zoom);
   if (ants.length) drawAnts(now, ants, px, py, zoom);
   drawGuides(px, py, zoom);
 
@@ -615,6 +625,72 @@ function drawSubjectBox(px, py, zoom) {
   drawZoomMarquee([px + r[0] * zoom, py + r[1] * zoom, r[2] * zoom, r[3] * zoom]);
 }
 
+/** The scratch canvas the clone preview's patch is decoded into. */
+const clonePatch = document.createElement("canvas");
+const clonePatchCtx = clonePatch.getContext("2d");
+
+/**
+ * The clone stamp's source: the pixels it is about to lay down, drawn inside
+ * the brush ring where they will land, and a crosshair where they are being
+ * read from. Without it the offset is invisible until the paint is down and
+ * the only way to line a copy up is to try it and undo.
+ */
+function drawClonePreview(px, py, zoom) {
+  const anchor = np.clone_anchor();
+  if (!anchor.length) return;
+  const { at, radius } = brushRingAt(zoom);
+  // With no pointer over the canvas there is nowhere to preview; the
+  // crosshair still says where the source was left.
+  if (!at) {
+    drawCrosshair(px + anchor[0] * zoom, py + anchor[1] * zoom);
+    return;
+  }
+  const [docX, docY] = np.screen_to_doc(at.x, at.y);
+  const offset = np.clone_source_offset(docX, docY);
+  if (!offset.length) return;
+  const [dx, dy] = offset;
+  drawCrosshair(at.x + dx * zoom, at.y + dy * zoom);
+  if (radius < 1.5) return;
+
+  // The dab's square, twice: where the pixels are read from, and where they
+  // would be stamped. Drawing the first at the second is the preview.
+  const size = np.size();
+  const destX = Math.round(docX) - (size >> 1);
+  const destY = Math.round(docY) - (size >> 1);
+  const bytes = np.clone_source_patch(destX + dx, destY + dy, size, size);
+  if (bytes.length !== size * size * 4) return;
+  clonePatch.width = size;
+  clonePatch.height = size;
+  clonePatchCtx.putImageData(new ImageData(new Uint8ClampedArray(bytes), size, size), 0, 0);
+
+  vctx.save();
+  brushRingPath(at, radius);
+  vctx.clip();
+  vctx.imageSmoothingEnabled = zoom < 1;
+  // Where the source is transparent the picture underneath should show, so
+  // the patch is drawn over the canvas rather than onto a cleared square.
+  vctx.drawImage(clonePatch, px + destX * zoom, py + destY * zoom, size * zoom, size * zoom);
+  vctx.restore();
+}
+
+/** A small cross, light over dark so it shows against any picture. */
+function drawCrosshair(x, y) {
+  const arm = 7;
+  vctx.save();
+  vctx.beginPath();
+  vctx.moveTo(x - arm, y);
+  vctx.lineTo(x + arm, y);
+  vctx.moveTo(x, y - arm);
+  vctx.lineTo(x, y + arm);
+  vctx.lineWidth = 3;
+  vctx.strokeStyle = "rgba(0,0,0,0.45)";
+  vctx.stroke();
+  vctx.lineWidth = 1;
+  vctx.strokeStyle = "rgba(255,255,255,0.95)";
+  vctx.stroke();
+  vctx.restore();
+}
+
 /** With the crop tool, everything outside the box is dimmed. */
 function drawCropShade(px, py, zoom) {
   const r = np.selection_rect();
@@ -764,27 +840,38 @@ function drawGuides(px, py, zoom) {
 }
 
 /** The tools whose size is worth seeing before the stroke starts. */
-const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "quickselect", "refine"]);
+const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "clone", "quickselect", "refine"]);
 const showsBrushRing = () => BRUSH_TOOLS.has(tool);
 
 /**
  * The brush, drawn where the pointer is and the size it will actually paint.
  * Two rings, light over dark, so it shows up against any picture.
  */
-function drawBrushRing(zoom) {
-  const at = sizing ? sizing.anchor : cursor;
-  const radius = (np.size() * zoom) / 2;
-  // Below a pixel or two the ring is just noise; the crosshair says enough.
-  if (radius < 1.5) return;
-  vctx.save();
+/** Where the ring is drawn, and how big: the dab the next stroke would lay. */
+function brushRingAt(zoom) {
+  return { at: sizing ? sizing.anchor : cursor, radius: (np.size() * zoom) / 2 };
+}
+
+/**
+ * The outline of the dab, as a path on `vctx`: a square for the square tip,
+ * the disc every other tip fits inside otherwise. The clone stamp's preview
+ * is clipped to the same shape, so what it shows is exactly what it covers.
+ */
+function brushRingPath(at, radius) {
   vctx.beginPath();
-  // The ring is the dab's outline: a square for the square tip, the disc
-  // every other tip fits inside otherwise.
   if (BRUSH_TOOLS.has(tool) && tool !== "quickselect" && tool !== "refine" && np.brush_tip() === "square") {
     vctx.rect(at.x - radius, at.y - radius, radius * 2, radius * 2);
   } else {
     vctx.arc(at.x, at.y, radius, 0, Math.PI * 2);
   }
+}
+
+function drawBrushRing(zoom) {
+  const { at, radius } = brushRingAt(zoom);
+  // Below a pixel or two the ring is just noise; the crosshair says enough.
+  if (radius < 1.5) return;
+  vctx.save();
+  brushRingPath(at, radius);
   vctx.lineWidth = 3;
   vctx.strokeStyle = "rgba(0,0,0,0.45)";
   vctx.stroke();
@@ -1088,11 +1175,11 @@ function zoomHint() {
 /** Shows the options that apply to the current tool. */
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
-  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "bucket" || tool === "gradient";
-  const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser";
+  const hasOpacity = tool === "brush" || tool === "eraser" || tool === "clone" || tool === "bucket" || tool === "gradient";
+  const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser" || tool === "clone";
   // The pencil is hard whatever the slider says, and chalk and spatter
   // have their grain and their dots in place of a soft rim.
-  const hasHardness = (tool === "brush" || tool === "eraser") && np.brush_tip_has_hardness();
+  const hasHardness = (tool === "brush" || tool === "eraser" || tool === "clone") && np.brush_tip_has_hardness();
   const isText = tool === "text";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
   const subject = tool === "subject";
@@ -1150,7 +1237,9 @@ function syncOptions() {
   // brush paints the selection by hand and has only a size.
   $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect" || tool === "bucket");
   $("opt-sample-wrap").hidden = !(tool === "wand" || tool === "bucket");
-  $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket");
+  $("opt-aligned-wrap").hidden = tool !== "clone";
+  $("opt-aligned").checked = np.clone_aligned();
+  $("opt-all-layers-wrap").hidden = !(auto || tool === "bucket" || tool === "clone");
   $("opt-antialias-wrap").hidden = !(auto || tool === "bucket" || tool === "ellipse-select" || tool === "lasso");
   $("opt-subject").hidden = !(auto || subject);
   $("opt-quality-wrap").hidden = !(auto || subject);
@@ -1386,6 +1475,7 @@ function bindOptions() {
     np.set_sample_mode("global");
     syncOptions();
   });
+  $("opt-aligned").addEventListener("change", (e) => np.set_clone_aligned(e.target.checked));
   $("opt-all-layers").addEventListener("change", (e) => np.set_sample_all_layers(e.target.checked));
   $("opt-antialias").addEventListener("change", (e) => np.set_antialias(e.target.checked));
   $("opt-subject").addEventListener("click", selectSubject);
@@ -2297,8 +2387,10 @@ async function finishSubjectBox() {
   await selectSubjectWithModel(box, subjectMods);
 }
 
-function buildMenus() {
-  createMenuBar($("menus"), [
+/** Every menu the bar shows. The command palette flattens the same list, so
+ *  a new item is searchable without being named twice. */
+function menuDefinitions() {
+  return [
     {
       title: "File",
       items: [
@@ -2338,7 +2430,17 @@ function buildMenus() {
     { title: "Filter", items: filterItems() },
     { title: "Select", items: selectItems() },
     { title: "View", items: viewItems() },
-  ]);
+  ];
+}
+
+function buildMenus() {
+  createMenuBar($("menus"), menuDefinitions());
+  commandPalette = createCommandPalette({
+    dialog: $("dlg-command"),
+    input: $("command-query"),
+    list: $("command-list"),
+    menus: menuDefinitions,
+  });
 }
 
 /** The canvas's right-click menu. */
@@ -4723,6 +4825,12 @@ function handleShortcut(key, shift, alt) {
     case "s":
       if (shift) showExportDialog();
       else saveDocument();
+      return true;
+    case "k":
+      // Not VS Code's Ctrl+Shift+P: Firefox opens a private window on that
+      // and will not hand the key back. Ctrl+K is the chord every other
+      // command palette on the web uses, and pages may cancel it.
+      commandPalette.open();
       return true;
     case "r":
       toggleRulers();

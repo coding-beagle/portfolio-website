@@ -79,6 +79,10 @@
           <button id="opt-contiguous" class="seg-on" aria-pressed="true" title="Only the patch under the click">Contiguous</button>
           <button id="opt-global" aria-pressed="false" title="Every matching pixel in the image">Global</button>
         </div>
+        <label class="opt check" id="opt-aligned-wrap" title="Keep one source offset across strokes, so separate strokes rebuild one continuous copy">
+          <input type="checkbox" id="opt-aligned" />
+          Aligned
+        </label>
         <label class="opt check" id="opt-all-layers-wrap" title="Read the flattened image rather than the active layer alone">
           <input type="checkbox" id="opt-all-layers" />
           All layers
@@ -252,7 +256,7 @@
         <span id="status-brush"></span>
         <span id="status-message" class="status-message"></span>
         <span class="status-spacer"></span>
-        <span class="status-keys">Space+drag or middle mouse to pan · Ctrl+wheel to zoom · Right-click for options</span>
+        <span class="status-keys">Space+drag or middle mouse to pan · Ctrl+wheel to zoom · Right-click for options · Ctrl+K for commands</span>
       </footer>
     </div>
 
@@ -389,6 +393,11 @@
           <button type="submit" class="primary">Export</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="dlg-command" class="command-palette" aria-label="Command palette">
+      <input id="command-query" type="text" placeholder="Type a command…" spellcheck="false" autocomplete="off" />
+      <div id="command-list" class="command-list"></div>
     </dialog>
 
     <div id="color-popover" class="color-popover" hidden></div>

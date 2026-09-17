@@ -360,6 +360,52 @@ export class NPaint {
         return v1;
     }
     /**
+     * @returns {boolean}
+     */
+    clone_aligned() {
+        const ret = wasm.npaint_clone_aligned(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * Where the clone stamp copies from, as `[x, y]` in document pixels,
+     * or empty when no source has been set. The page draws a mark there.
+     * @returns {Float64Array}
+     */
+    clone_anchor() {
+        const ret = wasm.npaint_clone_anchor(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * How far the clone stamp's source is from a pointer at a document
+     * point, as `[dx, dy]`, or empty when nothing has been anchored.
+     * @param {number} x
+     * @param {number} y
+     * @returns {Int32Array}
+     */
+    clone_source_offset(x, y) {
+        const ret = wasm.npaint_clone_source_offset(this.__wbg_ptr, x, y);
+        var v1 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The source pixels the clone stamp would copy from a rectangle, as
+     * RGBA bytes, for the preview the page draws inside the brush ring.
+     * @param {number} x
+     * @param {number} y
+     * @param {number} w
+     * @param {number} h
+     * @returns {Uint8Array}
+     */
+    clone_source_patch(x, y, w, h) {
+        const ret = wasm.npaint_clone_source_patch(this.__wbg_ptr, x, y, w, h);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * @returns {string}
      */
     color() {
@@ -2006,6 +2052,12 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * @param {boolean} on
+     */
+    set_clone_aligned(on) {
+        wasm.npaint_set_clone_aligned(this.__wbg_ptr, on);
     }
     /**
      * @param {string} hex

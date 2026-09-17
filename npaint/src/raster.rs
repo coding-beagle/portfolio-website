@@ -214,6 +214,20 @@ impl Raster {
         out
     }
 
+    /// Like [`Raster::crop`], but always `rect`'s size: the parts of `rect`
+    /// that fall outside the buffer come back transparent rather than
+    /// shrinking the result. What a preview of a patch wants, so that where
+    /// the patch lands does not shift when it hangs over an edge.
+    pub fn crop_padded(&self, rect: &Rect) -> Raster {
+        let mut out = Raster::new(rect.w.max(0) as u32, rect.h.max(0) as u32);
+        for y in 0..rect.h {
+            for x in 0..rect.w {
+                out.set(x, y, self.get(rect.x + x, rect.y + y));
+            }
+        }
+        out
+    }
+
     pub fn to_rgba_bytes(&self) -> Vec<u8> {
         let mut out = vec![0; self.pixels.len() * 4];
         self.write_rgba_bytes(&mut out);
@@ -824,6 +838,19 @@ mod tests {
 
     fn count(r: &Raster, color: Rgba) -> usize {
         r.pixels().iter().filter(|p| **p == color).count()
+    }
+
+    #[test]
+    fn a_padded_crop_keeps_its_size_over_the_edge() {
+        let mut r = Raster::new(4, 4);
+        r.set(0, 0, RED);
+        // Two thirds of this rectangle is off the top-left corner.
+        let out = r.crop_padded(&Rect::new(-2, -2, 3, 3));
+        assert_eq!((out.width(), out.height()), (3, 3));
+        assert_eq!(out.get(2, 2), RED, "the one pixel that was there");
+        assert_eq!(count(&out, Rgba::TRANSPARENT), 8);
+        // And a rectangle entirely outside is a blank of the size asked for.
+        assert_eq!(r.crop_padded(&Rect::new(20, 20, 2, 2)).pixels().len(), 4);
     }
 
     #[test]

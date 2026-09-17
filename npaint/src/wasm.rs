@@ -452,6 +452,38 @@ impl NPaint {
         self.editor.settings().sample_all_layers
     }
 
+    pub fn set_clone_aligned(&mut self, on: bool) {
+        self.editor.settings_mut().clone_aligned = on;
+    }
+
+    pub fn clone_aligned(&self) -> bool {
+        self.editor.settings().clone_aligned
+    }
+
+    /// Where the clone stamp copies from, as `[x, y]` in document pixels,
+    /// or empty when no source has been set. The page draws a mark there.
+    pub fn clone_anchor(&self) -> Vec<f64> {
+        match self.editor.settings().clone_anchor {
+            Some(p) => vec![p.x, p.y],
+            None => Vec::new(),
+        }
+    }
+
+    /// How far the clone stamp's source is from a pointer at a document
+    /// point, as `[dx, dy]`, or empty when nothing has been anchored.
+    pub fn clone_source_offset(&self, x: f64, y: f64) -> Vec<i32> {
+        match self.editor.clone_source_offset(Point::new(x, y)) {
+            Some((dx, dy)) => vec![dx, dy],
+            None => Vec::new(),
+        }
+    }
+
+    /// The source pixels the clone stamp would copy from a rectangle, as
+    /// RGBA bytes, for the preview the page draws inside the brush ring.
+    pub fn clone_source_patch(&self, x: i32, y: i32, w: i32, h: i32) -> Vec<u8> {
+        self.editor.clone_source_patch(Rect::new(x, y, w, h)).to_rgba_bytes()
+    }
+
     pub fn set_antialias(&mut self, on: bool) {
         self.editor.settings_mut().antialias = on;
     }
@@ -1728,6 +1760,10 @@ mod tests {
         assert!(!np.sample_all_layers());
         np.set_sample_all_layers(true);
         assert!(np.sample_all_layers());
+        assert!(np.clone_aligned());
+        np.set_clone_aligned(false);
+        assert!(!np.clone_aligned());
+        assert!(np.clone_anchor().is_empty(), "nothing to clone from yet");
     }
 
     #[test]

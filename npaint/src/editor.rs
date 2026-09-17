@@ -2549,6 +2549,31 @@ impl Editor {
     }
 
     /// The flattened picture inside `rect`, for the page to hand the model.
+    /// How far the clone stamp's source is from a pointer at `at`, in whole
+    /// pixels, or None when nothing has been anchored. The preview asks this
+    /// so that what it shows and what the next dab copies cannot disagree.
+    pub fn clone_source_offset(&self, at: Point) -> Option<(i32, i32)> {
+        // Mid-stroke the offset is settled, aligned or not: the dab about to
+        // land uses whatever the stroke fixed when it began.
+        if self.gesture.is_some() {
+            if let Some(kept) = self.settings.clone_offset {
+                return Some(kept);
+            }
+        }
+        crate::tools::clone_offset_for(&self.settings, at)
+    }
+
+    /// The source pixels under `rect`, as the clone stamp reads them — the
+    /// flattened picture or the active layer alone, as the options bar says.
+    /// Always `rect`'s size, so a patch hanging over an edge still lines up.
+    pub fn clone_source_patch(&self, rect: Rect) -> Raster {
+        if self.settings.sample_all_layers {
+            self.document.composite().crop_padded(&rect)
+        } else {
+            self.document.active_surface().crop_padded(&rect)
+        }
+    }
+
     pub fn composite_crop(&self, rect: Rect) -> Raster {
         self.document.composite().crop(&rect)
     }
@@ -2725,6 +2750,64 @@ mod tests {
     fn click(e: &mut Editor, x: f64, y: f64) {
         e.pointer_down(Point::new(x, y), false, false);
         e.pointer_up(Point::new(x, y), false, false);
+    }
+
+    #[test]
+    fn alt_clicking_with_the_clone_stamp_anchors_the_source_without_a_step() {
+        let mut e = editor();
+        click(&mut e, 4.0, 4.0);
+        e.set_tool(ToolKind::Clone);
+        let steps = e.history_labels().len();
+
+        // Alt marks where to copy from. It paints nothing and is not a step:
+        // there is no state of the document for it to undo back to.
+        e.pointer_down(Point::new(4.0, 4.0), false, true);
+        e.pointer_up(Point::new(4.0, 4.0), false, true);
+        assert_eq!(e.settings().clone_anchor, Some(Point::new(4.0, 4.0)));
+        assert_eq!(e.history_labels().len(), steps);
+        assert_eq!(px(&e, 4, 4), RED, "the pixel it anchored on is untouched");
+
+        // And then a plain stroke copies from there.
+        click(&mut e, 12.0, 12.0);
+        assert_eq!(px(&e, 12, 12), RED);
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Clone Stamp"));
+    }
+
+    #[test]
+    fn the_clone_preview_reads_the_offset_the_next_dab_would_use() {
+        let mut e = editor();
+        click(&mut e, 4.0, 4.0);
+        e.set_tool(ToolKind::Clone);
+        assert_eq!(e.clone_source_offset(Point::new(12.0, 12.0)), None, "nothing anchored yet");
+
+        e.pointer_down(Point::new(4.0, 4.0), false, true);
+        e.pointer_up(Point::new(4.0, 4.0), false, true);
+        assert_eq!(e.clone_source_offset(Point::new(12.0, 12.0)), Some((-8, -8)));
+
+        // Once a stroke has fixed the offset, an aligned preview keeps it
+        // wherever the pointer goes next; an unaligned one takes it afresh.
+        click(&mut e, 12.0, 12.0);
+        assert_eq!(e.clone_source_offset(Point::new(15.0, 15.0)), Some((-8, -8)));
+        e.settings_mut().clone_aligned = false;
+        assert_eq!(e.clone_source_offset(Point::new(15.0, 15.0)), Some((-11, -11)));
+
+        // And the patch it shows is the source, padded where it hangs over
+        // the edge so that what is drawn still lines up with the ring.
+        let patch = e.clone_source_patch(Rect::new(3, 3, 3, 3));
+        assert_eq!((patch.width(), patch.height()), (3, 3));
+        assert_eq!(patch.get(1, 1), RED, "the anchored pixel, in the middle");
+        let over_the_edge = e.clone_source_patch(Rect::new(-1, -1, 3, 3));
+        assert_eq!((over_the_edge.width(), over_the_edge.height()), (3, 3));
+    }
+
+    #[test]
+    fn the_clone_stamp_does_nothing_until_it_has_a_source() {
+        let mut e = editor();
+        e.set_tool(ToolKind::Clone);
+        let steps = e.history_labels().len();
+        click(&mut e, 12.0, 12.0);
+        assert_eq!(px(&e, 12, 12), Rgba::WHITE);
+        assert_eq!(e.history_labels().len(), steps, "and it is not an undo step either");
     }
 
     #[test]

@@ -1,6 +1,6 @@
-//! Freehand strokes: the brush, the pencil and the eraser.
+//! Freehand strokes: the brush, the pencil, the eraser and the clone stamp.
 //!
-//! All three are the same gesture — stamp a dab at every pixel the pointer
+//! All four are the same gesture — stamp a dab at every pixel the pointer
 //! passes — and differ only in what the stamp does. The stroke is built up as
 //! a coverage mask and applied to a copy of the layer taken at the start,
 //! so overlapping stamps within one stroke do not compound: a 50% brush lays
@@ -12,6 +12,14 @@
 //!
 //! Shift-clicking joins the new stroke to where the last one ended with a
 //! straight line, as in Photoshop, so a run of Shift-clicks draws a polyline.
+//!
+//! The clone stamp is the one that reads pixels to write them: Alt-click
+//! sets the source anchor, and the first stroke after that fixes the offset
+//! from the pointer to the source, which the dab then copies from. The
+//! pixels it reads are a copy taken when the stroke began, so painting over
+//! the source does not feed back into itself. *Aligned* keeps that offset
+//! across strokes, so a run of separate strokes rebuilds one continuous
+//! copy; without it every stroke starts from the anchor again.
 //!
 //! Three settings shape the path before it is stamped. *Smoothing* makes
 //! the brush trail the pointer — each event moves the brush only part of
@@ -33,6 +41,9 @@ pub enum StrokeMode {
     Pencil,
     /// Removes alpha, by the brush opacity.
     Eraser,
+    /// Paints what is at the same offset from the pointer as the source
+    /// anchor was when the stroke began.
+    Clone,
 }
 
 #[derive(Debug)]
@@ -52,6 +63,30 @@ struct InProgress {
     base: Raster,
     /// Where the stroke has been: alpha 255 for covered pixels.
     mask: Raster,
+    /// Clone only: the pixels to copy from, as they were when the stroke
+    /// began, and how far they are from the pointer.
+    source: Option<CloneSource>,
+}
+
+#[derive(Debug)]
+struct CloneSource {
+    pixels: Raster,
+    dx: i32,
+    dy: i32,
+}
+
+/// How far the clone stamp's source is from a stroke starting at `at`: the
+/// offset already in force while that is what the next dab would use, and
+/// the one the anchor gives otherwise. None when nothing has been anchored.
+///
+/// Whole pixels: the stamp is a straight copy, so a fractional offset would
+/// only blur what it was asked to reproduce exactly.
+pub fn clone_offset_for(settings: &super::ToolSettings, at: Point) -> Option<(i32, i32)> {
+    let anchor = settings.clone_anchor?;
+    match settings.clone_offset {
+        Some(kept) if settings.clone_aligned => Some(kept),
+        _ => Some(((anchor.x - at.x).round() as i32, (anchor.y - at.y).round() as i32)),
+    }
 }
 
 /// How far the brush moves towards the pointer on each event, for a
@@ -63,6 +98,14 @@ fn follow(smoothing: f32) -> f64 {
 impl StrokeTool {
     pub fn new(mode: StrokeMode) -> StrokeTool {
         StrokeTool { mode, gesture: None, previous_end: None, touched: None }
+    }
+
+    /// The pixels a clone stroke starting at `at` should copy from, or None
+    /// when no source anchor has been set yet.
+    fn clone_source(&mut self, ctx: &mut ToolContext, at: Point) -> Option<CloneSource> {
+        let (dx, dy) = clone_offset_for(ctx.settings, at)?;
+        ctx.settings.clone_offset = Some((dx, dy));
+        Some(CloneSource { pixels: ctx.sample(), dx, dy })
     }
 
     fn stamp_to(&mut self, ctx: &mut ToolContext, to: Point, pressure: f64) {
@@ -113,6 +156,13 @@ impl StrokeTool {
                         StrokeMode::Brush => color.scaled_alpha(opacity).over(before),
                         StrokeMode::Pencil => color.with_alpha(255).over(before),
                         StrokeMode::Eraser => before.scaled_alpha(1.0 - opacity),
+                        // Off the edge of the source the copy has nothing to
+                        // lay down, and `Raster::get` says so with a
+                        // transparent pixel that leaves `before` as it was.
+                        StrokeMode::Clone => match &g.source {
+                            Some(src) => src.pixels.get(x + src.dx, y + src.dy).scaled_alpha(opacity).over(before),
+                            None => before,
+                        },
                     };
                     if cover == 255 { full } else { before.lerp(full, f32::from(cover) / 255.0) }
                 };
@@ -150,10 +200,24 @@ impl Tool for StrokeTool {
             StrokeMode::Brush => ToolKind::Brush,
             StrokeMode::Pencil => ToolKind::Pencil,
             StrokeMode::Eraser => ToolKind::Eraser,
+            StrokeMode::Clone => ToolKind::Clone,
         }
     }
 
     fn begin(&mut self, ctx: &mut ToolContext, ev: PointerEvent) -> Gesture {
+        if self.mode == StrokeMode::Clone {
+            // Alt-click marks where to copy from; it paints nothing, and the
+            // offset the last anchor gave is no longer the one in force.
+            if ev.alt {
+                ctx.settings.clone_anchor = Some(ev.pos);
+                ctx.settings.clone_offset = None;
+                return Gesture::Passive;
+            }
+            if ctx.settings.clone_anchor.is_none() {
+                return Gesture::Passive;
+            }
+        }
+        let source = if self.mode == StrokeMode::Clone { self.clone_source(ctx, ev.pos) } else { None };
         let layer = ctx.document.active_surface();
         // With Shift, the stroke starts where the last one ended, so the
         // first stamp draws a straight line from there to the click.
@@ -162,6 +226,7 @@ impl Tool for StrokeTool {
             last: from,
             base: layer.clone(),
             mask: Raster::new(layer.width(), layer.height()),
+            source,
         });
         // A click without movement still lays down one dab.
         self.stamp_to(ctx, ev.pos, ev.pressure);
@@ -209,6 +274,7 @@ mod tests {
     use crate::viewport::Viewport;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
+    const GREEN: Rgba = Rgba::opaque(0, 255, 0);
 
     struct Rig {
         doc: Document,
@@ -235,7 +301,16 @@ mod tests {
 
         /// A stroke whose every event carries the Shift state.
         fn stroke_with(&mut self, points: &[(f64, f64)], shift: bool) {
-            let at = |x: f64, y: f64| PointerEvent { shift, ..PointerEvent::at(x, y) };
+            self.gesture(points, shift, false);
+        }
+
+        /// One Alt-click, which is how the clone stamp is given its source.
+        fn alt_click(&mut self, x: f64, y: f64) {
+            self.gesture(&[(x, y)], false, true);
+        }
+
+        fn gesture(&mut self, points: &[(f64, f64)], shift: bool, alt: bool) {
+            let at = |x: f64, y: f64| PointerEvent { shift, alt, ..PointerEvent::at(x, y) };
             let mut ctx = ToolContext {
                 document: &mut self.doc,
                 selection: &mut self.selection,
@@ -487,6 +562,116 @@ mod tests {
             assert_eq!(rig.px(x, y), RED, "({x},{y})");
         }
         assert_eq!(rig.painted(), 4);
+    }
+
+    /// A band of green down the left of the canvas, to clone from.
+    fn with_green_band(rig: &mut Rig) {
+        let all = Rect::new(0, 0, 30, 30);
+        rig.doc.active_layer_mut().raster.fill_rect(Rect::new(0, 0, 6, 30), GREEN, &all);
+    }
+
+    #[test]
+    fn the_clone_stamp_copies_from_the_anchor() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 5.0));
+        rig.stroke(&[(20.0, 5.0), (20.0, 25.0)]);
+        // The offset is (-17, 0), so the stroke reads the band all the way down.
+        assert_eq!(rig.px(20, 5), GREEN);
+        assert_eq!(rig.px(20, 25), GREEN);
+        assert_eq!(rig.px(20, 4), Rgba::TRANSPARENT, "only where the brush went");
+    }
+
+    #[test]
+    fn alt_click_sets_the_source_and_paints_nothing() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.alt_click(3.0, 5.0);
+        assert_eq!(rig.settings.clone_anchor, Some(Point::new(3.0, 5.0)));
+        assert_eq!(rig.px(3, 5), GREEN, "the click left the pixels alone");
+    }
+
+    #[test]
+    fn a_clone_stroke_without_a_source_does_nothing() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        let before = rig.painted();
+        rig.stroke(&[(20.0, 5.0), (20.0, 25.0)]);
+        assert_eq!(rig.painted(), before);
+    }
+
+    #[test]
+    fn aligned_keeps_one_offset_across_strokes_and_unaligned_starts_again() {
+        // Aligned: the second stroke carries on from where the copy was, so
+        // a point 4 further down reads 4 further down the band.
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.doc.active_layer_mut().raster.set(3, 9, RED);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 5.0));
+        rig.stroke(&[(20.0, 5.0)]);
+        rig.stroke(&[(20.0, 9.0)]);
+        assert_eq!(rig.px(20, 9), RED, "the offset stayed (-17, 0)");
+
+        // Unaligned: the second stroke starts from the anchor again, so it
+        // reads the anchor's own pixel wherever it is put down.
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.doc.active_layer_mut().raster.set(3, 9, RED);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 5.0));
+        rig.settings.clone_aligned = false;
+        rig.stroke(&[(20.0, 5.0)]);
+        rig.stroke(&[(20.0, 9.0)]);
+        assert_eq!(rig.px(20, 9), GREEN, "the offset was taken afresh");
+    }
+
+    #[test]
+    fn a_new_anchor_starts_the_offset_again_even_when_aligned() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.doc.active_layer_mut().raster.set(3, 9, RED);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 5.0));
+        rig.stroke(&[(20.0, 5.0)]);
+        rig.alt_click(3.0, 9.0);
+        rig.stroke(&[(20.0, 20.0)]);
+        assert_eq!(rig.px(20, 20), RED, "the copy reads the pixel just anchored");
+    }
+
+    #[test]
+    fn cloning_across_the_source_does_not_feed_back() {
+        // A stroke that runs over its own source reads the pixels as they
+        // were when it began, so the copy does not smear itself along.
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 15.0));
+        rig.stroke(&[(5.0, 15.0), (25.0, 15.0)]);
+        assert_eq!(rig.px(7, 15), GREEN, "the band, moved two to the right");
+        assert_eq!(rig.px(9, 15), Rgba::TRANSPARENT, "and then what was beyond it");
+        assert_eq!(rig.px(25, 15), Rgba::TRANSPARENT);
+    }
+
+    #[test]
+    fn the_clone_stamp_stays_inside_the_selection() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        // A wide field to copy from, so the source is green right along the
+        // stroke and only the selection decides where the paint lands.
+        rig.doc.active_layer_mut().raster.fill_rect(Rect::new(0, 0, 15, 30), GREEN, &Rect::new(0, 0, 30, 30));
+        rig.selection = Selection::Rect(Rect::new(10, 0, 8, 30));
+        rig.settings.clone_anchor = Some(Point::new(3.0, 15.0));
+        rig.stroke(&[(8.0, 15.0), (25.0, 15.0)]);
+        assert_eq!(rig.px(12, 15), GREEN);
+        assert_eq!(rig.px(19, 15), Rgba::TRANSPARENT);
+    }
+
+    #[test]
+    fn a_clone_source_off_the_canvas_lays_down_nothing() {
+        let mut rig = Rig::new(StrokeMode::Clone);
+        with_green_band(&mut rig);
+        rig.settings.clone_anchor = Some(Point::new(3.0, 15.0));
+        // The offset is (+20, 0): every source pixel is past the right edge.
+        rig.stroke(&[(-17.0, 15.0), (-17.0, 15.0)]);
+        rig.settings.clone_anchor = Some(Point::new(29.0, 15.0));
+        rig.stroke(&[(5.0, 15.0)]);
+        assert_eq!(rig.px(5, 15), GREEN, "unchanged: the source is empty there");
     }
 
     #[test]

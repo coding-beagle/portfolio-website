@@ -146,8 +146,15 @@ npaint/
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
       movetool.rs  move (translate the selection or the layer)
-      stroke.rs    brush, pencil, eraser (one gesture, three stamps, a tip
-                   from brush.rs, and a hardness the pencil ignores)
+      stroke.rs    brush, pencil, eraser, clone stamp (one gesture, four
+                   stamps, a tip from brush.rs, and a hardness the pencil
+                   ignores). The clone stamp is the one that reads pixels
+                   to write them: Alt-click anchors the source, and the
+                   stroke copies from a fixed offset. `clone_offset_for` is
+                   that offset, and `Editor::clone_source_offset` and
+                   `clone_source_patch` are the same answer for the preview
+                   the page draws inside the brush ring, so what is shown
+                   and what is stamped cannot drift apart
       bucket.rs    paint bucket: the wand's patch, filled
       eyedropper.rs the eyedropper, and the Alt-click under every brush
       shape.rs     line, rectangle, ellipse (rubber-band)
@@ -162,6 +169,8 @@ npaint/
     index.html     the page
     app.js         DOM, canvas, events, render loop, menu definitions
     menu.js        the menu-bar drop-downs and context menus (one component)
+    commands.js    the command palette: the menu tree flattened into one
+                   fuzzy-searchable list, shortcuts and all (Ctrl+K)
     colorpicker.js hue ring + saturation/value square, hex/RGB/HSV fields
     gradient.js    the gradient editor: the run of colour stops the gradient
                    tool lays down, its presets, and the bar they are drawn on
@@ -955,7 +964,11 @@ what the numbers mean.
 
 **A menu item.** `app.js` builds every menu from item lists; `layerItems`,
 `editItems` and `selectItems` are shared between the menu bar and the
-context menus, so add to those rather than to one menu.
+context menus, so add to those rather than to one menu. `menuDefinitions()`
+is the whole bar, and the command palette flattens it, so an item is
+searchable — under its menu's name, with its shortcut — the moment it
+exists. Nothing is listed twice; a command the palette should find is a
+menu item, not an entry of its own.
 
 **A brush tip.** A `BrushTip` variant in `brush.rs` with a name, a label
 and an arm in `stamp` that writes coverage through `Raster::max_cover_in`
