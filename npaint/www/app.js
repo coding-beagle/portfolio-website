@@ -4242,8 +4242,16 @@ function bindPointer() {
       view.style.cursor = "";
       const w = r.x1 - r.x0;
       const h = r.y1 - r.y0;
+      const zoom = np.zoom();
       act(() => {
-        if (np.resize_canvas(w, h, -r.x0, -r.y0)) message(`Canvas ${w} × ${h} px.`);
+        if (np.resize_canvas(w, h, -r.x0, -r.y0)) {
+          // The pixels moved to (-x0, -y0) within the new canvas, so leaving
+          // the pan alone would slide the picture across the screen by that
+          // much. Move the origin the other way and the canvas stays under
+          // the dashed outline the drag was showing.
+          np.pan_by(r.x0 * zoom, r.y0 * zoom);
+          message(`Canvas ${w} × ${h} px.`);
+        }
       });
       return;
     }

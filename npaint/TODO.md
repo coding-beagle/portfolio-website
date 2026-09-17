@@ -1,9 +1,5 @@
 Sorted by priority:
 
-# Bugs
-
-Canvas resizing (via drag) should keep the viewport panning consistent
-
 # Features:
 
 Add gradient editor
