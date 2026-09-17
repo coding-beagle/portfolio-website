@@ -120,7 +120,9 @@ npaint/
                    adjustment layer, a smart object, or a group; the layer
                    mask and which of the two rasters the tools edit; the two
                    locks; which group the layer is in (`parent`) and whether
-                   it is clipped to the one below (`clipped`)
+                   it is clipped to the one below (`clipped`); and the
+                   `Offscreen` store, the pixels a move pushed over the edge
+                   of the canvas — see "Pixels off the canvas"
     palette.rs     a set of colours, and a picture conformed to it: the
                    nearest colour, with the error hidden by a dither, and
                    the distinct colours a picture is made of (a median cut)
@@ -152,7 +154,9 @@ npaint/
                    filled between them
       wand.rs      magic wand, quick select and the refine brush (none of
                    them touch pixels — only the selection)
-      movetool.rs  move (translate the selection or the layer)
+      movetool.rs  move (translate the selection or the layer). What a
+                   drag of the whole layer pushes off the canvas goes into
+                   the layer's `Offscreen` store rather than being cut off
       stroke.rs    brush, pencil, eraser, clone stamp, healing brush (one
                    gesture, five stamps, a tip from brush.rs, and a hardness
                    the pencil ignores). The clone stamp is the one that reads pixels
@@ -327,7 +331,9 @@ number and adds a line to the version history at the top of `src/file.rs`,
 which is the one place that says what each version was. `src/file.rs` writes
 the document as a little-endian stream —
 magic, version, size, then every layer with its rasters, mask, kind, blend
-mode, locks and the group it is in — and reads it back into a `Document`. It is deliberately
+mode, locks and the group it is in, and last a block a reader too old for it
+may skip, holding the clipping flag and the pixels the layer keeps off the
+canvas — and reads it back into a `Document`. It is deliberately
 not JSON or a zip: the engine has no parser for either, and the pixels are
 the bulk of it. The page gzips the stream on the way to disk
 (`CompressionStream`) and inflates it on the way back; a stream that arrives
@@ -540,7 +546,11 @@ funnel covers fills, clears and adjustment previews.
 
 The move tool is the exception (`ToolKind::confined_to_selection`): moving
 pixels *out* of the selection is the whole point of it, and it carries the
-selection along with them. So do the arrow keys: `nudge_layer` is the move
+selection along with them — off the canvas too. A `Selection::Rect` is not
+cut down to the canvas (a `Mask` is, being a grid the size of the document),
+so a marquee may be dragged out past the edge to pick up the pixels a layer
+keeps there; `Selection::clip`, which is what painting takes, still hands
+back only what is on the canvas. So do the arrow keys: `nudge_layer` is the move
 tool by another route (one undo step per run of presses), and
 `nudge_selection` moves only the outline. Edit > Stroke deliberately paints
 both sides of the edge, so it does not go through the funnel either.
@@ -1340,6 +1350,45 @@ The buffer means a clipping group cannot be cut in half, so
 a stroke on a clipped layer would composite against a cached backdrop that
 already had the group drawn into it.
 
+## Pixels off the canvas
+
+Dragging a layer's pixels over the edge does not cut them off. What leaves
+the canvas goes into `Layer::offscreen`, an `Offscreen` — a raster and the
+rectangle in document coordinates where it sits — and dragging back brings
+it back, as it does in Photoshop. Its one invariant is that nothing in it is
+inside the canvas: what is inside belongs in `Layer::raster`, and
+`Offscreen::outside` is what keeps that true.
+
+* **Who fills it.** `MoveTool` and `Editor::nudge_layer`, both through
+  `movetool::split_for_move`, which is the one place that decides what a
+  move is moving: the layer's surface and its store as one picture, divided
+  by the selection. So a marquee dragged out past the edge picks up what is
+  out there, and one over the canvas leaves it alone. A drag on a *mask* is
+  cut off at the canvas as it always was — the store belongs to the pixels,
+  and a mask has none. The layer with no store at all, which is nearly
+  every layer, is split over the canvas alone and costs what it always did.
+* **How a drag carries it.** The gesture takes the store out of the layer at
+  `begin` and puts it back at `finish`, so there is one answer rather than
+  two halves of one, and the pixels it holds are part of what the drag
+  shifts. Only what the canvas shows is drawn each frame, and the dirty
+  rectangle is clipped to the canvas (a store a long way out would otherwise
+  claim half the document). At low zoom this is the one drag that cannot run
+  on the reduced copy, which is the canvas and no more, so
+  `hold_reduced_move` declines and the drag runs on the document.
+* **Getting it back.** Move it back, or Image > Reveal All:
+  `Document::content_bounds` unions the stores with the smart objects'
+  placements and the canvas, and growing the canvas settles whatever is now
+  inside it back into the pixels (`Layer::settle_offscreen`, called from
+  `Layer::map_rasters` — so every canvas flip, turn and resize carries the
+  store along through the same placement the smart objects get).
+* **What it costs.** The store spans everything between the parts it holds,
+  so `MAX_OFFSCREEN_PIXELS` caps it: past that the oldest of it is dropped,
+  which is what all of it did before there was anywhere to keep it.
+* **Where it is kept.** In the file, in the layer record's extra block, so
+  an older build still opens the file and simply has no store (see "Files").
+  Undo carries it: `Snapshot::LayerPixels` holds it beside the raster,
+  because a move changes both.
+
 ## Masks, adjustment layers and smart objects
 
 Every layer is one struct with a `kind`, and the tools do not know which:
@@ -1483,10 +1532,12 @@ document; the brush tips have no angle or spacing controls, and no tip of the
 user's own; the dither's error-diffusion patterns are a serial pass over
 every pixel, so as a live adjustment *layer* on a very large canvas they cost
 noticeably more per composite than the ordered ones; pixel layers are always
-document-sized (a transform resamples into the canvas, and what leaves it is
-lost — a smart object keeps what leaves, since it re-renders from its
-source), which with four bytes a pixel is also what `MAX_PIXELS` is really
-about; a mask is not linked to its layer (moving or transforming the pixels
+document-sized, and only a *move* keeps what it pushes over the edge (in the
+`Offscreen` store — see "Pixels off the canvas"): a free transform still
+resamples into the canvas and loses what leaves it, and so does merging two
+layers, where only what the canvas shows is baked. A smart object loses
+nothing either way, since it re-renders from its source. Document-sized
+layers, at four bytes a pixel, are also what `MAX_PIXELS` is really about; a mask is not linked to its layer (moving or transforming the pixels
 leaves the mask where it was; the canvas operations and the layer flips do
 carry it along); a smart object's contents cannot be opened for editing, only
 replaced; an adjustment layer's preview is composited at full resolution

@@ -1637,8 +1637,9 @@ function cropToSelection() {
       // The kept pixels moved to the canvas origin, so leaving the pan alone
       // would slide them across the screen by where the box started. Moving
       // the origin the other way leaves the picture exactly where it was,
-      // still at the zoom the crop was judged at.
-      np.pan_by(rect[0] * zoom, rect[1] * zoom);
+      // still at the zoom the crop was judged at. A box may be dragged past
+      // the canvas, and only the part inside it is kept.
+      np.pan_by(Math.max(0, rect[0]) * zoom, Math.max(0, rect[1]) * zoom);
       message(`Cropped to ${np.width()} × ${np.height()} px.`);
     }
   });

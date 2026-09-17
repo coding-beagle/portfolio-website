@@ -15,13 +15,13 @@ use crate::document::{Document, DocumentError, Drop};
 use crate::file::{self, FileError};
 use crate::geometry::{Point, Rect};
 use crate::history::{Aside, History, Snapshot};
-use crate::layer::{keep_alpha, EditRefusal, Layer, LayerId, SmartObject, Target};
+use crate::layer::{keep_alpha, EditRefusal, Layer, LayerId, Offscreen, SmartObject, Target};
 use crate::mask::{Mask, SelectMode};
 use crate::raster::Raster;
 use crate::selection::Selection;
 use crate::snap::Snap;
 use crate::text::TextObject;
-use crate::tools::movetool::drag_offset;
+use crate::tools::movetool::{drag_offset, split_for_move, Split};
 use crate::tools::{sample_color, Gesture, PointerEvent, Tool, ToolContext, ToolKind, ToolSettings};
 use crate::transform::{Affine, Hit, Projective, TransformInfo, TransformSession};
 use crate::viewport::Viewport;
@@ -551,6 +551,12 @@ impl Editor {
     /// Splits the reduced copy's pixels for a move-tool drag to shift, or
     /// `None` when no reduced copy could be held.
     fn hold_reduced_move(&mut self, start: Point) -> Option<ReducedMove> {
+        // The reduced copy is the canvas and no more, so a layer with
+        // pixels kept outside it has nowhere to preview them coming back
+        // in. Such a drag runs on the document itself instead.
+        if self.document.active_layer().offscreen.is_some() {
+            return None;
+        }
         let bounds = self.document.active_surface().content_bounds();
         self.hold_preview_base(self.document.active_index());
         let Some(small) = self.preview_base.as_ref().and_then(|b| b.small.as_ref()) else {
@@ -1917,16 +1923,23 @@ impl Editor {
         }
         let snapshot = Snapshot::of_active_layer(&self.document);
         self.record_coalescing(snapshot, "Move", format!("nudge:{index}"));
-        let surface = self.document.active_surface();
-        let (moving, mut out) = self.selection.split(surface);
+        // A nudge is a move, and keeps what it pushes off the canvas the
+        // same way a drag does; see [`crate::tools::movetool`].
+        let canvas = self.document.bounds();
+        let Split { moving, mut stationary, left, keeps_offscreen } = split_for_move(&mut self.document, &self.selection);
         // Where the moved pixels were and where they have gone: a nudge held
         // down repeats at the keyboard's rate, and on a large document
         // recompositing all of it for each one cannot keep up.
-        let dirty = moving.content_bounds().map_or_else(Rect::default, |b| b.union(&Rect::new(b.x + dx, b.y + dy, b.w, b.h)));
-        out.merge_over(&moving.translated(dx, dy));
-        *self.document.active_surface_mut() = out;
-        let bounds = self.document.bounds();
-        self.selection = self.selection.translated(dx, dy, bounds);
+        let dirty = moving
+            .content_bounds()
+            .map_or_else(Rect::default, |b| b.union(&Rect::new(b.x + dx, b.y + dy, b.w, b.h)))
+            .intersect(&canvas);
+        let moved = moving.translated(dx, dy);
+        stationary.merge_translated_in(&moved.raster, moved.rect.x, moved.rect.y, &canvas);
+        *self.document.active_surface_mut() = stationary;
+        let outside = keeps_offscreen.then(|| Offscreen::outside(moved.rect, &moved.raster, canvas)).flatten();
+        self.document.active_layer_mut().offscreen = Offscreen::merged(outside, left);
+        self.selection = self.selection.translated(dx, dy);
         self.touch(dirty);
         true
     }
@@ -1938,8 +1951,7 @@ impl Editor {
             return false;
         }
         self.record_coalescing(Snapshot::Nothing, "Move Selection", "nudge-selection");
-        let bounds = self.document.bounds();
-        self.selection = self.selection.translated(dx, dy, bounds);
+        self.selection = self.selection.translated(dx, dy);
         self.touch_all();
         true
     }
@@ -2216,10 +2228,20 @@ impl Editor {
                 } else {
                     self.record(Snapshot::of_layer(&self.document, index).expect("the active layer exists"), "Free Transform");
                     *self.document.active_surface_mut() = rendered;
+                    // Pixels kept off the canvas belong to the layer, so a
+                    // transform of the whole of it takes them along; one
+                    // inside a selection cannot reach them. Unlike the move
+                    // tool, what this pushes *over* the edge is still lost:
+                    // the session works on the canvas surface alone.
+                    if t.moved_selection().is_none() && !before.editing_mask() {
+                        let matrix = t.matrix();
+                        let layer = self.document.active_layer_mut();
+                        layer.offscreen = layer.offscreen.as_ref().and_then(|kept| kept.placed(&matrix));
+                        layer.settle_offscreen(w, h);
+                    }
                 }
                 if let Some(rect) = t.moved_selection() {
-                    let bounds = self.document.bounds();
-                    self.selection.set_rect(rect, bounds);
+                    self.selection.set_rect(rect);
                 }
             }
             // The outline is already where the preview left it; the step
@@ -2566,7 +2588,7 @@ impl Editor {
     /// The marching ants: closed loops in document coordinates, one per
     /// island and one per hole.
     pub fn selection_contours(&self) -> Vec<Vec<Point>> {
-        self.selection.contours(self.document.bounds())
+        self.selection.contours()
     }
 
     /// How many pixels are selected, for the status bar.
@@ -2658,8 +2680,16 @@ impl Editor {
     /// Extends the selection to every pixel in the image that looks like one
     /// already in it, wherever it is — Photoshop's Select Similar.
     pub fn select_similar(&mut self) -> bool {
-        let Some(area) = self.selection.rect() else { return false };
+        if self.selection.is_none() {
+            return false;
+        }
         let source = self.sample();
+        // A marquee may reach past the canvas; only the pixels there can be
+        // read for what the selection is made of.
+        let area = self.selection.clip(source.bounds());
+        if area.is_empty() {
+            return false;
+        }
         let tolerance = self.settings.tolerance;
         let mut wanted = ColorSet::new();
         for y in area.y..area.bottom() {
@@ -4507,6 +4537,51 @@ mod tests {
         assert!((info.angle_degrees - 90.0).abs() < 1e-6);
         e.cancel_session();
         assert!(!e.transform_set_position(0.0, 0.0), "no transform open");
+    }
+
+    #[test]
+    fn pixels_moved_off_the_canvas_are_kept_and_reveal_all_brings_them_back() {
+        let mut e = Editor::new(8, 8, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(1, 1, RED));
+        assert!(e.nudge_layer(12, 0), "well past the right edge");
+        assert_eq!(px(&e, 1, 1).a, 0, "gone from the canvas");
+        assert_eq!(e.document().content_bounds(), Rect::new(0, 0, 14, 8));
+
+        assert!(e.nudge_layer(-12, 0));
+        assert_eq!(px(&e, 1, 1), RED, "and brought back by moving back");
+
+        // Or brought back by growing the canvas out to it instead.
+        assert!(e.nudge_layer(12, 0));
+        assert!(e.reveal_all());
+        assert_eq!((e.document().width(), e.document().height()), (14, 8));
+        assert_eq!(px(&e, 13, 1), RED);
+        assert_eq!(e.document().active_layer().offscreen, None, "nothing left outside");
+    }
+
+    #[test]
+    fn undoing_a_move_puts_back_what_it_pushed_off_the_canvas() {
+        let mut e = Editor::new(8, 8, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(1, 1, RED));
+        assert!(e.nudge_layer(12, 0));
+        assert!(e.undo());
+        assert_eq!(px(&e, 1, 1), RED);
+        assert_eq!(e.document().active_layer().offscreen, None);
+        assert!(e.redo());
+        assert_eq!(px(&e, 1, 1).a, 0);
+        assert!(e.document().active_layer().offscreen.is_some());
+    }
+
+    #[test]
+    fn a_free_transform_of_the_whole_layer_takes_what_is_outside_it_along() {
+        let mut e = Editor::new(8, 8, Rgba::TRANSPARENT);
+        paint(&mut e, |r| r.set(1, 1, RED));
+        let kept = Offscreen::new(Rect::new(-2, 1, 1, 1), Raster::filled(1, 1, Rgba::BLACK));
+        e.document.active_layer_mut().offscreen = Some(kept);
+        e.begin_transform().unwrap();
+        assert!(e.transform_nudge(0.0, 2.0));
+        assert!(e.commit_session());
+        let kept = e.document().active_layer().offscreen.as_ref().expect("still outside");
+        assert_eq!(kept.rect, Rect::new(-2, 3, 1, 1), "two down, with the rest of the layer");
     }
 
     // ---- Locks and blend modes ----------------------------------------------------------

@@ -113,6 +113,119 @@ impl SmartObject {
     }
 }
 
+/// How many pixels a layer may keep outside the canvas. The store spans
+/// everything between the parts it holds, so dragging a picture a very long
+/// way out would otherwise ask for a buffer the size of the distance; past
+/// this the oldest of it is cut off, as all of it was before there was
+/// anywhere to keep it.
+const MAX_OFFSCREEN_PIXELS: i64 = 40_000_000;
+
+/// The pixels a layer holds outside the canvas.
+///
+/// Dragging pixels over the edge does not throw them away: what left the
+/// canvas is kept here, at `rect` in document coordinates, so that dragging
+/// back brings the picture back whole and Image > Reveal All can grow the
+/// canvas to it. Nothing in here is inside the canvas — what is inside is
+/// in [`Layer::raster`], and [`Offscreen::outside`] is what keeps that so.
+///
+/// Only a layer's own pixels have one. A layer mask is still cut off at the
+/// canvas edge, and a smart object never needed this: its source is already
+/// kept at its own size, which is why a placed picture could always hang
+/// over the edge and come back. Merging two layers, or flattening, keeps
+/// only what the canvas shows: what is baked is what was on screen.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Offscreen {
+    /// Where the buffer sits in document coordinates. Its size is the
+    /// raster's.
+    pub rect: Rect,
+    pub raster: Raster,
+}
+
+impl Offscreen {
+    /// The raster placed at `rect`; the two must be the same size.
+    pub fn new(rect: Rect, raster: Raster) -> Offscreen {
+        debug_assert_eq!((rect.w, rect.h), (raster.width() as i32, raster.height() as i32));
+        Offscreen { rect, raster }
+    }
+
+    /// `raster`, sitting at `rect`, with everything the canvas shows
+    /// dropped and the rest trimmed to what it actually holds. `None` when
+    /// nothing of it is left outside — which is the common answer, since
+    /// most moves stay on the canvas.
+    pub fn outside(rect: Rect, raster: &Raster, canvas: Rect) -> Option<Offscreen> {
+        let inside = rect.intersect(&canvas);
+        if inside == rect {
+            return None;
+        }
+        let mut kept = raster.clone();
+        kept.clear_in(&Rect::new(inside.x - rect.x, inside.y - rect.y, inside.w, inside.h));
+        let content = kept.content_bounds()?;
+        Some(Offscreen {
+            rect: Rect::new(rect.x + content.x, rect.y + content.y, content.w, content.h),
+            raster: kept.crop(&content),
+        })
+    }
+
+    /// The smallest document rect holding every pixel it has, which is
+    /// `rect` unless something has been cleared out of it since.
+    pub fn content_bounds(&self) -> Option<Rect> {
+        let content = self.raster.content_bounds()?;
+        Some(Rect::new(self.rect.x + content.x, self.rect.y + content.y, content.w, content.h))
+    }
+
+    /// The same pixels, shifted by whole pixels.
+    pub fn translated(self, dx: i32, dy: i32) -> Offscreen {
+        Offscreen { rect: Rect::new(self.rect.x + dx, self.rect.y + dy, self.rect.w, self.rect.h), ..self }
+    }
+
+    /// This buffer with `under` laid beneath it. Too far apart to hold in
+    /// one buffer, `under` is dropped: what was moved last is what a move
+    /// back is asking for.
+    pub fn over(self, under: Option<Offscreen>) -> Offscreen {
+        let Some(under) = under else { return self };
+        let rect = self.rect.union(&under.rect);
+        if rect.area() > MAX_OFFSCREEN_PIXELS {
+            return self;
+        }
+        let mut raster = Raster::new(rect.w as u32, rect.h as u32);
+        let all = raster.bounds();
+        raster.merge_translated_in(&under.raster, under.rect.x - rect.x, under.rect.y - rect.y, &all);
+        raster.merge_translated_in(&self.raster, self.rect.x - rect.x, self.rect.y - rect.y, &all);
+        Offscreen { rect, raster }
+    }
+
+    /// [`Offscreen::over`] where either side may be nothing.
+    pub fn merged(over: Option<Offscreen>, under: Option<Offscreen>) -> Option<Offscreen> {
+        match over {
+            Some(over) => Some(over.over(under)),
+            None => under,
+        }
+    }
+
+    /// The buffer where a canvas flip, rotation or resize sends it — the
+    /// same placement the smart objects on the layer get. `None` when the
+    /// placement leaves nothing of it, or puts it further out than a buffer
+    /// may reach.
+    pub fn placed(&self, m: &Projective) -> Option<Offscreen> {
+        let (x, y) = (f64::from(self.rect.x), f64::from(self.rect.y));
+        let (w, h) = (f64::from(self.rect.w), f64::from(self.rect.h));
+        let corners = [Point::new(x, y), Point::new(x + w, y), Point::new(x + w, y + h), Point::new(x, y + h)];
+        let (min, max) = m.image_bounds(corners)?;
+        // The corners are pixel boundaries, so the far ones are exclusive.
+        let (x0, y0) = (min.x.floor() as i32, min.y.floor() as i32);
+        let rect = Rect::new(x0, y0, max.x.ceil() as i32 - x0, max.y.ceil() as i32 - y0);
+        if rect.is_empty() || rect.area() > MAX_OFFSCREEN_PIXELS {
+            return None;
+        }
+        // The buffer's own pixels are at the origin, so the placement runs
+        // from there into the document and back to the new buffer's corner.
+        let from_local = Projective::from(Affine::translation(x, y));
+        let to_local = Projective::from(Affine::translation(-f64::from(rect.x), -f64::from(rect.y)));
+        let into = to_local.then(m).then(&from_local);
+        Some(Offscreen { rect, raster: self.raster.projected_into(&into, rect.w as u32, rect.h as u32) })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayerKind {
     Pixels,
@@ -217,6 +330,9 @@ pub struct Layer {
     /// The pixels as they composite: painted directly for a pixel layer,
     /// rendered from the source for a smart object, empty for an adjustment.
     pub raster: Raster,
+    /// The pixels a move pushed off the canvas, kept rather than cut off.
+    /// Always `None` on a layer with no pixels of its own. See [`Offscreen`].
+    pub offscreen: Option<Offscreen>,
     /// The layer mask, a grey document-sized raster, if there is one.
     pub mask: Option<Raster>,
     /// A mask can be switched off without being thrown away.
@@ -287,6 +403,7 @@ impl Layer {
             blend: BlendMode::Normal,
             kind: LayerKind::Pixels,
             raster,
+            offscreen: None,
             mask: None,
             mask_enabled: true,
             target: Target::Pixels,
@@ -551,6 +668,28 @@ impl Layer {
         if let Some(mask) = &self.mask {
             self.mask = Some(f(mask));
         }
+        if let Some(offscreen) = &self.offscreen {
+            // `place` is the same move in document coordinates that the
+            // smart objects get, so what is being kept out there travels
+            // with the canvas rather than staying behind it.
+            self.offscreen = offscreen.placed(&place(&Projective::IDENTITY));
+            self.settle_offscreen(width, height);
+        }
+    }
+
+    /// Brings home whatever the layer keeps outside the canvas that is now
+    /// inside it, and leaves the store holding only what is still out
+    /// there. What growing the canvas — Reveal All, Canvas Size — is for.
+    pub fn settle_offscreen(&mut self, width: u32, height: u32) {
+        let Some(offscreen) = self.offscreen.take() else { return };
+        if !self.has_pixels() {
+            // Nothing to bring it home to; such a layer should never have
+            // had a store in the first place.
+            return;
+        }
+        let canvas = Rect::new(0, 0, width as i32, height as i32);
+        self.raster.merge_translated_in(&offscreen.raster, offscreen.rect.x, offscreen.rect.y, &canvas);
+        self.offscreen = Offscreen::outside(offscreen.rect, &offscreen.raster, canvas);
     }
 
     /// Moves a smart object's placement and re-renders it.
@@ -610,6 +749,44 @@ mod tests {
     use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
+
+    /// A 4x4 layer with one red pixel two to the left of the canvas.
+    fn kept_outside() -> Layer {
+        let mut layer = Layer::new(LayerId(1), "a", Raster::new(4, 4));
+        layer.offscreen = Some(Offscreen::new(Rect::new(-2, 1, 1, 1), Raster::filled(1, 1, RED)));
+        layer
+    }
+
+    #[test]
+    fn growing_the_canvas_brings_home_what_was_kept_outside_it() {
+        let mut layer = kept_outside();
+        // Canvas Size, two wider on the left: everything shifts two right.
+        let shift = Projective::from(Affine::translation(2.0, 0.0));
+        layer.map_rasters(|r| r.resized(6, 4, 2, 0), |m| shift.then(m), 6, 4);
+        assert_eq!(layer.raster.get(0, 1), RED, "it is on the canvas now");
+        assert_eq!(layer.offscreen, None);
+    }
+
+    #[test]
+    fn flipping_the_canvas_takes_what_is_outside_it_along() {
+        let mut layer = kept_outside();
+        let flip = Projective::from(Affine { a: -1.0, e: 4.0, ..Affine::IDENTITY });
+        layer.map_rasters(Raster::flipped_horizontal, |m| flip.then(m), 4, 4);
+        let kept = layer.offscreen.expect("still outside, on the other side");
+        assert_eq!(kept.rect, Rect::new(5, 1, 1, 1));
+        assert_eq!(kept.raster.get(0, 0), RED);
+    }
+
+    #[test]
+    fn what_is_left_outside_the_canvas_is_trimmed_to_what_it_holds() {
+        let raster = Raster::filled(4, 4, RED);
+        // Sitting two left of a 4x4 canvas: two columns of it show, two do not.
+        let kept = Offscreen::outside(Rect::new(-2, 0, 4, 4), &raster, Rect::new(0, 0, 4, 4)).unwrap();
+        assert_eq!(kept.rect, Rect::new(-2, 0, 2, 4));
+        assert_eq!(kept.raster.get(0, 0), RED);
+        // Wholly on the canvas, there is nothing to keep.
+        assert_eq!(Offscreen::outside(Rect::new(0, 0, 4, 4), &raster, Rect::new(0, 0, 4, 4)), None);
+    }
 
     #[test]
     fn opacity_is_clamped() {

@@ -67,7 +67,7 @@ impl MarqueeTool {
         let bounds = ctx.document.bounds();
         let rect = Self::rect(d, ev);
         match (self.shape, d.mode) {
-            (MarqueeShape::Rectangle, SelectMode::Replace) => ctx.selection.set_rect(rect, bounds),
+            (MarqueeShape::Rectangle, SelectMode::Replace) => ctx.selection.set_rect(rect),
             (MarqueeShape::Rectangle, mode) => {
                 let mut next = d.base.clone();
                 next.combine(&Mask::from_rect(bounds.w as u32, bounds.h as u32, rect), mode, bounds);
@@ -290,9 +290,13 @@ mod tests {
     }
 
     #[test]
-    fn selection_clips_to_the_document() {
+    fn a_marquee_may_be_dragged_past_the_document() {
+        // Where a layer may be holding pixels a move pushed out there; only
+        // a rectangle can say so, a mask being the size of the document.
         let s = drive(&[("begin", PointerEvent::at(15.0, 15.0)), ("finish", PointerEvent::at(40.0, 40.0))]);
-        assert_eq!(s, Selection::Rect(Rect::new(15, 15, 5, 5)));
+        assert_eq!(s, Selection::Rect(Rect::new(15, 15, 25, 25)));
+        let e = drive(&[("begin", PointerEvent::at(15.0, 15.0)), ("finish", PointerEvent::at(40.0, 40.0))]);
+        assert_eq!(e.clip(Rect::new(0, 0, 20, 20)), Rect::new(15, 15, 5, 5), "what may be painted is not");
     }
 
     #[test]

@@ -203,13 +203,15 @@ impl Document {
     }
 
     /// Everything the layers reach, the canvas included: what Reveal All
-    /// grows to. Only a smart object can answer anything but the canvas —
-    /// every other layer's raster *is* the canvas, so nothing it holds can
-    /// be outside — which is what keeps this cheap enough to ask often.
+    /// grows to. Only two things can answer anything but the canvas — a
+    /// smart object placed past the edge, and the pixels a move pushed off
+    /// it — and both say where they are without looking at a pixel, which
+    /// is what keeps this cheap enough to ask often.
     pub fn content_bounds(&self) -> Rect {
         self.layers
             .iter()
-            .filter_map(|l| l.smart_object().map(SmartObject::extent))
+            .flat_map(|l| [l.smart_object().map(SmartObject::extent), l.offscreen.as_ref().map(|o| o.rect)])
+            .flatten()
             .fold(self.bounds(), |all, r| all.union(&r))
     }
 

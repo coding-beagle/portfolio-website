@@ -15,6 +15,10 @@
 //! and older builds still open the file. The first such field is the
 //! clipping flag (one byte, non-zero for a layer clipped to the one below);
 //! a file written before it has an empty block and reads back unclipped.
+//! The second is the pixels the layer keeps off the canvas (one byte, and
+//! if it is set the buffer's place as four `i32` and then the buffer); a
+//! file written before it has none, which is what a layer that has never
+//! been moved off the edge holds anyway.
 //! After the layers comes a trailer with the guides; a file without one
 //! (the first files written) simply has none, and a reader from before the
 //! trailer stops after the layers.
@@ -55,7 +59,8 @@
 use crate::adjust::Adjustment;
 use crate::blend::BlendMode;
 use crate::document::Document;
-use crate::layer::{Layer, LayerId, LayerKind, SmartObject, Target};
+use crate::geometry::Rect;
+use crate::layer::{Layer, LayerId, LayerKind, Offscreen, SmartObject, Target};
 use crate::raster::Raster;
 use crate::snap::Guides;
 use crate::text::{TextAlign, TextObject, TextStyle};
@@ -103,6 +108,10 @@ impl Writer {
     }
 
     fn u32(&mut self, v: u32) {
+        self.out.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn i32(&mut self, v: i32) {
         self.out.extend_from_slice(&v.to_le_bytes());
     }
 
@@ -240,8 +249,21 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
             None => w.u8(0),
         }
         // The block a reader too old for these may skip; see the module.
-        w.u32(1);
-        w.u8(u8::from(layer.clipped));
+        let mut extra = Writer { out: Vec::new() };
+        extra.u8(u8::from(layer.clipped));
+        match &layer.offscreen {
+            Some(offscreen) => {
+                extra.u8(1);
+                extra.i32(offscreen.rect.x);
+                extra.i32(offscreen.rect.y);
+                extra.i32(offscreen.rect.w);
+                extra.i32(offscreen.rect.h);
+                extra.raster(&offscreen.raster);
+            }
+            None => extra.u8(0),
+        }
+        w.u32(extra.out.len() as u32);
+        w.out.extend_from_slice(&extra.out);
     }
     for axis in [&guides.h, &guides.v] {
         w.u32(axis.len() as u32);
@@ -277,6 +299,10 @@ impl Reader<'_> {
 
     fn u32(&mut self) -> Result<u32, FileError> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
+    }
+
+    fn i32(&mut self) -> Result<i32, FileError> {
+        Ok(i32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
     }
 
     fn f32(&mut self) -> Result<f32, FileError> {
@@ -341,6 +367,22 @@ impl Reader<'_> {
         }
         Ok(TextObject { text, style, color, origin })
     }
+}
+
+/// The pixels a layer keeps off the canvas, out of the layer record's extra
+/// block, or `None` from a file written before there were any. A block that
+/// does not parse is not worth refusing the whole file over — the picture
+/// itself is in the fields ahead of it — so it comes back empty instead.
+fn read_offscreen(extra: &[u8]) -> Option<Offscreen> {
+    // Byte 0 is the clipping flag, which the caller has already read.
+    let mut r = Reader { bytes: extra, at: 1 };
+    if r.u8().ok()? == 0 {
+        return None;
+    }
+    let rect = Rect::new(r.i32().ok()?, r.i32().ok()?, r.i32().ok()?, r.i32().ok()?);
+    let raster = r.raster().ok()?;
+    let size = (raster.width() as i32, raster.height() as i32);
+    ((rect.w, rect.h) == size).then(|| Offscreen::new(rect, raster))
 }
 
 /// A document and its guides from NPaint file bytes. The guides come back
@@ -422,7 +464,9 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
             None
         };
         let extra_len = r.u32()? as usize;
-        let clipped = r.take(extra_len)?.first().is_some_and(|&b| b != 0);
+        let extra = r.take(extra_len)?;
+        let clipped = extra.first().is_some_and(|&b| b != 0);
+        let offscreen = read_offscreen(extra);
 
         let mut layer = Layer::new(id, name, raster);
         layer.visible = visible;
@@ -437,6 +481,7 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
         layer.parent = parent;
         layer.collapsed = collapsed;
         layer.clipped = clipped;
+        layer.offscreen = offscreen;
         layers.push(layer);
     }
     // `from_parts` also checks that the groups nest the way the stack
@@ -517,8 +562,10 @@ mod tests {
         doc.set_collapsed(group, true).unwrap();
         doc.layer_mut(group).unwrap().set_opacity(0.4);
         // A clipped layer, so the round trip covers the flag in the layer
-        // record's extra block.
+        // record's extra block, and pixels kept off the canvas, which are
+        // the rest of that block.
         doc.layer_mut(1).unwrap().clipped = true;
+        doc.layer_mut(0).unwrap().offscreen = Some(Offscreen::new(Rect::new(-3, 2, 2, 1), Raster::filled(2, 1, RED)));
         doc.set_active(1).unwrap();
         doc
     }

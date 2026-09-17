@@ -97,9 +97,13 @@ impl Selection {
 
     /// Makes a rectangular selection, or clears it if the rect has no area —
     /// a click with the marquee tool deselects, the same as in Photoshop.
-    pub fn set_rect(&mut self, rect: Rect, bounds: Rect) {
-        let clipped = rect.intersect(&bounds);
-        *self = if clipped.is_empty() { Selection::None } else { Selection::Rect(clipped) };
+    ///
+    /// The rectangle is *not* cut down to the canvas: a layer may hold
+    /// pixels outside it (see [`crate::layer::Offscreen`]), and a marquee
+    /// that reaches out there is how they are picked up and moved back.
+    /// Painting is still confined to the canvas, by [`Selection::clip`].
+    pub fn set_rect(&mut self, rect: Rect) {
+        *self = if rect.is_empty() { Selection::None } else { Selection::Rect(rect) };
     }
 
     /// Takes a mask as the selection, collapsing the two cases that are not
@@ -147,16 +151,27 @@ impl Selection {
     /// leaves behind — what the move tool and the free transform drag. A
     /// partly covered pixel is split between the two in proportion.
     pub fn split(&self, layer: &Raster) -> (Raster, Raster) {
+        self.split_at(layer, (0, 0))
+    }
+
+    /// [`Selection::split`] of a buffer that sits at `origin` in the
+    /// document rather than over the canvas — the pixels a layer keeps
+    /// outside it, along with the ones on it. A marquee dragged out there
+    /// picks them up; a mask, being the size of the document, never
+    /// reaches them.
+    pub fn split_at(&self, layer: &Raster, origin: (i32, i32)) -> (Raster, Raster) {
+        let (ox, oy) = origin;
         match self {
             Selection::None => (layer.clone(), Raster::new(layer.width(), layer.height())),
-            Selection::Rect(r) => layer.split(r),
+            Selection::Rect(r) => layer.split(&Rect::new(r.x - ox, r.y - oy, r.w, r.h)),
             Selection::Mask(m) => {
                 let mut moving = Raster::new(layer.width(), layer.height());
                 let mut stationary = layer.clone();
-                let area = m.bounds().intersect(&layer.bounds());
+                let area = Rect::new(m.bounds().x - ox, m.bounds().y - oy, m.bounds().w, m.bounds().h)
+                    .intersect(&layer.bounds());
                 for y in area.y..area.bottom() {
                     for x in area.x..area.right() {
-                        let cover = f32::from(m.cover(x, y)) / 255.0;
+                        let cover = f32::from(m.cover(x + ox, y + oy)) / 255.0;
                         if cover <= 0.0 {
                             continue;
                         }
@@ -176,15 +191,14 @@ impl Selection {
         }
     }
 
-    /// Moves the selection by whole pixels, keeping it inside the document.
-    pub fn translated(&self, dx: i32, dy: i32, bounds: Rect) -> Selection {
+    /// Moves the selection by whole pixels, travelling with the pixels it
+    /// holds — off the canvas with them, if that is where they went.
+    pub fn translated(&self, dx: i32, dy: i32) -> Selection {
         match self {
             Selection::None => Selection::None,
-            Selection::Rect(r) => {
-                let mut out = Selection::None;
-                out.set_rect(Rect::new(r.x + dx, r.y + dy, r.w, r.h), bounds);
-                out
-            }
+            // A rectangle travels whole, off the canvas and back; a mask
+            // is a grid the size of the document and cannot leave it.
+            Selection::Rect(r) => Selection::Rect(Rect::new(r.x + dx, r.y + dy, r.w, r.h)),
             Selection::Mask(m) => {
                 let mut out = Selection::None;
                 out.set_mask(m.translated(dx, dy));
@@ -234,14 +248,14 @@ impl Selection {
     }
 
     /// The marching ants, as closed loops in document coordinates.
-    pub fn contours(&self, bounds: Rect) -> Vec<Vec<Point>> {
+    pub fn contours(&self) -> Vec<Vec<Point>> {
         match self {
             Selection::None => Vec::new(),
+            // Drawn where it is, canvas or no canvas: a marquee out past
+            // the edge is holding the pixels out there.
+            Selection::Rect(r) if r.is_empty() => Vec::new(),
             Selection::Rect(r) => {
-                let r = r.intersect(&bounds);
-                if r.is_empty() {
-                    return Vec::new();
-                }
+                let r = *r;
                 let (x0, y0, x1, y1) = (f64::from(r.x), f64::from(r.y), f64::from(r.right()), f64::from(r.bottom()));
                 vec![vec![Point::new(x0, y0), Point::new(x1, y0), Point::new(x1, y1), Point::new(x0, y1)]]
             }
@@ -280,25 +294,26 @@ mod tests {
         assert!(s.contains(-100, 3));
         assert_eq!(s.rect(), None);
         assert_eq!(s.cover(5, 5), 255);
-        assert!(s.contours(BOUNDS).is_empty());
+        assert!(s.contours().is_empty());
     }
 
+    /// A marquee may reach past the canvas, to hold the pixels a move put
+    /// out there; what is *painted* is cut down to the canvas instead.
     #[test]
-    fn a_rect_selection_clips_to_the_document() {
+    fn a_rect_selection_may_reach_past_the_document() {
         let mut s = Selection::None;
-        s.set_rect(Rect::new(5, 5, 20, 20), BOUNDS);
-        assert_eq!(s, Selection::Rect(Rect::new(5, 5, 5, 5)));
+        s.set_rect(Rect::new(5, 5, 20, 20));
+        assert_eq!(s, Selection::Rect(Rect::new(5, 5, 20, 20)));
         assert_eq!(s.clip(BOUNDS), Rect::new(5, 5, 5, 5));
         assert!(s.contains(5, 5));
+        assert!(s.contains(20, 20), "out past the edge, and still selected");
         assert!(!s.contains(4, 5));
     }
 
     #[test]
-    fn an_empty_or_off_document_rect_deselects() {
+    fn an_empty_rect_deselects() {
         let mut s = Selection::Rect(Rect::new(1, 1, 2, 2));
-        s.set_rect(Rect::new(3, 3, 0, 0), BOUNDS);
-        assert!(s.is_none());
-        s.set_rect(Rect::new(50, 50, 5, 5), BOUNDS);
+        s.set_rect(Rect::new(3, 3, 0, 0));
         assert!(s.is_none());
     }
 
@@ -417,7 +432,7 @@ mod tests {
     #[test]
     fn a_rect_traces_as_its_four_corners() {
         let s = Selection::Rect(Rect::new(2, 3, 4, 5));
-        let loops = s.contours(BOUNDS);
+        let loops = s.contours();
         assert_eq!(loops.len(), 1);
         assert_eq!(loops[0].len(), 4);
         assert_eq!(loops[0][0], Point::new(2.0, 3.0));
@@ -426,7 +441,7 @@ mod tests {
 
     #[test]
     fn moving_carries_the_selection_along() {
-        let s = Selection::Rect(Rect::new(1, 1, 2, 2)).translated(3, 0, BOUNDS);
+        let s = Selection::Rect(Rect::new(1, 1, 2, 2)).translated(3, 0);
         assert_eq!(s.rect(), Some(Rect::new(4, 1, 2, 2)));
     }
 }

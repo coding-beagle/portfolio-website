@@ -14,7 +14,7 @@
 //! snapshot is [`Snapshot::Nothing`].
 
 use crate::document::Document;
-use crate::layer::{Layer, LayerId, Target};
+use crate::layer::{Layer, LayerId, Offscreen, Target};
 use crate::raster::Raster;
 use crate::selection::Selection;
 
@@ -24,8 +24,10 @@ use crate::selection::Selection;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Snapshot {
     /// One surface of one layer — its pixels or its mask — found by id so a
-    /// later reorder does not point the restore at the wrong layer.
-    LayerPixels { id: LayerId, target: Target, raster: Raster },
+    /// later reorder does not point the restore at the wrong layer. The
+    /// pixels the layer keeps off the canvas travel with it, since a move
+    /// is a step that changes both.
+    LayerPixels { id: LayerId, target: Target, raster: Raster, offscreen: Option<Offscreen> },
     /// A whole layer: pixels, mask, kind and properties. For the edits that
     /// touch more than one of those at once, such as flipping a layer or
     /// transforming a smart object.
@@ -51,7 +53,8 @@ impl Snapshot {
     pub fn of_layer(doc: &Document, index: usize) -> Option<Snapshot> {
         let layer = doc.layer(index)?;
         let target = if layer.editing_mask() { Target::Mask } else { Target::Pixels };
-        Some(Snapshot::LayerPixels { id: layer.id(), target, raster: layer.surface().clone() })
+        let offscreen = layer.offscreen.clone();
+        Some(Snapshot::LayerPixels { id: layer.id(), target, raster: layer.surface().clone(), offscreen })
     }
 
     pub fn of_active_layer(doc: &Document) -> Snapshot {
@@ -71,20 +74,21 @@ impl Snapshot {
     /// that returns itself; the history stays consistent either way.
     fn restore(self, doc: &mut Document) -> Snapshot {
         match self {
-            Snapshot::LayerPixels { id, target, raster } => match doc.index_of(id) {
+            Snapshot::LayerPixels { id, target, raster, offscreen } => match doc.index_of(id) {
                 Some(index) => {
                     let layer = doc.layer_mut(index).expect("index came from index_of");
                     let slot = match (target, &mut layer.mask) {
                         (Target::Mask, Some(mask)) => mask,
                         // The mask this snapshot holds has been deleted since;
                         // there is nowhere to put it back, so leave things be.
-                        (Target::Mask, None) => return Snapshot::LayerPixels { id, target, raster },
+                        (Target::Mask, None) => return Snapshot::LayerPixels { id, target, raster, offscreen },
                         (Target::Pixels, _) => &mut layer.raster,
                     };
                     let previous = std::mem::replace(slot, raster);
-                    Snapshot::LayerPixels { id, target, raster: previous }
+                    let was = std::mem::replace(&mut layer.offscreen, offscreen);
+                    Snapshot::LayerPixels { id, target, raster: previous, offscreen: was }
                 }
-                None => Snapshot::LayerPixels { id, target, raster },
+                None => Snapshot::LayerPixels { id, target, raster, offscreen },
             },
             Snapshot::Layer(layer) => match doc.index_of(layer.id()) {
                 Some(index) => {
