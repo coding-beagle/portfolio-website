@@ -138,6 +138,11 @@ run_npaint:
 	@test -f npaint/build/pkg/npaint_bg.wasm || { echo "No build yet: run make build_npaint"; exit 1; }
 	python3 -m http.server 8790 -d npaint/build
 
+# record the tools' hover clips: serves the built NPaint on :8791 with record
+# mode on, and writes what is recorded into npaint/www/demos/
+record_npaint:
+	python3 npaint/scripts/record_server.py --port 8791
+
 # install the nt CLI into the current environment, editable
 install_nt:
 	pip install -e ./cli

@@ -15,6 +15,7 @@ import { ADJUSTMENTS, createAdjustDialog } from "./adjust.js";
 import { createGradientEditor, paintGradient, toFlat, fromFlat, loadStops } from "./gradient.js";
 import { createPalettePanel } from "./palette.js";
 import { readRecovery, writeRecovery, clearRecovery, supported as recoverySupported } from "./recovery.js";
+import { attachToolHelp, refreshDemo } from "./toolhelp.js";
 
 // ---- Tools ------------------------------------------------------------------
 
@@ -273,6 +274,23 @@ async function boot() {
   buildQualityPicker();
   requestAnimationFrame(frame);
   startRecovery();
+  startRecordMode();
+}
+
+/**
+ * Record mode is a development tool for making the tools' hover clips, so it
+ * is asked for by hand with `?record=1` and its module is not fetched at all
+ * otherwise.
+ */
+async function startRecordMode() {
+  if (!new URLSearchParams(location.search).has("record")) return;
+  const { createRecorder } = await import("./record.js");
+  createRecorder({
+    canvas: view,
+    viewport,
+    currentTool: () => tool,
+    onSaved: (name) => refreshDemo(name),
+  });
 }
 
 function onResize() {
@@ -1196,10 +1214,12 @@ function buildToolbox() {
     const b = document.createElement("button");
     b.className = "tool";
     b.dataset.tool = t.name;
-    b.title = `${t.label} (${t.key})`;
     b.setAttribute("aria-label", t.label);
     b.innerHTML = `<svg viewBox="0 0 24 24">${ICON[t.name]}</svg><span class="key">${t.key}</span>`;
     b.addEventListener("click", () => setTool(t.name));
+    // The hover card says everything `title` would and shows the tool at
+    // work; where it cannot be had — a touch screen — the tooltip stands in.
+    if (!attachToolHelp(b, t)) b.title = `${t.label} (${t.key})`;
     box.appendChild(b);
   }
   setTool(tool);

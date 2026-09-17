@@ -1662,3 +1662,213 @@ button.primary {
   padding: 10px 12px;
   color: var(--text-dim);
 }
+
+/* ---- Tool hover card ---- */
+/* Fixed rather than absolute: the toolbox scrolls, and the card has to be
+   able to stand clear of it over the canvas. */
+.toolhelp {
+  position: fixed;
+  z-index: 60;
+  width: 276px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.toolhelp[hidden] {
+  display: none;
+}
+.toolhelp-demo {
+  display: block;
+  width: 100%;
+  margin-bottom: 7px;
+  border-radius: 2px;
+  background: var(--bg);
+}
+.toolhelp-demo[hidden] {
+  display: none;
+}
+.toolhelp-title {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.toolhelp-hint {
+  color: var(--text-dim);
+}
+
+/* ---- Record mode (?record=1) ---- */
+.recorder {
+  position: fixed;
+  right: 14px;
+  /* Clear of the status bar, which is the one thing worth reading while recording. */
+  bottom: 34px;
+  z-index: 70;
+  width: 216px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.recorder-title {
+  font-weight: 600;
+}
+.recorder-tool {
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.recorder-tool-name {
+  color: var(--text);
+}
+.recorder-region {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--text-dim);
+}
+.recorder-region-size {
+  flex: 1 1 auto;
+}
+.recorder-full {
+  padding: 1px 7px;
+}
+.recorder-preview {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  border-radius: 2px;
+  background: var(--bg);
+}
+/* The trim bar: the whole take, with the kept span picked out and a handle at
+   each end of it. */
+.recorder-trim {
+  position: relative;
+  height: 16px;
+  margin-bottom: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.recorder-trim-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-soft);
+}
+.recorder-trim-handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 7px;
+  margin-left: -3px;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: ew-resize;
+}
+.recorder-trim-time {
+  margin-bottom: 8px;
+  color: var(--text-dim);
+}
+.recorder-review-actions {
+  display: flex;
+  gap: 6px;
+}
+.recorder-review-actions button {
+  flex: 1 1 0;
+}
+.recorder-review[hidden] {
+  display: none;
+}
+.recorder-go {
+  width: 100%;
+}
+.recorder.recording .recorder-go {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #1a0a0a;
+}
+.recorder-status {
+  margin-top: 6px;
+  min-height: 1.4em;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.recorder-status.ok {
+  color: var(--accent);
+}
+.recorder-status.warn {
+  color: var(--danger);
+}
+
+/* The region box over the viewport. Only the edges and the corner take the
+   pointer: the middle stays transparent to it, so the canvas under the box
+   can still be painted on while the box is framing the shot. */
+.record-region {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  outline: 1px dashed var(--accent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+}
+.record-region.recording {
+  outline-color: var(--danger);
+}
+.record-region-edge {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+}
+.record-region-edge.n,
+.record-region-edge.s {
+  left: 0;
+  right: 0;
+  height: 7px;
+}
+.record-region-edge.n {
+  top: -3px;
+}
+.record-region-edge.s {
+  bottom: -3px;
+}
+.record-region-edge.e,
+.record-region-edge.w {
+  top: 0;
+  bottom: 0;
+  width: 7px;
+}
+.record-region-edge.w {
+  left: -3px;
+}
+.record-region-edge.e {
+  right: -3px;
+}
+.record-region-grab {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 13px;
+  height: 13px;
+  pointer-events: auto;
+  cursor: nwse-resize;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.record-region.recording .record-region-grab {
+  background: var(--danger);
+}
+.record-region-size {
+  position: absolute;
+  left: 0;
+  top: -19px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--panel);
+  border-radius: 2px;
+  white-space: nowrap;
+}

@@ -187,6 +187,13 @@ npaint/
                    undo, and `.gpl` in and out
     recovery.js    the crash-recovery store: one copy of the document in
                    IndexedDB. Nothing in it may throw — see "Autosave"
+    toolhelp.js    the card shown beside a tool button on hover: the tool's
+                   name, its hint, and its demo clip if there is one
+    record.js      record mode (`?record=1`): records a tool's demo clip off
+                   the viewport canvas. Development only, not fetched
+                   otherwise — see "Tool demo clips"
+    demos/         one WebM per tool, named after the tool. Optional; a tool
+                   without one gets a card with only its text
     subject-worker.js the worker Select Subject's model runs in
     subject-model.js  the model behind Select Subject: loads ONNX Runtime and
                    U-2-Net on demand with progress, caches them in the
@@ -1004,6 +1011,65 @@ whole layer. Motion blur and pixelate move alpha about, as the blur does, so
 both work in premultiplied colour; median, emboss and find edges keep alpha
 as they found it.
 
+## Tool demo clips
+
+Resting the pointer on a tool button brings up a card with the tool's name,
+its hint from `TOOLS`, and a short silent loop of the tool at work. The clip
+is `www/demos/<tool name>.webm`, where the name is the one `ToolKind::name`
+gives — and that is the whole registration: `toolhelp.js` probes for the file
+the first time a tool is hovered and remembers whether it was there. A tool
+without a clip shows the same card without a video, so the set can be filled
+in one tool at a time and never has to be complete.
+
+Clips are recorded in the editor itself:
+
+```
+make build_npaint     # record mode serves build/, so it has to exist
+make record_npaint    # http://localhost:8791/?record=1
+```
+
+The panel that appears follows the toolbox: select a tool, frame the shot,
+press Record, use it, press Stop, trim it, press Save. What is captured is the viewport canvas via
+`captureStream`, not the screen — no permission prompt, no toolbar and no
+cursor in the frame. The clip is `PUT` back to the record server, which
+re-encodes it through ffmpeg to 480px wide VP9 and writes it into
+`www/demos/`, and the card picks it up on the next hover without a reload.
+
+**The trim.** A take is reviewed before it is kept: it loops in the panel over
+a trim bar whose two handles set the in and out points, and those ride along
+with the `PUT` as `?in=&out=` for ffmpeg to cut on. The cut belongs on the
+server because the browser would have to re-encode to make one and the server
+is re-encoding regardless — and because `MediaRecorder` writes a *stream*, so
+its WebM carries no duration and `video.duration` comes back `Infinity`. The
+preview works around that by seeking to an impossible time to make the browser
+find the real end (`realDuration`), falling back to the wall-clock length of
+the take. The server answers with `trimmed`, which is false when there was no
+ffmpeg to cut with, so the panel can warn instead of leaving a clip that
+quietly keeps the false start.
+
+**The region.** Most tools act on a corner of the picture, and a clip of the
+whole canvas would show that corner about six pixels across, so the dashed box
+over the viewport says what to record: edges move it, the corner handle
+resizes it, `Full` resets it, and it is remembered in `localStorage` between
+takes. `captureStream` cannot crop, so the region is blitted into a scratch
+canvas every frame and *that* canvas is captured — which is also where the
+recording gets its size, capped at `MAX_CAPTURE_EDGE` so a big region on a
+retina display does not feed the encoder frames the card will never show. The
+box's middle is `pointer-events: none`: the canvas under it has to stay
+paintable, or the shot could not be framed before it is recorded.
+
+The clips ship with the page, so size is worth a thought — but not much of
+one. A three- to five-second take at 60fps is 60-80 KB, so a clip for all
+twenty-odd tools costs under 2 MB. Length is what drives that; nothing else
+comes close, and 60fps costs about half again what 30 does. Keep a take to the
+length of one gesture.
+
+Hover is the whole interaction, so a device that cannot hover — a phone —
+gets the button's plain `title` tooltip instead, and `attachToolHelp` returns
+false to say so. Record mode is asked for by hand and `record.js` is not
+fetched without `?record=1`, so none of this costs the deployed page anything
+beyond `toolhelp.js`.
+
 ## Adding things
 
 **A tool.** Add a file under `src/tools/`, implement `Tool` (`begin`,
@@ -1011,7 +1077,8 @@ as they found it.
 see "What dirty means"), add a `ToolKind` variant with a name and a
 history label, and an arm in `ToolKind::instantiate`. In `app.js`, add an
 entry to `TOOLS` (name, label, shortcut key, icon path, hint); tools that
-share a key cycle when it is pressed. Say in `begin` whether the gesture
+share a key cycle when it is pressed. The hover card and its demo clip come
+for free from that entry — see "Tool demo clips". Say in `begin` whether the gesture
 `EditsActiveLayer` — that is all the undo system needs from you; a `Passive`
 gesture that changes the selection becomes a step on its own. Clip every
 pixel write with `ctx.clip()` and the selection will just work. A tool that
