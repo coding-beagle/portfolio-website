@@ -19,11 +19,12 @@ use crate::color::Rgba;
 use crate::document::Drop;
 use crate::editor::Editor;
 use crate::geometry::{Point, Rect};
-use crate::gradient::GradientShape;
+use crate::gradient::{GradientShape, GradientStops};
 use crate::layer::{mask_cover, Target};
 use crate::mask::SelectMode;
-use crate::transform::{Handle, Hit};
+use crate::palette::Palette;
 use crate::raster::Raster;
+use crate::transform::{Handle, Hit};
 use crate::text::TextAlign;
 use crate::tools::{Symmetry, ToolKind, MAX_RADIAL};
 
@@ -524,6 +525,27 @@ impl NPaint {
 
     pub fn gradient_reverse(&self) -> bool {
         self.editor.settings().gradient_reverse
+    }
+
+    /// The stops the gradient tool runs through, as `[position, r, g, b, a]`
+    /// each — what the page's gradient editor holds. An empty list puts it
+    /// back on the foreground and background swatches.
+    pub fn set_gradient_stops(&mut self, flat: &[f32]) {
+        let stops = GradientStops::from_flat(flat);
+        self.editor.settings_mut().gradient_stops = if stops.is_empty() { None } else { Some(stops) };
+    }
+
+    pub fn gradient_stops(&self) -> Vec<f32> {
+        match &self.editor.settings().gradient_stops {
+            Some(stops) => stops.to_flat(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The most-used colours of the flattened picture, most used first, as
+    /// `[r, g, b]` each: the palette panel's "From Image".
+    pub fn image_palette(&self, max: usize) -> Vec<f32> {
+        Palette::from_image(&self.editor.document().composite(), max).to_flat()
     }
 
     pub fn gradient_shape_names() -> Vec<String> {
@@ -1946,6 +1968,31 @@ mod tests {
         assert!(np.set_gradient_shape("spiral").is_err());
         assert_eq!(NPaint::gradient_shape_names().len(), NPaint::gradient_shape_labels().len());
         assert!(NPaint::gradient_shape_names().contains(&"reflected".to_owned()));
+    }
+
+    #[test]
+    fn the_gradient_editor_s_stops_cross_the_boundary() {
+        let mut np = NPaint::new(4, 4, "#ffffff").unwrap();
+        assert!(np.gradient_stops().is_empty(), "the swatches until the editor says otherwise");
+        let stops = vec![0.0, 255.0, 0.0, 0.0, 255.0, 0.5, 0.0, 255.0, 0.0, 255.0, 1.0, 0.0, 0.0, 255.0, 0.0];
+        np.set_gradient_stops(&stops);
+        assert_eq!(np.gradient_stops(), stops);
+        np.set_gradient_stops(&[]);
+        assert!(np.gradient_stops().is_empty(), "emptied, it is the swatches again");
+    }
+
+    #[test]
+    fn a_palette_can_be_taken_from_the_picture() {
+        let mut np = NPaint::new(4, 4, "#ffffff").unwrap();
+        np.set_color("#ff0000").unwrap();
+        np.set_tool("pencil").unwrap();
+        np.set_size(2);
+        np.pointer_down(1.0, 1.0, false, false, 1.0);
+        np.pointer_up(1.0, 1.0, false, false, 1.0);
+        let palette = np.image_palette(8);
+        assert_eq!(palette.len() % 3, 0);
+        assert_eq!(&palette[0..3], &[255.0, 255.0, 255.0], "most of the canvas is still white");
+        assert!(palette[3..].as_chunks::<3>().0.iter().any(|c| c[0] > 240.0 && c[1] < 16.0), "and the red is in it: {palette:?}");
     }
 
     #[test]

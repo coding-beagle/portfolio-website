@@ -632,6 +632,15 @@ export class NPaint {
         return v1;
     }
     /**
+     * @returns {Float32Array}
+     */
+    gradient_stops() {
+        const ret = wasm.npaint_gradient_stops(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * @returns {string[]}
      */
     static group_blend_mode_labels() {
@@ -755,6 +764,18 @@ export class NPaint {
     history_position() {
         const ret = wasm.npaint_history_position(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * The most-used colours of the flattened picture, most used first, as
+     * `[r, g, b]` each: the palette panel's "From Image".
+     * @param {number} max
+     * @returns {Float32Array}
+     */
+    image_palette(max) {
+        const ret = wasm.npaint_image_palette(this.__wbg_ptr, max);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
     /**
      * @returns {boolean}
@@ -2019,6 +2040,17 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * The stops the gradient tool runs through, as `[position, r, g, b, a]`
+     * each — what the page's gradient editor holds. An empty list puts it
+     * back on the foreground and background swatches.
+     * @param {Float32Array} flat
+     */
+    set_gradient_stops(flat) {
+        const ptr0 = passArrayF32ToWasm0(flat, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.npaint_set_gradient_stops(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * The guides the page draws, in document pixels, for the move tool and

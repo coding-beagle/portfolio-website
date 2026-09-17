@@ -7,13 +7,14 @@
 //! it puts back and the area it reports dirty are both the whole clip, and
 //! the cost of a drag is the cost of the fill.
 //!
-//! The colours are the foreground and the background, which is what the two
-//! swatches are for; the options bar's Reverse swaps them, so the gradient
-//! can be turned round without touching the swatches.
+//! The colours come from [`ToolSettings::gradient_stops`] — what the page's
+//! gradient editor holds — or, while that is empty, from the foreground and
+//! background swatches, which is the plain two-colour blend. The options
+//! bar's Reverse turns the run round without touching either.
 
 use super::{constrain_angle, Gesture, PointerEvent, Tool, ToolContext, ToolKind};
 use crate::geometry::{Point, Rect};
-use crate::gradient::Gradient;
+use crate::gradient::{Gradient, GradientStops};
 use crate::raster::Raster;
 
 #[derive(Debug, Default)]
@@ -31,12 +32,12 @@ impl GradientTool {
         // Shift snaps the drag to 45°, as it does for a line.
         let end = if ev.shift { constrain_angle(start, ev.pos) } else { ev.pos };
         let settings = ctx.settings.clone();
-        let (from, to) = if settings.gradient_reverse {
-            (settings.background, settings.color)
-        } else {
-            (settings.color, settings.background)
+        let stops = match &settings.gradient_stops {
+            Some(stops) if !stops.is_empty() => stops.clone(),
+            _ => GradientStops::two(settings.color, settings.background),
         };
-        let gradient = Gradient { shape: settings.gradient_shape, start, end, from, to };
+        let stops = if settings.gradient_reverse { stops.reversed() } else { stops };
+        let gradient = Gradient { shape: settings.gradient_shape, start, end, stops };
         let area = self.area;
         let raster = ctx.document.active_surface_mut();
         raster.copy_from(base, &area);
@@ -85,7 +86,7 @@ mod tests {
     use super::*;
     use crate::color::Rgba;
     use crate::document::Document;
-    use crate::gradient::GradientShape;
+    use crate::gradient::{GradientShape, GradientStops};
     use crate::selection::Selection;
     use crate::tools::ToolSettings;
     use crate::viewport::Viewport;
@@ -158,6 +159,18 @@ mod tests {
         let (r, _) = run(s, Selection::None, &[(0.0, 0.0), (19.0, 0.0)]);
         let p = r.get(0, 0);
         assert!(p.r > 200 && p.g > 100, "half red over white is pink, not red: {p}");
+    }
+
+    #[test]
+    fn the_editor_s_stops_are_what_is_laid_down() {
+        let stops = GradientStops::new(vec![
+            crate::gradient::GradientStop { at: 0.0, color: Rgba::opaque(0, 255, 0) },
+            crate::gradient::GradientStop { at: 1.0, color: Rgba::opaque(0, 255, 0) },
+        ]);
+        let s = ToolSettings { gradient_stops: Some(stops), ..settings() };
+        let (r, _) = run(s, Selection::None, &[(0.0, 0.0), (19.0, 0.0)]);
+        assert_eq!(r.get(0, 0), Rgba::opaque(0, 255, 0), "the swatches have nothing to say now");
+        assert_eq!(r.get(19, 0), Rgba::opaque(0, 255, 0));
     }
 
     #[test]

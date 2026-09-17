@@ -3,8 +3,10 @@
 // `preview_adjustment` on every change, so the canvas shows the result live;
 // OK commits it as one undo step and Cancel puts the pixels back.
 //
-// Most controls are sliders. Curves is the exception: a tone curve drawn by
-// hand on a small graph, which hands the engine its points as a flat list.
+// Most controls are sliders. Two are not: Curves is a tone curve drawn by
+// hand on a small graph, and Map to Palette shows the palette panel's
+// colours; both hand the engine a variable-length flat list, which is why
+// they ride at the end of an adjustment's parameters.
 // There are two small ones besides — a dropdown and a checkbox — which hand
 // the engine a number like everything else: the option's index, or 0/1.
 //
@@ -23,6 +25,8 @@
 // the layer's current settings, and the engine's session applies each change
 // to the layer rather than to pixels. The dialog cannot tell the difference,
 // which is the point.
+
+import { currentPaletteFlat } from "./palette.js";
 
 /**
  * The dither patterns, in the order `dither::DitherMethod::ALL` declares
@@ -53,6 +57,15 @@ const CHANNELS = ["RGB", "Red", "Green", "Blue"];
 const CHANNEL_TINTS = [null, "#e4564a", "#3fa85c", "#4e7ff2"];
 /** The channel row, shared by every adjustment that takes one. */
 const channelParam = () => ({ kind: "choice", label: "Channel", value: 0, options: CHANNELS, channel: true });
+
+/**
+ * The palette filter's patterns: the dithers, with "None" in front of them,
+ * so the index is one past `dither::DitherMethod::ALL` and zero is a plain
+ * nearest-colour match. `adjust::Kind::Palette` reads it the same way.
+ */
+const PALETTE_PATTERNS = ["None", ...DITHER_PATTERNS];
+/** The first error-diffusion pattern in that list, which has no cells. */
+const PALETTE_DIFFUSION = DITHER_FLOYD_STEINBERG + 1;
 
 export const ADJUSTMENTS = [
   {
@@ -153,6 +166,19 @@ export const ADJUSTMENTS = [
     params: [
       { label: "Amount", min: 0, max: 100, value: 10, unit: "%" },
       { kind: "toggle", label: "Monochromatic", value: 0 },
+    ],
+  },
+  {
+    // The colours are the palette panel's, and ride at the end of the
+    // parameters as the curve's points do — see `src/palette.rs`.
+    name: "palette",
+    label: "Map to Palette…",
+    group: "filter",
+    params: [
+      { kind: "choice", label: "Dither", value: 0, options: PALETTE_PATTERNS },
+      { label: "Strength", min: 0, max: 100, value: 100, unit: "%", enabled: (v) => v[0] > 0 },
+      { label: "Cell size", min: 1, max: 16, value: 1, unit: " px", enabled: (v) => v[0] > 0 && v[0] < PALETTE_DIFFUSION },
+      { kind: "palette", label: "Palette", value: [] },
     ],
   },
   { name: "desaturate", label: "Desaturate", shortcut: "Ctrl+Shift+U", params: [] },
@@ -364,6 +390,57 @@ function createCurveControl(initial, onChange) {
   };
 }
 
+/**
+ * The palette the filter maps onto: the colours the palette panel has in
+ * hand, shown as swatches. The panel is where a palette is edited, so this
+ * only shows what will be used and offers to take the panel's colours again
+ * when they have moved on since the dialog opened.
+ */
+function createPaletteControl(initial, onChange) {
+  const row = document.createElement("div");
+  row.className = "adjust-row adjust-palette";
+  const label = document.createElement("label");
+  label.textContent = "Palette";
+  const swatches = document.createElement("div");
+  swatches.className = "adjust-swatches";
+  const take = document.createElement("button");
+  take.type = "button";
+  take.textContent = "Use current palette";
+  take.title = "Take the colours the palette panel has now";
+  let colors = initial.length >= 3 ? [...initial] : currentPaletteFlat();
+
+  function draw() {
+    swatches.replaceChildren();
+    for (let i = 0; i + 2 < colors.length; i += 3) {
+      const dot = document.createElement("span");
+      dot.className = "adjust-swatch";
+      dot.style.background = `rgb(${colors[i]}, ${colors[i + 1]}, ${colors[i + 2]})`;
+      swatches.appendChild(dot);
+    }
+    const count = colors.length / 3;
+    take.disabled = false;
+    label.textContent = count ? `Palette (${count})` : "Palette (empty)";
+  }
+
+  take.addEventListener("click", () => {
+    colors = currentPaletteFlat();
+    draw();
+    onChange();
+  });
+  draw();
+  row.append(label, swatches, take);
+  return {
+    element: row,
+    values: () => colors,
+    reset: () => {
+      colors = currentPaletteFlat();
+      draw();
+    },
+    focus: () => take.focus(),
+    setEnabled: () => {},
+  };
+}
+
 /** A slider control, with its label and readout. */
 function createSliderControl(p, value, onChange) {
   const row = document.createElement("div");
@@ -527,6 +604,11 @@ export function createAdjustDialog(np, { onChange, onError }) {
         const v = flat && Number.isFinite(flat[tail]) ? flat[tail] : p.value;
         tail += 1;
         control = createChoiceControl(p, v, preview);
+      } else if (p.kind === "palette") {
+        // The palette takes every remaining value: colours, three at a time.
+        const initial = flat ? Array.from(flat.slice(at, end)) : [];
+        at = end;
+        control = createPaletteControl(initial, preview);
       } else if (p.kind === "curve") {
         // The curve takes every remaining value up to the channel: pairs of
         // points.

@@ -16,6 +16,7 @@
 
 use crate::color::Rgba;
 use crate::dither::{Dither, DitherMethod, MAX_LEVELS, MAX_SCALE, MIN_LEVELS};
+use crate::palette::Palette;
 use crate::filter;
 use crate::geometry::Rect;
 use crate::raster::Raster;
@@ -108,6 +109,11 @@ pub enum Kind {
     /// Grain: colours scattered by up to `amount` percent of the range,
     /// keyed to where the pixel is. `mono` moves the channels together.
     Noise { amount: f32, mono: bool },
+    /// Every colour replaced by the nearest in a palette, with the error
+    /// hidden by `method` — `None` for a plain nearest match.
+    /// `strength` and `scale` are the pattern's amount and cell size, as
+    /// they are for a dither. See [`crate::palette`].
+    Palette { method: Option<DitherMethod>, strength: f32, scale: f32, palette: Palette },
 }
 
 
@@ -152,6 +158,7 @@ impl Adjustment {
         "blur",
         "sharpen",
         "noise",
+        "palette",
     ];
 
     /// Builds an adjustment from its name and parameters.
@@ -310,6 +317,18 @@ impl Kind {
                 amount: p(1, 100.0).clamp(0.0, 300.0),
             },
             "noise" => Kind::Noise { amount: p(0, 10.0).clamp(0.0, 100.0), mono: p(1, 0.0) >= 0.5 },
+            // The palette's colours are variable-length and so ride last,
+            // where the curve's points do. Zero for the pattern is no
+            // dither at all, so the ladder of methods starts at one.
+            "palette" => Kind::Palette {
+                method: match p(0, 0.0) {
+                    v if v < 0.5 => None,
+                    v => Some(DitherMethod::from_index(v - 1.0)),
+                },
+                strength: p(1, 100.0).clamp(0.0, 100.0),
+                scale: p(2, 1.0).round().clamp(1.0, MAX_SCALE),
+                palette: Palette::from_flat(params.get(3..).unwrap_or_default()),
+            },
             other => return Err(AdjustmentError(format!("unknown adjustment: {other}"))),
         })
     }
@@ -329,6 +348,7 @@ impl Kind {
             Kind::Blur { .. } => "blur",
             Kind::Sharpen { .. } => "sharpen",
             Kind::Noise { .. } => "noise",
+            Kind::Palette { .. } => "palette",
         }
     }
 
@@ -348,6 +368,7 @@ impl Kind {
             Kind::Blur { .. } => "Blur",
             Kind::Sharpen { .. } => "Sharpen",
             Kind::Noise { .. } => "Noise",
+            Kind::Palette { .. } => "Palette",
         }
     }
 
@@ -370,6 +391,12 @@ impl Kind {
             Kind::Blur { radius } => vec![*radius],
             Kind::Sharpen { radius, amount } => vec![*radius, *amount],
             Kind::Noise { amount, mono } => vec![*amount, if *mono { 1.0 } else { 0.0 }],
+            Kind::Palette { method, strength, scale, palette } => {
+                let pattern = method.map_or(0.0, |m| m.index() + 1.0);
+                let mut params = vec![pattern, *strength, *scale];
+                params.extend(palette.to_flat());
+                params
+            }
         }
     }
 
@@ -393,7 +420,12 @@ impl Kind {
     /// [`Kind::apply_spatial`] rather than a lookup table, and
     /// [`Adjustment::pixel_map`] has nothing to offer for them.
     pub fn is_spatial(&self) -> bool {
-        matches!(self, Kind::Dither { .. } | Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. })
+        match self {
+            // A palette map with no dither is a function of the colour
+            // alone, and takes the cheaper path through [`PixelMap`].
+            Kind::Palette { method, .. } => method.is_some(),
+            _ => matches!(self, Kind::Dither { .. } | Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. }),
+        }
     }
 
     /// The adjustments that read more than one pixel, applied to the clip.
@@ -407,6 +439,9 @@ impl Kind {
             Kind::Blur { radius } => filter::blur(raster, clip, *radius),
             Kind::Sharpen { radius, amount } => filter::sharpen(raster, clip, *radius, *amount),
             Kind::Noise { amount, mono } => filter::noise(raster, clip, *amount, *mono),
+            Kind::Palette { method, strength, scale, palette } => {
+                palette.map(raster, clip, *method, strength / 100.0, *scale as i32)
+            }
             _ => unreachable!("only a spatial adjustment asks for one"),
         }
     }
@@ -419,6 +454,7 @@ impl Kind {
     pub fn map(&self, p: Rgba) -> Rgba {
         match self {
             Kind::Dither { .. } => self.dither().quantize(p),
+            Kind::Palette { palette, .. } => palette.nearest(p),
             Kind::Blur { .. } | Kind::Sharpen { .. } | Kind::Noise { .. } => p,
             Kind::HueSaturation { hue, saturation, lightness } => {
                 let (h, s, l) = rgb_to_hsl(p);
@@ -939,6 +975,34 @@ mod tests {
         let bounds = r.bounds();
         blue_only.apply(&mut r, &bounds);
         assert_eq!(r.get(0, 0), Rgba::new(40, 80, 255, 90));
+    }
+
+    #[test]
+    fn a_palette_adjustment_maps_the_picture_onto_its_colours() {
+        // Black and white, no dither: a plain nearest match, and cheap
+        // enough to go through the lookup path rather than the spatial one.
+        let mono = Adjustment::from_params("palette", &[0.0, 100.0, 1.0, 0.0, 0.0, 0.0, 255.0, 255.0, 255.0]).unwrap();
+        assert_eq!(mono.label(), "Palette");
+        assert!(!mono.kind.is_spatial(), "nothing but the colour is needed to answer");
+        assert_eq!(mono.map(Rgba::opaque(200, 200, 200)), Rgba::WHITE);
+        assert_eq!(mono.map(Rgba::opaque(40, 40, 40)), Rgba::BLACK);
+
+        let mut r = Raster::filled(4, 4, Rgba::opaque(200, 10, 10));
+        let bounds = r.bounds();
+        mono.apply(&mut r, &bounds);
+        assert_eq!(r.get(0, 0), Rgba::BLACK, "nearer black than white");
+
+        // The same palette dithered reads the pixel's position, so it is
+        // spatial and its parameters carry the pattern.
+        let dithered = Adjustment::from_params("palette", &[5.0, 100.0, 1.0, 0.0, 0.0, 0.0, 255.0, 255.0, 255.0]).unwrap();
+        assert!(dithered.kind.is_spatial());
+        assert_eq!(dithered.params()[0], 5.0, "one past the pattern's own index, since zero is none");
+        assert_eq!(Adjustment::from_params("palette", &dithered.params()).unwrap(), dithered);
+
+        // A palette of nothing has nothing to map to and leaves the picture
+        // as it found it.
+        let empty = Adjustment::from_params("palette", &[0.0, 100.0, 1.0]).unwrap();
+        assert_eq!(empty.map(Rgba::opaque(200, 10, 10)), Rgba::opaque(200, 10, 10));
     }
 
     #[test]

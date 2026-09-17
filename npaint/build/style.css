@@ -221,6 +221,13 @@ button.opt {
   min-height: 90px;
   border-top: 1px solid var(--border);
 }
+.palette-panel {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+}
+.palette-panel[hidden] {
+  display: none;
+}
 
 .toolbox {
   display: flex;
@@ -816,6 +823,10 @@ button.primary {
     border-left: 1px solid var(--border);
     flex-basis: 40%;
   }
+  .palette-panel {
+    border-top: none;
+    border-left: 1px solid var(--border);
+  }
   .status-keys,
   .hint {
     display: none;
@@ -1274,4 +1285,210 @@ button.primary {
 .viewport.tool-lasso canvas,
 .viewport.tool-ellipse-select canvas {
   cursor: crosshair;
+}
+
+/* ---- The palette panel ---- */
+.palette-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.palette-title span:first-child {
+  flex: 1 1 auto;
+}
+.palette-count {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.palette-choose {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.palette-choose select {
+  width: 100%;
+}
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20px, 1fr));
+  gap: 2px;
+  padding: 8px;
+  overflow: auto;
+  max-height: 180px;
+}
+.palette-swatch {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--swatch, #000);
+  min-width: 0;
+}
+.palette-swatch.palette-on {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.palette-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 6px;
+  border-top: 1px solid var(--border);
+}
+.palette-buttons button {
+  padding: 3px 7px;
+}
+.palette-buttons select {
+  padding: 2px 4px;
+}
+
+/* ---- The gradient editor ---- */
+.gradient-open {
+  padding: 2px;
+  line-height: 0;
+}
+.gradient-open canvas {
+  width: 64px;
+  height: 18px;
+  display: block;
+  border-radius: 2px;
+}
+.gradient-editor {
+  position: fixed;
+  z-index: 70;
+  width: 284px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 10px 12px 12px;
+  color: var(--text-dim);
+}
+.gradient-editor[hidden] {
+  display: none;
+}
+.ge-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ge-title button {
+  padding: 0 6px;
+}
+.ge-bar-wrap {
+  position: relative;
+  height: 46px;
+  margin-bottom: 6px;
+}
+.ge-bar {
+  width: 260px;
+  height: 28px;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+/* The markers lie over the bar as well as under it, so a click anywhere on
+   the run adds a stop there. */
+.ge-markers {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 262px;
+  height: 46px;
+  touch-action: none;
+  cursor: crosshair;
+}
+.ge-markers:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+.ge-mark {
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 14px;
+  margin-left: -6px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--stop, #000);
+  opacity: calc(0.35 + 0.65 * var(--stop-alpha, 1));
+  cursor: grab;
+}
+.ge-mark-on {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.ge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ge-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ge-opacity {
+  flex: 1 1 auto;
+}
+.ge-opacity input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ge-at {
+  width: 4em;
+}
+.ge-swatch {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--swatch, #000);
+}
+.ge-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+.ge-preset {
+  padding: 2px;
+  line-height: 0;
+}
+.ge-preset canvas {
+  width: 44px;
+  height: 16px;
+  display: block;
+}
+.ge-buttons button {
+  padding: 3px 7px;
+}
+.ge-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---- The palette a filter maps onto ---- */
+.adjust-palette {
+  align-items: start;
+}
+.adjust-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 72px;
+  overflow: auto;
+}
+.adjust-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
 }

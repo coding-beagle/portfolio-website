@@ -11,6 +11,8 @@ import init, { NPaint } from "./pkg/npaint.js";
 import { createMenuBar, showContextMenu, closeMenus } from "./menu.js";
 import { createColorPicker } from "./colorpicker.js";
 import { ADJUSTMENTS, createAdjustDialog } from "./adjust.js";
+import { createGradientEditor, paintGradient, toFlat, fromFlat, loadStops } from "./gradient.js";
+import { createPalettePanel } from "./palette.js";
 import { readRecovery, writeRecovery, clearRecovery, supported as recoverySupported } from "./recovery.js";
 
 // ---- Tools ------------------------------------------------------------------
@@ -102,7 +104,7 @@ const TOOLS = [
     name: "gradient",
     label: "Gradient",
     key: "G",
-    hint: "Drag out the two ends and the layer fills from the foreground colour to the background. Shift snaps to 45°. Alt+click picks a colour.",
+    hint: "Drag out the two ends and the layer fills with the gradient. Click the gradient to edit its colours. Shift snaps to 45°.",
   },
   {
     name: "eyedropper",
@@ -185,6 +187,11 @@ let resizing = null;
 let dpr = 1;
 let picker; // the colour picker
 let pickerTarget = "fg"; // which swatch the picker is editing
+// While the picker is open on something that is not one of the swatches —
+// a gradient stop, a palette colour — what to do with the colour it gives.
+let pickerHandler = null;
+let gradientEditor; // the gradient editor popover
+let palettePanel; // the palette panel
 let adjust; // the adjustment dialog
 // The document's name, from the file it came from; what Save and Export use.
 // A document that came from nowhere is still saved under something, so the
@@ -196,6 +203,8 @@ let docName = UNTITLED;
 let showRulers = false;
 let showGrid = false;
 let showPixelGrid = true;
+/** Whether the palette panel is in the side column. */
+let showPalette = true;
 let gridSize = 32;
 /** Whether the move tool and transforms snap to guides and canvas edges. */
 let snapToGuides = true;
@@ -221,6 +230,8 @@ async function boot() {
   buildMenus();
   bindOptions();
   bindSwatches();
+  bindGradientEditor();
+  bindPalettePanel();
   bindLayers();
   bindPointer();
   bindKeyboard();
@@ -1130,8 +1141,11 @@ function syncOptions() {
   $("opt-fill-wrap").hidden = !isShape;
   $("opt-gradient-wrap").hidden = !isGradient;
   $("opt-gradient-reverse-wrap").hidden = !isGradient;
+  $("opt-gradient-edit").hidden = !isGradient;
   $("opt-gradient").value = np.gradient_shape();
   $("opt-gradient-reverse").checked = np.gradient_reverse();
+  if (isGradient) syncGradientButton();
+  else if (gradientEditor) gradientEditor.close();
   // The tolerance is the wand's, quick select's and the bucket's; the refine
   // brush paints the selection by hand and has only a size.
   $("opt-tolerance-wrap").hidden = !(tool === "wand" || tool === "quickselect" || tool === "bucket");
@@ -1257,7 +1271,10 @@ function bindOptions() {
     gradient.appendChild(o);
   });
   gradient.addEventListener("change", () => np.set_gradient_shape(gradient.value));
-  $("opt-gradient-reverse").addEventListener("change", (e) => np.set_gradient_reverse(e.target.checked));
+  $("opt-gradient-reverse").addEventListener("change", (e) => {
+    np.set_gradient_reverse(e.target.checked);
+    syncGradientButton();
+  });
   $("opt-symmetry").addEventListener("change", (e) => {
     const [mx, my, n] = e.target.value.split(",").map(Number);
     np.set_symmetry(Boolean(mx), Boolean(my), n);
@@ -1490,6 +1507,8 @@ function bindSwatches() {
         np.set_text_outline_color(hex);
         syncCharacterPanel();
         previewText();
+      } else if (pickerHandler) {
+        pickerHandler(hex);
       }
       syncSwatches();
     },
@@ -1506,9 +1525,91 @@ function bindSwatches() {
   syncSwatches();
 }
 
+// ---- The gradient editor ---------------------------------------------------
+
+/** The gradient shown on the options bar's button, in CSS pixels. */
+const GRADIENT_PREVIEW_W = 64;
+const GRADIENT_PREVIEW_H = 18;
+
+function bindGradientEditor() {
+  gradientEditor = createGradientEditor($("gradient-editor"), {
+    onChange: (stops) => {
+      np.set_gradient_stops(toFlat(stops));
+      syncGradientButton();
+    },
+    pickColor: openPickerOn,
+  });
+  // The engine starts on the swatches; a gradient chosen last time is put
+  // back, as the view furniture and the recent colours are.
+  const saved = loadStops();
+  if (saved.length) np.set_gradient_stops(toFlat(saved));
+  $("opt-gradient-edit").addEventListener("click", () => {
+    if (gradientEditor.isOpen()) gradientEditor.close();
+    else gradientEditor.open($("opt-gradient-edit"), currentStops());
+  });
+  syncGradientButton();
+}
+
+/**
+ * The stops the gradient tool would lay down now: the editor's, or the two
+ * swatches while it is running from those.
+ */
+function currentStops() {
+  const stops = fromFlat(np.gradient_stops());
+  if (stops.length) return stops;
+  return [
+    { at: 0, color: np.color(), alpha: 255 },
+    { at: 1, color: np.background(), alpha: 255 },
+  ];
+}
+
+/** The button shows the run as the tool will lay it down, Reverse and all. */
+function syncGradientButton() {
+  const stops = currentStops();
+  const shown = np.gradient_reverse() ? stops.map((s) => ({ ...s, at: 1 - s.at })).sort((a, b) => a.at - b.at) : stops;
+  paintGradient($("opt-gradient-preview"), shown, { width: GRADIENT_PREVIEW_W, height: GRADIENT_PREVIEW_H });
+}
+
+// ---- The palette panel ------------------------------------------------------
+
+function bindPalettePanel() {
+  palettePanel = createPalettePanel({
+    setForeground: (hex) => {
+      np.set_color(hex);
+      syncSwatches();
+    },
+    setBackground: (hex) => {
+      np.set_background(hex);
+      syncSwatches();
+    },
+    foreground: () => np.color(),
+    pickColor: openPickerOn,
+    imagePalette: (max) => np.image_palette(max),
+    download,
+    message,
+  });
+  syncPalettePanel();
+}
+
+function syncPalettePanel() {
+  $("palette-panel").hidden = !showPalette;
+  if (showPalette && palettePanel) palettePanel.refresh();
+}
+
+/**
+ * Opens the picker on something with no swatch of its own — a gradient stop,
+ * a palette colour — handing every colour it gives to `onChange`.
+ */
+function openPickerOn(anchor, hex, onChange) {
+  pickerTarget = "custom";
+  pickerHandler = onChange;
+  picker.open(anchor, hex);
+}
+
 /** Opens the picker on a swatch: the foreground, the background, or the text outline's colour. */
 function openPicker(target) {
   pickerTarget = target;
+  pickerHandler = null;
   const anchors = { fg: "swatch-fg", bg: "swatch-bg", outline: "char-outline-color" };
   const colors = { fg: () => np.color(), bg: () => np.background(), outline: () => np.text_outline_color() };
   picker.open($(anchors[target]), colors[target]());
@@ -1517,6 +1618,8 @@ function openPicker(target) {
 function syncSwatches() {
   $("swatch-fg").style.setProperty("--swatch", np.color());
   $("swatch-bg").style.setProperty("--swatch", np.background());
+  // A gradient running from the swatches follows them.
+  if (gradientEditor) syncGradientButton();
   // Text being typed is in the foreground colour: a new colour sets it again.
   if (textEdit && textEdit.color !== np.color()) previewText();
 }
@@ -1848,6 +1951,16 @@ function viewItems() {
       },
     },
     { label: "Clear Guides", enabled: () => guides.h.length + guides.v.length > 0, action: clearGuides },
+    { sep: true },
+    {
+      label: "Palette",
+      checked: () => showPalette,
+      action: () => {
+        showPalette = !showPalette;
+        saveViewPrefs();
+        syncPalettePanel();
+      },
+    },
   ];
 }
 
@@ -1914,7 +2027,8 @@ function pullGuides() {
 /** The view furniture is remembered between visits. */
 function saveViewPrefs() {
   try {
-    localStorage.setItem("npaint.view", JSON.stringify({ rulers: showRulers, grid: showGrid, gridSize, pixelGrid: showPixelGrid, snap: snapToGuides }));
+    const view = { rulers: showRulers, grid: showGrid, gridSize, pixelGrid: showPixelGrid, snap: snapToGuides, palette: showPalette };
+    localStorage.setItem("npaint.view", JSON.stringify(view));
   } catch {
     // No storage: not remembered, nothing lost.
   }
@@ -1928,6 +2042,8 @@ function loadViewPrefs() {
       showGrid = Boolean(saved.grid);
       showPixelGrid = saved.pixelGrid !== false;
       snapToGuides = saved.snap !== false;
+      showPalette = saved.palette !== false;
+      syncPalettePanel();
       if ([8, 16, 32, 64, 128].includes(saved.gridSize)) gridSize = saved.gridSize;
     }
     const limit = Number(localStorage.getItem("npaint.historyLimit"));

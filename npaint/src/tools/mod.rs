@@ -239,10 +239,14 @@ pub struct ToolSettings {
     pub hardness: f32,
     /// Whether the shape tools fill their shape or stroke its outline.
     pub fill: bool,
-    /// How the gradient tool lays its two colours out.
+    /// The colours the gradient tool runs through, as the page's gradient
+    /// editor left them. `None` — and an empty run, which is what an editor
+    /// emptied of stops gives — means the foreground and background
+    /// swatches, the plain two-colour blend.
+    pub gradient_stops: Option<crate::gradient::GradientStops>,
+    /// How the gradient tool lays its colours out.
     pub gradient_shape: crate::gradient::GradientShape,
-    /// Whether the gradient runs from the background colour to the
-    /// foreground rather than the other way about.
+    /// Whether the gradient runs the other way round.
     pub gradient_reverse: bool,
     /// Whether dragging with the zoom tool scrubs the zoom continuously
     /// rather than marking out the rectangle to zoom into.
@@ -280,6 +284,7 @@ impl Default for ToolSettings {
             opacity: 1.0,
             hardness: 1.0,
             fill: true,
+            gradient_stops: None,
             gradient_shape: crate::gradient::GradientShape::default(),
             gradient_reverse: false,
             scrubby_zoom: true,

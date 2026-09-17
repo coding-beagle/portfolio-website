@@ -85,7 +85,7 @@ impl DitherMethod {
     /// The diffusion kernel as `(dx, dy, weight)` with its divisor. Only the
     /// cells *after* the current pixel in reading order appear, so a single
     /// left-to-right, top-to-bottom pass never revisits a decided pixel.
-    fn kernel(self) -> (&'static [(i32, i32, f32)], f32) {
+    pub(crate) fn kernel(self) -> (&'static [(i32, i32, f32)], f32) {
         match self {
             DitherMethod::FloydSteinberg => (&[(1, 0, 7.0), (-1, 1, 3.0), (0, 1, 5.0), (1, 1, 1.0)], 16.0),
             DitherMethod::JarvisJudiceNinke => (
@@ -147,7 +147,7 @@ impl DitherMethod {
 
 /// How many rows below the current one any kernel reaches, and so how many
 /// rows of error the pass has to carry.
-const ERROR_ROWS: usize = 3;
+pub(crate) const ERROR_ROWS: usize = 3;
 
 /// The smallest and largest number of output levels per channel. Two is
 /// black and white; 255 leaves nothing to round.
@@ -323,7 +323,7 @@ const BAYER8: [u8; 64] = [
 /// The threshold the tiled matrix holds at `(x, y)`, in `0..1`. Half a step
 /// is added so the thresholds sit in the middle of their slots and the
 /// matrix is symmetric about 0.5.
-fn bayer(method: DitherMethod, x: i32, y: i32) -> f32 {
+pub(crate) fn bayer(method: DitherMethod, x: i32, y: i32) -> f32 {
     let (matrix, side): (&[u8], i32) = match method {
         DitherMethod::Bayer2 => (&BAYER2, 2),
         DitherMethod::Bayer4 => (&BAYER4, 4),

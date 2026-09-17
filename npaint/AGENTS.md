@@ -115,6 +115,9 @@ npaint/
                    adjustment layer, a smart object, or a group; the layer
                    mask and which of the two rasters the tools edit; the two
                    locks; which group the layer is in (`parent`)
+    palette.rs     a set of colours, and a picture conformed to it: the
+                   nearest colour, with the error hidden by a dither, and
+                   the palette a picture is mostly made of
     mask.rs        per-pixel selection coverage: combine, grow/contract,
                    feather, smooth, antialias, contours (the marching ants),
                    and `from_polygon`, which is what the lasso draws with
@@ -160,6 +163,10 @@ npaint/
     app.js         DOM, canvas, events, render loop, menu definitions
     menu.js        the menu-bar drop-downs and context menus (one component)
     colorpicker.js hue ring + saturation/value square, hex/RGB/HSV fields
+    gradient.js    the gradient editor: the run of colour stops the gradient
+                   tool lays down, its presets, and the bar they are drawn on
+    palette.js     the palette panel: the colours to draw in, their own
+                   undo, and `.gpl` in and out
     recovery.js    the crash-recovery store: one copy of the document in
                    IndexedDB. Nothing in it may throw — see "Autosave"
     subject-worker.js the worker Select Subject's model runs in
@@ -504,6 +511,51 @@ Coverage is 8-bit, so `feather` and `antialias` are not special cases; the
 two cheap shapes (nothing selected, a plain rectangle) stay as themselves and
 a mask that turns out to be a solid rectangle collapses back into one.
 
+## Gradients and palettes
+
+Both are **the page's, not the document's**. A gradient is a tool setting and
+a palette is a set of colours to draw in; neither is in the picture, so
+neither is in the file, and both are remembered in `localStorage` the way the
+view furniture and the strip of recent colours are.
+
+**The gradient.** `gradient::GradientStops` is a sorted run of stops — a
+colour, an alpha and how far along it sits — and `sample` mixes the two on
+either side of a fraction, premultiplied, so a run out to transparent fades
+rather than dragging a grey halo behind it. Two stops in the same place are a
+hard edge, since the run a fraction falls in starts at the *last* stop at or
+before it. `ToolSettings::gradient_stops` is `None` while the tool is running
+from the foreground and background swatches, which is what it did before
+there was an editor and is still where a fresh document starts;
+`www/gradient.js` is the editor for the rest, and hands the engine
+`[position, r, g, b, a]` per stop. The options bar's button draws the run as
+it will be laid down, Reverse and all, a column at a time by the same rule
+the engine samples with — not as a canvas gradient, which mixes straight
+and would show a fade to transparent differently from the picture.
+
+**The palette.** `www/palette.js` holds the colours and the panel. Editing
+one is undoable, but through the panel's own two buttons rather than the
+document's history: an undo that sometimes meant the picture and sometimes
+the swatches would be worse than none. `.gpl` is the exchange format, since
+GIMP, Aseprite, Krita and Inkscape all read it. "From image" is the one thing
+the engine answers: `Palette::from_image` buckets the composite's colours
+coarsely, counts them and reports each bucket's average, most used first, so
+a photograph gives the colours it is drawn in rather than a hundred shades of
+one of them.
+
+**Filter > Map to Palette** is where a palette reaches the picture:
+`adjust::Kind::Palette` is an adjustment like any other — the same dialog,
+preview, undo step and life as an adjustment layer — that replaces every
+colour with the nearest in its palette. Its colours ride at the *end* of its
+parameters, where the curve's points do, because they are the variable-length
+part; `file.rs` writes an adjustment's parameters length-prefixed, so a
+palette adjustment layer round-trips without the format changing. With no
+dither it is a function of one colour and takes the cheap path;
+with one it reads where the pixel is, so `is_spatial` says so for that case
+alone. The ordered patterns perturb by `Palette::spread` — how far apart the
+palette's colours typically are — since a palette has no evenly spaced ladder
+for a threshold to be a step of, and the diffusion passes carry the error of
+the whole colour rather than of one channel.
+
 ## Select Subject
 
 One command, two ways of answering it:
@@ -821,8 +873,12 @@ it is a command).
 
 **A gradient shape.** A `GradientShape` variant in `gradient.rs` with a name,
 a label and an arm in `fraction` — the rule from a position to how far along
-the two colours it is. The options bar lists them from
-`gradient_shape_names`, so nothing changes in the page.
+the run a point is. The options bar lists them from `gradient_shape_names`,
+so nothing changes in the page.
+
+**A built-in palette or gradient.** A row in `BUILT_IN` in `www/palette.js`
+or in `PRESETS` in `www/gradient.js`. Neither crosses into the engine, so
+neither is more than its colours.
 
 **A filter.** A `Kind` variant in `adjust.rs` as for any adjustment, plus an
 arm in `Kind::is_spatial` and one in `Kind::apply_spatial` pointing at a
@@ -1097,6 +1153,14 @@ needs a sixteenth of those pixels (1.3 ms rather than 23 ms —
 channel at a time, where Photoshop's Levels and Curves keep a separate set of
 numbers per channel behind one dialog — two adjustment layers is the answer
 here.
+
+Neither the gradient in hand nor the palette is saved in the document — they
+are the page's, so a `.npaint` opened on another machine comes back without
+them, and a `.psd`'s own swatches and gradient presets are not read; the
+palette is matched in plain RGB distance rather than a perceptual one, which
+shows most on a palette of near-greys; a `.gpl`'s colour names are dropped on
+the way in, so a round trip through the panel loses them; there is no
+gradient *layer*, only the pixels a drag lays down.
 
 Bigger than any of those, and worth saying plainly: everything is 8-bit
 straight sRGB. There is no 16-bit, no colour management, no profile handling
