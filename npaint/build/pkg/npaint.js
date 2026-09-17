@@ -766,13 +766,15 @@ export class NPaint {
         return ret >>> 0;
     }
     /**
-     * The most-used colours of the flattened picture, most used first, as
-     * `[r, g, b]` each: the palette panel's "From Image".
+     * The distinct colours of the flattened picture, the ones covering most
+     * of it first, as `[r, g, b]` each: the palette panel's "From image".
+     * `separation` is `0.0..=1.0` of how far apart they are made to be.
      * @param {number} max
+     * @param {number} separation
      * @returns {Float32Array}
      */
-    image_palette(max) {
-        const ret = wasm.npaint_image_palette(this.__wbg_ptr, max);
+    image_palette(max, separation) {
+        const ret = wasm.npaint_image_palette(this.__wbg_ptr, max, separation);
         var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;

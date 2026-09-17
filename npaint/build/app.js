@@ -1584,7 +1584,7 @@ function bindPalettePanel() {
     },
     foreground: () => np.color(),
     pickColor: openPickerOn,
-    imagePalette: (max) => np.image_palette(max),
+    imagePalette: (max, separation) => np.image_palette(max, separation),
     download,
     message,
   });

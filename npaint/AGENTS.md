@@ -117,7 +117,7 @@ npaint/
                    locks; which group the layer is in (`parent`)
     palette.rs     a set of colours, and a picture conformed to it: the
                    nearest colour, with the error hidden by a dither, and
-                   the palette a picture is mostly made of
+                   the distinct colours a picture is made of (a median cut)
     mask.rs        per-pixel selection coverage: combine, grow/contract,
                    feather, smooth, antialias, contours (the marching ants),
                    and `from_polygon`, which is what the lasso draws with
@@ -537,10 +537,40 @@ one is undoable, but through the panel's own two buttons rather than the
 document's history: an undo that sometimes meant the picture and sometimes
 the swatches would be worse than none. `.gpl` is the exchange format, since
 GIMP, Aseprite, Krita and Inkscape all read it. "From image" is the one thing
-the engine answers: `Palette::from_image` buckets the composite's colours
-coarsely, counts them and reports each bucket's average, most used first, so
-a photograph gives the colours it is drawn in rather than a hundred shades of
-one of them.
+the engine answers, and `Palette::from_image` is a **median cut** rather than
+a count of the commonest colours. The difference is the whole point of it:
+counting gives a picture's palette as six shades of sky, because that is what
+most of the pixels are. The cut starts from coarse buckets of the composite
+(see `BUCKET_LEVELS`), treats them as one box in colour space, and splits the
+*widest* box across its widest channel **at the middle of that channel's
+range** — halving the box by colour, not by pixel count, which is what stops
+a crowded cluster from being divided over and over while the rest of the
+picture waits. Each box then reports its own pixel-weighted average. A bucket
+holding a negligible share of the picture (`NEGLIGIBLE_SHARE`) is dropped
+first, so a stray pixel or a compression artefact does not claim one of the
+answers — unless dropping it would leave too few to fill the palette.
+`a_picture_of_one_colour_s_shades_does_not_spend_the_palette_on_them` is the
+test that pins this.
+
+The cut alone is not always enough — a photograph really is mostly one or two
+colours, and a cut fine enough to reach the rest of it comes back with
+several shades of those. So `from_image` also takes a **separation**,
+`0.0..=1.0` of `MAX_SEPARATION`, which the dialog's Distinct slider sets: the
+cut is asked for `OVERSAMPLE` times as many colours as are wanted and they
+are taken in order of coverage, each skipped if it is nearer than that to one
+already taken. At zero the cut's own answer stands; wound up, near-shades
+give way to colours from elsewhere in the picture, and a picture with nothing
+else to offer comes back with fewer colours than were asked for — which the
+dialog says. Every search recomposites the picture, so the page looks again
+when the slider is let go rather than on every tick of the drag.
+
+The colours come back by how much of the picture each covers. Everything
+after that is the page's: the dialog says how many to look for, offers the
+order they are shown and added in (by area, by hue, by lightness, or hue
+banded then light — greys lead the hue orders, having no hue to sort by), and
+is where the choosing happens. Each colour can be left out, the ones the
+palette already has are marked, and what is left either joins the palette or
+becomes it. Nothing changes until one of those two buttons is pressed.
 
 **Filter > Map to Palette** is where a palette reaches the picture:
 `adjust::Kind::Palette` is an adjustment like any other — the same dialog,

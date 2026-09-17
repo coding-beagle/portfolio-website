@@ -542,10 +542,11 @@ impl NPaint {
         }
     }
 
-    /// The most-used colours of the flattened picture, most used first, as
-    /// `[r, g, b]` each: the palette panel's "From Image".
-    pub fn image_palette(&self, max: usize) -> Vec<f32> {
-        Palette::from_image(&self.editor.document().composite(), max).to_flat()
+    /// The distinct colours of the flattened picture, the ones covering most
+    /// of it first, as `[r, g, b]` each: the palette panel's "From image".
+    /// `separation` is `0.0..=1.0` of how far apart they are made to be.
+    pub fn image_palette(&self, max: usize, separation: f32) -> Vec<f32> {
+        Palette::from_image(&self.editor.document().composite(), max, separation).to_flat()
     }
 
     pub fn gradient_shape_names() -> Vec<String> {
@@ -1989,7 +1990,7 @@ mod tests {
         np.set_size(2);
         np.pointer_down(1.0, 1.0, false, false, 1.0);
         np.pointer_up(1.0, 1.0, false, false, 1.0);
-        let palette = np.image_palette(8);
+        let palette = np.image_palette(8, 0.0);
         assert_eq!(palette.len() % 3, 0);
         assert_eq!(&palette[0..3], &[255.0, 255.0, 255.0], "most of the canvas is still white");
         assert!(palette[3..].as_chunks::<3>().0.iter().any(|c| c[0] > 240.0 && c[1] < 16.0), "and the red is in it: {palette:?}");

@@ -29,14 +29,33 @@ use std::collections::HashMap;
 /// someone chose; past this it is an image.
 pub const MAX_COLORS: usize = 256;
 
+/// The furthest apart [`Palette::from_image`] will insist its colours are,
+/// as an RGB distance (the whole cube's diagonal is about 442). Full bias
+/// leaves only a handful of colours from any picture, which is the point of
+/// the far end of the slider.
+const MAX_SEPARATION: f32 = 192.0;
+
+/// How many colours the cut is asked for before the ones too close together
+/// are dropped: the bias throws candidates away, so there have to be spares
+/// for it to work through.
+const OVERSAMPLE: usize = 4;
+
 /// How coarsely [`Palette::from_image`] buckets colours before counting
 /// them: 32 levels a channel, so shades within about eight of each other
 /// count as the same colour rather than as thousands of near-misses.
 const BUCKET_LEVELS: u32 = 32;
 
-/// One bucket of [`Palette::from_image`]: how many pixels fell in it and
-/// their totals, which give the colour it reports.
-type Bucket = (u32, [u64; 3]);
+/// One cell of the colour cube while the picture is being gathered: how
+/// many pixels fell in it, and their totals, which give its average colour.
+type Cell = (u32, [u64; 3]);
+
+/// One bucket of [`Palette::from_image`]: a colour the picture holds, and
+/// how many pixels of it there are.
+#[derive(Clone, Copy, Debug)]
+struct Bucket {
+    color: [u8; 3],
+    count: u32,
+}
 
 /// A set of colours to draw in, or to conform a picture to.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -130,44 +149,49 @@ impl Palette {
         total / self.colors.len() as f32 / 255.0 / 3f32.sqrt()
     }
 
-    /// The colours a picture is mostly made of, most used first, at most
-    /// `max` of them.
+    /// The picture's colours, at most `max` of them, held at least
+    /// `separation` apart.
     ///
-    /// Near-identical shades are counted together (see [`BUCKET_LEVELS`])
-    /// and each bucket reports the average of what fell in it, so a
-    /// photograph gives the colours it is actually drawn in rather than
-    /// `max` shades of one of them.
-    pub fn from_image(raster: &Raster, max: usize) -> Palette {
-        let mut buckets: HashMap<(u8, u8, u8), Bucket> = HashMap::new();
-        let step = 256 / BUCKET_LEVELS;
-        for y in 0..raster.height() as i32 {
-            for x in 0..raster.width() as i32 {
-                let p = raster.get(x, y);
-                if p.a == 0 {
-                    continue;
-                }
-                let key = |v: u8| (u32::from(v) / step) as u8;
-                let entry = buckets.entry((key(p.r), key(p.g), key(p.b))).or_insert((0, [0; 3]));
-                entry.0 += 1;
-                entry.1[0] += u64::from(p.r);
-                entry.1[1] += u64::from(p.g);
-                entry.1[2] += u64::from(p.b);
+    /// The cut itself is a median cut: the coarse buckets of the picture
+    /// (see [`BUCKET_LEVELS`]) are one box in colour space, split again and
+    /// again — the widest box, across its widest channel, at the middle of
+    /// that channel's range — until there are as many boxes as are wanted,
+    /// each reporting its own pixel-weighted average. Halving a box by
+    /// *colour* rather than by pixel count is what stops a crowded cluster
+    /// of near-identical shades being divided over and over while the rest
+    /// of the picture waits.
+    ///
+    /// That alone is not always enough — a photograph really is mostly one
+    /// or two colours, and a cut fine enough to reach the rest of it comes
+    /// back with several shades of those. `separation` is the answer:
+    /// `0.0..=1.0` of [`MAX_SEPARATION`], the least an answer may resemble
+    /// the ones already found. The cut is asked for more colours than are
+    /// wanted ([`OVERSAMPLE`]) and they are taken in order of how much of
+    /// the picture each covers, each one skipped if it is nearer than that
+    /// to one already taken. At zero nothing is skipped and the cut's own
+    /// answer stands; wound up, near-shades give way to colours from
+    /// elsewhere in the picture, and a picture that has nothing else to
+    /// offer comes back with fewer colours than were asked for.
+    ///
+    /// They come back by how much of the picture each covers, most first;
+    /// the page sorts them however it likes to show them.
+    pub fn from_image(raster: &Raster, max: usize, separation: f32) -> Palette {
+        let max = max.min(MAX_COLORS);
+        if max == 0 {
+            return Palette::default();
+        }
+        let apart = if separation.is_finite() { separation.clamp(0.0, 1.0) * MAX_SEPARATION } else { 0.0 };
+        let wanted = if apart > 0.0 { max.saturating_mul(OVERSAMPLE).min(MAX_COLORS) } else { max };
+        let mut chosen: Vec<Bucket> = Vec::new();
+        for candidate in median_cut(gather(raster), wanted) {
+            if chosen.len() == max {
+                break;
+            }
+            if chosen.iter().all(|kept| apart_enough(kept.color, candidate.color, apart)) {
+                chosen.push(candidate);
             }
         }
-        let mut found: Vec<((u8, u8, u8), Bucket)> = buckets.into_iter().collect();
-        // The key breaks ties, so the same picture always gives the same
-        // palette in the same order.
-        found.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(&b.0)));
-        found.truncate(max.min(MAX_COLORS));
-        Palette::new(
-            found
-                .into_iter()
-                .map(|(_, (count, sum))| {
-                    let mean = |c: usize| (sum[c] / u64::from(count)) as u8;
-                    Rgba::opaque(mean(0), mean(1), mean(2))
-                })
-                .collect(),
-        )
+        Palette::new(chosen.into_iter().map(|b| Rgba::opaque(b.color[0], b.color[1], b.color[2])).collect())
     }
 
     /// Every pixel of `clip` replaced by the palette colour nearest it, with
@@ -260,6 +284,142 @@ impl Palette {
     }
 }
 
+/// The picture as coarse buckets: one entry per cell of the colour cube
+/// that any pixel fell in, holding the average colour of those pixels and
+/// how many there were. Fully transparent pixels are not colours of the
+/// picture and are left out.
+fn gather(raster: &Raster) -> Vec<Bucket> {
+    let mut cells: HashMap<(u8, u8, u8), Cell> = HashMap::new();
+    let step = 256 / BUCKET_LEVELS;
+    for y in 0..raster.height() as i32 {
+        for x in 0..raster.width() as i32 {
+            let p = raster.get(x, y);
+            if p.a == 0 {
+                continue;
+            }
+            let key = |v: u8| (u32::from(v) / step) as u8;
+            let cell = cells.entry((key(p.r), key(p.g), key(p.b))).or_insert((0, [0; 3]));
+            cell.0 += 1;
+            cell.1[0] += u64::from(p.r);
+            cell.1[1] += u64::from(p.g);
+            cell.1[2] += u64::from(p.b);
+        }
+    }
+    let mut found: Vec<((u8, u8, u8), Cell)> = cells.into_iter().collect();
+    // The cell breaks ties, so the same picture always gives the same
+    // palette rather than whatever order the map happened to hold.
+    found.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(&b.0)));
+    found
+        .into_iter()
+        .map(|(_, (count, sum))| {
+            let mean = |c: usize| (sum[c] / u64::from(count)) as u8;
+            Bucket { color: [mean(0), mean(1), mean(2)], count }
+        })
+        .collect()
+}
+
+/// How small a share of the picture a bucket may be and still count as one
+/// of its colours: below this it is a stray pixel or a compression artefact,
+/// and it is dropped as long as enough buckets are left to fill the palette.
+const NEGLIGIBLE_SHARE: u64 = 2000;
+
+/// The buckets cut down to at most `max` colours, most of the picture first.
+/// See [`Palette::from_image`] for what the cut is and why.
+fn median_cut(buckets: Vec<Bucket>, max: usize) -> Vec<Bucket> {
+    if max == 0 || buckets.is_empty() {
+        return Vec::new();
+    }
+    let total = weight(&buckets);
+    let worth_it: Vec<Bucket> =
+        buckets.iter().copied().filter(|b| u64::from(b.count) * NEGLIGIBLE_SHARE >= total).collect();
+    let buckets = if worth_it.len() >= max { worth_it } else { buckets };
+    let mut boxes: Vec<Vec<Bucket>> = vec![buckets];
+    while boxes.len() < max {
+        // The widest box is the one worth splitting; a box that is one
+        // colour wide has nothing left to say, so a picture with fewer
+        // colours than asked for simply stops here.
+        let Some(next) = boxes
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.len() > 1 && spread_of(b).1 > 0)
+            .max_by(|a, b| spread_of(a.1).1.cmp(&spread_of(b.1).1).then(weight(a.1).cmp(&weight(b.1))))
+            .map(|(i, _)| i)
+        else {
+            break;
+        };
+        let (channel, _) = spread_of(&boxes[next]);
+        let mut members = boxes.remove(next);
+        members.sort_by_key(|b| b.color[channel]);
+        // Cut the box in half *by colour*, not by pixel count: a photograph
+        // is mostly one or two colours, and splitting where the pixels are
+        // would keep dividing those and never reach the rest of it. What
+        // comes out is one entry per region of colour the picture uses.
+        let lo = u32::from(members[0].color[channel]);
+        let hi = u32::from(members[members.len() - 1].color[channel]);
+        let middle = ((lo + hi) / 2) as u8;
+        let at = match members.iter().position(|b| b.color[channel] > middle) {
+            // Unless everything is on one side of the middle, which happens
+            // when the box is a tight cluster and one outlier: then halve
+            // the pixels instead, so the split still separates something.
+            Some(at) if at > 0 => at,
+            _ => {
+                let half = weight(&members) / 2;
+                let mut carried = 0u64;
+                members.iter().position(|b| {
+                    carried += u64::from(b.count);
+                    carried > half
+                }).unwrap_or(0)
+            }
+        };
+        let at = at.clamp(1, members.len() - 1);
+        let rest = members.split_off(at);
+        boxes.push(members);
+        boxes.push(rest);
+    }
+    let mut colors: Vec<Bucket> = boxes.iter().map(|b| average(b)).collect();
+    colors.sort_by(|a, b| b.count.cmp(&a.count).then(a.color.cmp(&b.color)));
+    colors
+}
+
+/// Whether two colours are at least `apart` from each other, in plain RGB
+/// distance. Squared on both sides, to keep the root out of the loop.
+fn apart_enough(a: [u8; 3], b: [u8; 3], apart: f32) -> bool {
+    let squared: f32 = (0..3)
+        .map(|c| {
+            let d = f32::from(a[c]) - f32::from(b[c]);
+            d * d
+        })
+        .sum();
+    squared >= apart * apart
+}
+
+/// The channel a box is widest across, and how wide that is.
+fn spread_of(members: &[Bucket]) -> (usize, u8) {
+    (0..3)
+        .map(|c| {
+            let lo = members.iter().map(|b| b.color[c]).min().unwrap_or(0);
+            let hi = members.iter().map(|b| b.color[c]).max().unwrap_or(0);
+            (c, hi - lo)
+        })
+        .max_by_key(|(_, width)| *width)
+        .unwrap_or((0, 0))
+}
+
+/// How many of the picture's pixels a box holds.
+fn weight(members: &[Bucket]) -> u64 {
+    members.iter().map(|b| u64::from(b.count)).sum()
+}
+
+/// The box as one colour: the average of its pixels, not of its buckets, so
+/// the shade most of the box actually is wins.
+fn average(members: &[Bucket]) -> Bucket {
+    let total = weight(members).max(1);
+    let channel = |c: usize| {
+        (members.iter().map(|b| u64::from(b.color[c]) * u64::from(b.count)).sum::<u64>() / total) as u8
+    };
+    Bucket { color: [channel(0), channel(1), channel(2)], count: total.min(u64::from(u32::MAX)) as u32 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,15 +503,43 @@ mod tests {
     }
 
     #[test]
-    fn a_palette_from_a_picture_is_its_colours_most_used_first() {
+    fn a_palette_from_a_picture_is_its_colours_most_of_it_first() {
         let mut r = flat(10, 10, RED);
         r.fill_rect(Rect::new(0, 0, 10, 3), WHITE, &r.bounds());
         // A shade a hair off the red counts with it rather than as its own.
         r.fill_rect(Rect::new(0, 9, 10, 1), Rgba::opaque(252, 2, 2), &r.bounds());
-        let p = Palette::from_image(&r, 8);
+        let p = Palette::from_image(&r, 8, 0.0);
         assert_eq!(p.colors().len(), 2, "two colours, not three: {:?}", p.colors());
         assert!(p.colors()[0].r > 240 && p.colors()[0].g < 10, "the red covers most of it");
         assert_eq!(p.colors()[1], WHITE);
+        assert_eq!(Palette::from_image(&r, 0, 0.0).colors().len(), 0, "none asked for, none given");
+    }
+
+    #[test]
+    fn a_picture_of_one_colour_s_shades_does_not_spend_the_palette_on_them() {
+        // Most of the picture is near-identical blues; a corner of it is
+        // red and another green. Counting the commonest colours would give
+        // three blues and lose both of the others.
+        let mut r = Raster::new(20, 20);
+        let bounds = r.bounds();
+        for y in 0..20 {
+            for x in 0..20 {
+                r.set(x, y, Rgba::opaque(20 + (x as u8 % 5), 40 + (y as u8 % 5), 200 + (x as u8 % 6)));
+            }
+        }
+        r.fill_rect(Rect::new(0, 0, 3, 3), RED, &bounds);
+        r.fill_rect(Rect::new(17, 17, 3, 3), Rgba::opaque(0, 255, 0), &bounds);
+
+        let colors = Palette::from_image(&r, 3, 0.0).colors().to_vec();
+        assert_eq!(colors.len(), 3, "{colors:?}");
+        let has = |want: Rgba| colors.iter().any(|c| {
+            let d = |a: u8, b: u8| i32::from(a) - i32::from(b);
+            d(c.r, want.r).abs() < 40 && d(c.g, want.g).abs() < 40 && d(c.b, want.b).abs() < 40
+        });
+        assert!(has(Rgba::opaque(22, 42, 202)), "the blue the picture is mostly made of: {colors:?}");
+        assert!(has(RED), "and the red corner: {colors:?}");
+        assert!(has(Rgba::opaque(0, 255, 0)), "and the green one: {colors:?}");
+        assert!(colors[0].b > 150, "the blue covers the most, so it comes first");
     }
 
     #[test]
@@ -362,8 +550,50 @@ mod tests {
                 r.set(x, y, Rgba::opaque((x * 32) as u8, (y * 32) as u8, 0));
             }
         }
-        assert_eq!(Palette::from_image(&r, 4).colors().len(), 4);
-        assert!(Palette::from_image(&Raster::new(4, 4), 8).is_empty(), "nothing opaque, nothing to count");
+        assert_eq!(Palette::from_image(&r, 4, 0.0).colors().len(), 4);
+        assert!(Palette::from_image(&Raster::new(4, 4), 8, 0.0).is_empty(), "nothing opaque, nothing to count");
+    }
+
+    #[test]
+    fn a_bias_towards_distinct_colours_keeps_the_near_shades_out() {
+        // Most of the picture is four shades of blue, close enough that a
+        // cut fine enough to reach the two corners keeps some of them.
+        let mut r = Raster::new(20, 20);
+        let bounds = r.bounds();
+        for y in 0..20 {
+            for x in 0..20 {
+                r.set(x, y, Rgba::opaque(10 * (x as u8 / 5), 30 + 10 * (y as u8 / 5), 200));
+            }
+        }
+        r.fill_rect(Rect::new(0, 0, 4, 4), RED, &bounds);
+        r.fill_rect(Rect::new(16, 16, 4, 4), Rgba::opaque(0, 255, 0), &bounds);
+
+        let near = |c: Rgba, want: Rgba| {
+            let d = |a: u8, b: u8| (i32::from(a) - i32::from(b)).abs();
+            d(c.r, want.r) < 50 && d(c.g, want.g) < 50 && d(c.b, want.b) < 50
+        };
+        let blues = |palette: &Palette| palette.colors().iter().filter(|c| c.b > 150 && c.r < 100).count();
+
+        let loose = Palette::from_image(&r, 5, 0.0);
+        assert!(blues(&loose) > 1, "the cut alone keeps shades of the blue: {:?}", loose.colors());
+
+        let strict = Palette::from_image(&r, 5, 0.5);
+        assert_eq!(blues(&strict), 1, "wound up, one blue stands for all of them: {:?}", strict.colors());
+        assert!(strict.colors().iter().any(|c| near(*c, RED)), "{:?}", strict.colors());
+        assert!(strict.colors().iter().any(|c| near(*c, Rgba::opaque(0, 255, 0))), "{:?}", strict.colors());
+
+        // Wound all the way up, every answer is as far from the others as
+        // the bias says, so a picture with nothing else to offer simply
+        // gives fewer colours.
+        let strictest = Palette::from_image(&r, 5, 1.0);
+        assert!(!strictest.is_empty(), "there is always the one it started from");
+        for (i, a) in strictest.colors().iter().enumerate() {
+            for b in &strictest.colors()[i + 1..] {
+                let d = |x: u8, y: u8| f32::from(x) - f32::from(y);
+                let apart = (d(a.r, b.r).powi(2) + d(a.g, b.g).powi(2) + d(a.b, b.b).powi(2)).sqrt();
+                assert!(apart >= MAX_SEPARATION, "{a} and {b} are only {apart} apart");
+            }
+        }
     }
 
     #[test]

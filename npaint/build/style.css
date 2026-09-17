@@ -1337,8 +1337,84 @@ button.primary {
 .palette-buttons button {
   padding: 3px 7px;
 }
-.palette-buttons select {
-  padding: 2px 4px;
+.from-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 26px);
+  gap: 4px;
+  max-height: 200px;
+  overflow: auto;
+  padding: 2px;
+}
+.from-image-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--swatch, #000);
+  opacity: 0.35;
+}
+.from-image-swatch.from-image-on {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* A colour the palette already has: adding it would do nothing, so it is
+   marked rather than hidden. */
+.from-image-swatch.from-image-have {
+  position: relative;
+}
+.from-image-swatch.from-image-have::after {
+  content: "";
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.from-image-pick {
+  display: flex;
+  gap: 4px;
+}
+.from-image-pick button {
+  padding: 3px 7px;
+}
+.from-image-bias {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+.from-image-bias input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.from-image-bias output {
+  width: 3em;
+  text-align: right;
+}
+.from-image-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-dim);
+}
+#dlg-from-image .dialog-form {
+  min-width: 330px;
+}
+
+.palette-colors {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+.palette-colors input {
+  width: 4.5em;
 }
 
 /* ---- The gradient editor ---- */

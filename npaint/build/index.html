@@ -225,8 +225,7 @@
               <button id="palette-remove" title="Remove the colour picked out">−</button>
               <button id="palette-undo" title="Take back the last change to the palette">↶</button>
               <button id="palette-redo" title="Put back what was taken back">↷</button>
-              <button id="palette-from-image" title="Take the picture's most-used colours">From image</button>
-              <select id="palette-colors" title="How many colours to take from the picture"></select>
+              <button id="palette-from-image" title="Find the picture's most-used colours and choose from them">From image…</button>
               <button id="palette-load" title="Open a .gpl palette">Load…</button>
               <button id="palette-save" title="Save as a .gpl palette">Save…</button>
             </div>
@@ -296,6 +295,36 @@
           <button id="adjust-ok" class="primary">OK</button>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="dlg-from-image">
+      <form id="from-image-form" class="dialog-form">
+        <h2>Colours from the picture</h2>
+        <label>Find
+          <input id="palette-colors" type="number" step="1" />
+          colours
+          <button type="button" id="from-image-find">Find again</button>
+        </label>
+        <label class="from-image-bias" title="How far apart the colours have to be. Wound up, shades of one colour give way to colours from elsewhere in the picture — and a picture with nothing else to offer gives fewer.">
+          Distinct
+          <input id="from-image-bias" type="range" min="0" max="100" />
+          <output id="from-image-bias-out"></output>
+        </label>
+        <p class="field-note" id="from-image-note"></p>
+        <div class="from-image-grid" id="from-image-grid"></div>
+        <div class="from-image-pick">
+          <button type="button" id="from-image-all">Select all</button>
+          <button type="button" id="from-image-none">Select none</button>
+          <label class="from-image-sort">Order
+            <select id="from-image-order" title="The order the colours are shown in, and go into the palette in"></select>
+          </label>
+        </div>
+        <div class="dialog-buttons">
+          <button type="button" id="from-image-cancel">Cancel</button>
+          <button type="button" id="from-image-replace">Replace palette</button>
+          <button type="submit" class="primary" id="from-image-add">Add to palette</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog id="dlg-canvas">
