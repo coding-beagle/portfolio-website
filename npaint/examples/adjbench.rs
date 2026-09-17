@@ -71,6 +71,33 @@ fn main() {
         }
     }
 
+    // What a filter's slider costs at 1:1, where there is no reduced preview
+    // to save it: the pass covers the window rather than the document.
+    {
+        let mut e = npaint::editor::Editor::new(w, h, Rgba::WHITE);
+        e.add_layer_from("photo", doc.layers()[0].raster.clone()).unwrap();
+        e.set_zoom_about(1.0, npaint::geometry::Point::new(0.0, 0.0));
+        let mut out = Raster::new(w, h);
+        let mut n = 0.0f32;
+        for (view, label) in [(None, "whole document"), (Some((1920.0, 1080.0)), "1920x1080 window")] {
+            match view {
+                Some((vw, vh)) => e.set_view_size(vw, vh),
+                None => e.set_view_size(0.0, 0.0),
+            }
+            for (name, params) in [("blur", &[8.0][..]), ("median", &[4.0][..])] {
+                e.begin_adjustment().unwrap();
+                ms(&format!("a {name} slider tick at 1:1, over {label}"), 5, || {
+                    n = (n + 1.0) % 3.0;
+                    let params: Vec<f32> = params.iter().map(|v| v + n).collect();
+                    e.preview_adjustment(name, &params).unwrap();
+                    let rect = e.take_dirty().unwrap_or(all);
+                    e.composite_into(&mut out, &rect);
+                });
+                e.cancel_session();
+            }
+        }
+    }
+
     // (a) The layers below the adjustment do not change while its settings
     // do, so composite them once and keep the answer.
     let mut below = Raster::new(w, h);

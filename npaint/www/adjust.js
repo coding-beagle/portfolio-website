@@ -602,14 +602,39 @@ export function createAdjustDialog(np, { onChange, onError, mayEdit }) {
     controls.forEach((c) => c.restyle && c.restyle());
   }
 
-  function preview() {
-    refreshRows();
+  /** The queued preview pass, or 0 when none is waiting. */
+  let pending = 0;
+
+  function runPreview() {
+    pending = 0;
     try {
       np.preview_adjustment(spec.name, values());
     } catch (e) {
       onError(String(e));
     }
     onChange();
+  }
+
+  // A slider fires `input` faster than the canvas redraws, so a pass a
+  // frame is as many as anyone can see — and with a filter as slow as the
+  // median the ones in between are answers that are stale before they
+  // finish. The newest values win.
+  function preview() {
+    refreshRows();
+    if (!pending) pending = requestAnimationFrame(runPreview);
+  }
+
+  /**
+   * Settles a queued pass before the session ends: `run` to work it out now,
+   * which is what commit needs so that the last slider move is in what it
+   * keeps, or false to drop it — a pass after the session has gone would
+   * have nothing to preview into.
+   */
+  function settlePreview(run) {
+    if (!pending) return;
+    cancelAnimationFrame(pending);
+    pending = 0;
+    if (run) runPreview();
   }
 
   /** The controls' defaults, in the same flat order the engine reads. */
@@ -666,6 +691,7 @@ export function createAdjustDialog(np, { onChange, onError, mayEdit }) {
 
   function finish(commit) {
     if (!dlg.open) return;
+    settlePreview(commit);
     if (commit) np.commit_session();
     else np.cancel_session();
     dlg.close();
@@ -677,6 +703,7 @@ export function createAdjustDialog(np, { onChange, onError, mayEdit }) {
    *  another layer was clicked while it was open, say. */
   function abandon() {
     if (!dlg.open) return;
+    settlePreview(false);
     dlg.close();
     spec = null;
     onChange();

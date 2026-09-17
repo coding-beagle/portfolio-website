@@ -32,6 +32,12 @@ pub const HANDLE_GRAB_PX: f64 = 8.0;
 /// The most a preview may be shrunk, however far out the canvas is zoomed.
 const MAX_PREVIEW_STEP: u32 = 16;
 
+/// How coarsely the visible rectangle is rounded, in document pixels. A
+/// full-size preview is worked out for whole tiles of this size, so that
+/// panning asks for a fresh pass when it crosses a tile edge rather than on
+/// every frame. See [`Editor::visible_rect`].
+const PREVIEW_TILE: i32 = 64;
+
 /// The composite of everything below the layer a session is changing, kept
 /// for as long as the session lasts. See [`Editor::preview_base`].
 struct PreviewBase {
@@ -275,6 +281,17 @@ pub struct Editor {
     /// 25 ms, and it is the whole canvas every tick: an adjustment has no
     /// dirty rectangle to save it.
     preview_base: Option<PreviewBase>,
+    /// The document rectangle the full-size preview has been worked out for
+    /// — everywhere else the picture is still the one the session started
+    /// from, and the frame on screen agrees.
+    ///
+    /// A filter costs its area, and at 1:1 most of a large document is off
+    /// screen: there is no reason to blur twenty-four million pixels so that
+    /// two million can be looked at. `None` while no full-size preview is in
+    /// force, either because there is no session or because a reduced one is
+    /// running, in which case coming back to full size has to composite
+    /// everything again.
+    previewed: Option<Rect>,
     /// The active layer before a transform began, restored on cancel and
     /// used as the undo snapshot on commit. The whole layer, because a
     /// smart object's transform changes its placement as well as its pixels.
@@ -333,6 +350,7 @@ impl Editor {
             gesture: None,
             session: None,
             preview_base: None,
+            previewed: None,
             transform_base: None,
             moving_smart: false,
             transform_shown: None,
@@ -713,6 +731,69 @@ impl Editor {
         true
     }
 
+    /// The document rectangle the canvas is showing, rounded out to whole
+    /// [`PREVIEW_TILE`]s so that a pan of a pixel does not ask for a fresh
+    /// preview pass. The whole document when the page has not said how big
+    /// its window is, which is the tests and the first frame.
+    fn visible_rect(&self) -> Rect {
+        let bounds = self.document.bounds();
+        let view = self.viewport.view();
+        if view.is_empty() {
+            return bounds;
+        }
+        let top_left = self.viewport.screen_to_doc(Point::new(0.0, 0.0));
+        let bottom_right = self.viewport.screen_to_doc(Point::new(view.w, view.h));
+        // Brought inside the document before the rounding, so that a canvas
+        // panned a long way off the screen cannot overflow the arithmetic.
+        let inside = |v: f64, limit: i32| v.clamp(0.0, f64::from(limit)) as i32;
+        let tile_below = |v: i32| v.div_euclid(PREVIEW_TILE) * PREVIEW_TILE;
+        let x = tile_below(inside(top_left.x, bounds.w));
+        let y = tile_below(inside(top_left.y, bounds.h));
+        let right = tile_below(inside(bottom_right.x, bounds.w)) + PREVIEW_TILE;
+        let bottom = tile_below(inside(bottom_right.y, bounds.h)) + PREVIEW_TILE;
+        Rect::new(x, y, right - x, bottom - y).intersect(&bounds)
+    }
+
+    /// Brings the full-size preview up to date after the view has moved
+    /// under it.
+    ///
+    /// A preview is only worked out where the canvas can show it, so a pan
+    /// or a zoom uncovers pixels the current settings have never been
+    /// applied to. Cheap to call: it does nothing while the visible
+    /// rectangle is still the one the last pass covered.
+    fn refresh_full_preview(&mut self) {
+        // The sessions that preview through an adjustment. The others draw
+        // at full size whatever the zoom and keep their own dirty rectangles.
+        if !matches!(self.session, Some(Session::Adjust { .. } | Session::AdjustmentLayer { .. })) {
+            return;
+        }
+        if self.preview_base.as_ref().is_some_and(|b| b.small.is_some()) {
+            // A reduced preview is running: the page is not drawing the
+            // full-size frame at all, and it is left behind entirely.
+            self.previewed = None;
+            return;
+        }
+        let shown = self.visible_rect();
+        if self.previewed == Some(shown) {
+            return;
+        }
+        // Coming back from a reduced preview the frame is whatever the last
+        // full render left, so all of it has to be composited again.
+        let stale = shown.union(&self.previewed.unwrap_or_else(|| self.document.bounds()));
+        self.previewed = Some(shown);
+        // An adjustment layer applies at composite time, so for that one the
+        // rectangle above is the whole of the catching up.
+        if let Some(Session::Adjust { base, clip, last: Some(adjustment) }) = &self.session {
+            let (base, adjustment) = (base.clone(), adjustment.clone());
+            let clip = clip.intersect(&shown);
+            let mut out = base.clone();
+            adjustment.apply(&mut out, &clip);
+            self.selection.apply(&mut out, &base, &clip);
+            *self.document.active_surface_mut() = out;
+        }
+        self.touch(stale);
+    }
+
     /// The size of the reduced preview, as `[width, height, step]`, when one
     /// is in force. The page draws it stretched over the canvas.
     pub fn preview_size(&self) -> Option<[u32; 3]> {
@@ -734,6 +815,7 @@ impl Editor {
             }
             self.touch_all();
         }
+        self.refresh_full_preview();
         let dirty = self.is_dirty();
         let small = self.preview_base.as_ref()?.small.as_ref()?;
         if !dirty && out.width() == small.document.width() && out.height() == small.document.height() {
@@ -2113,6 +2195,7 @@ impl Editor {
         }
         let clip = self.selection.clip(self.document.bounds());
         self.session = Some(Session::Adjust { base: self.document.active_surface().clone(), clip, last: None });
+        self.previewed = Some(Rect::default());
         self.hold_preview_base(self.document.active_index());
         Ok(())
     }
@@ -2128,6 +2211,7 @@ impl Editor {
         self.set_active_layer(index).map_err(|_| SessionError::NotAdjustmentLayer)?;
         self.open_session()?;
         self.session = Some(Session::AdjustmentLayer { before });
+        self.previewed = Some(Rect::default());
         self.hold_preview_base(index);
         Ok(())
     }
@@ -2148,11 +2232,25 @@ impl Editor {
         // full-size surface, so there is no reason to compute it — that is
         // where the saving is. Commit works it out once, from `last`.
         let reduced = self.preview_small(&adjustment, is_layer);
+        // A full-size pass covers what the canvas is showing and no more: at
+        // 1:1 most of a large document is off screen, and a filter costs its
+        // area. `refresh_full_preview` catches up the rest when the view
+        // moves. See [`Editor::previewed`].
+        let shown = (!reduced).then(|| self.visible_rect());
+        let stale = match shown {
+            // Everything the pass before covered is composited again too:
+            // outside the new rectangle the surface goes back to the pixels
+            // the session started from.
+            Some(rect) => rect.union(&self.previewed.unwrap_or_else(|| self.document.bounds())),
+            // The reduced preview recomposites whole, so the rectangle only
+            // has to say that something changed.
+            None => self.document.bounds(),
+        };
         match &mut self.session {
             Some(Session::Adjust { base, clip, last }) => {
                 *last = Some(adjustment.clone());
-                if !reduced {
-                    let (base, clip) = (base.clone(), *clip);
+                if let Some(shown) = shown {
+                    let (base, clip) = (base.clone(), clip.intersect(&shown));
                     let mut out = base.clone();
                     adjustment.apply(&mut out, &clip);
                     self.selection.apply(&mut out, &base, &clip);
@@ -2165,7 +2263,8 @@ impl Editor {
             }
             _ => return Err(AdjustmentError("no adjustment in progress".to_owned())),
         }
-        self.touch_all();
+        self.previewed = shown;
+        self.touch(stale);
         Ok(())
     }
 
@@ -2190,6 +2289,7 @@ impl Editor {
     /// Keeps whatever is currently previewed as one undo step.
     pub fn commit_session(&mut self) -> bool {
         self.preview_base = None;
+        self.previewed = None;
         self.transform_shown = None;
         self.transform_small = None;
         let Some(session) = self.session.take() else { return false };
@@ -2271,6 +2371,7 @@ impl Editor {
     /// Puts the layer back the way it was before the session.
     pub fn cancel_session(&mut self) -> bool {
         self.preview_base = None;
+        self.previewed = None;
         self.transform_shown = None;
         self.transform_small = None;
         let Some(session) = self.session.take() else { return false };
@@ -4847,6 +4948,70 @@ mod tests {
         let all = want.bounds();
         Adjustment::from(Kind::Invert).apply(&mut want, &all);
         assert_eq!(e.document().active_surface(), &want, "commit is the full-size answer");
+    }
+
+    /// At a zoom too close for a reduced preview, a full-size pass covers the
+    /// window and no more, and the view moving under it brings the rest up to
+    /// date.
+    #[test]
+    fn a_full_size_preview_covers_the_window_and_follows_it() {
+        const GREY: Rgba = Rgba::opaque(90, 90, 90);
+        const INVERTED: Rgba = Rgba::opaque(165, 165, 165);
+        let mut e = Editor::new(512, 64, GREY);
+        e.set_view_size(64.0, 64.0);
+        e.set_zoom_about(1.0, Point::new(0.0, 0.0));
+        assert_eq!(e.preview_step(), 1, "nothing to reduce at 1:1");
+
+        e.begin_adjustment().unwrap();
+        // The page draws a frame before the first slider move, which takes
+        // the dirty rectangle with it.
+        e.take_dirty();
+        e.preview_adjustment("invert", &[]).unwrap();
+        let surface = e.document().active_surface();
+        assert_eq!(surface.get(0, 0), INVERTED, "the window is previewed");
+        assert_eq!(surface.get(127, 0), INVERTED, "out to the end of its tile");
+        assert_eq!(surface.get(128, 0), GREY, "and the rest of the document is left alone");
+        assert_eq!(e.take_dirty(), Some(Rect::new(0, 0, 128, 64)), "nor is it recomposited");
+
+        // The canvas pans to the far end: what has come into view is worked
+        // out now, and what has left it goes back to the pixels the session
+        // started from.
+        e.pan_by(-448.0, 0.0);
+        assert_eq!(e.preview_into(&mut Raster::new(1, 1)), None, "no reduced preview at 1:1");
+        let surface = e.document().active_surface();
+        assert_eq!(surface.get(511, 0), INVERTED, "the new window is previewed");
+        assert_eq!(surface.get(0, 0), GREY, "and the old one is back as it was");
+        assert_eq!(e.take_dirty(), Some(Rect::new(0, 0, 512, 64)), "both ends are recomposited");
+
+        // Whatever the previews covered, what the document keeps is all of it.
+        e.commit_session();
+        assert!(e.document().active_surface().pixels().iter().all(|p| *p == INVERTED));
+    }
+
+    /// An adjustment layer applies at composite time, so previewing one costs
+    /// a recomposite rather than a pass over the pixels — of the window, and
+    /// of whatever the view uncovers afterwards.
+    #[test]
+    fn an_adjustment_layer_previews_the_window_and_catches_up_on_a_pan() {
+        let mut e = Editor::new(512, 64, Rgba::opaque(90, 90, 90));
+        e.set_view_size(64.0, 64.0);
+        e.set_zoom_about(1.0, Point::new(0.0, 0.0));
+        let index = e.add_adjustment_layer("levels", &[0.0, 255.0, 1.0]).unwrap();
+        e.begin_adjustment_layer(index).unwrap();
+        e.take_dirty();
+        e.preview_adjustment("levels", &[0.0, 128.0, 1.0]).unwrap();
+        assert_eq!(e.take_dirty(), Some(Rect::new(0, 0, 128, 64)), "the window, not the document");
+
+        e.pan_by(-448.0, 0.0);
+        assert_eq!(e.preview_into(&mut Raster::new(1, 1)), None, "no reduced preview at 1:1");
+        assert_eq!(e.take_dirty(), Some(Rect::new(0, 0, 512, 64)), "what the pan uncovered as well");
+
+        // The frame is composited only where it has been marked, so what the
+        // marks cover has to be the whole of the difference.
+        let all = e.document().bounds();
+        let mut frame = Raster::new(512, 64);
+        e.composite_into(&mut frame, &all);
+        assert_eq!(frame, e.document().composite());
     }
 
     /// The invariant the dirty rectangle rests on: redrawing only what the
