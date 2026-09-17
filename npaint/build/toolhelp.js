@@ -10,12 +10,14 @@
 //
 // That probe used to happen on the first hover, which made the first card for
 // each tool arrive a beat late. The whole set is well under two megabytes, so
-// instead every attached tool is fetched once the page has gone idle and kept
-// as a blob URL in `sources`; a hover then only has to point the video at a
-// clip that is already in memory. The fetch is what probes, so a tool whose
-// clip 404s is settled before it is ever hovered. Hovering before the
-// prefetch reaches that tool still works — it falls back to the URL and the
-// browser's own cache.
+// instead every attached tool is fetched once the page has gone idle. Fetching
+// alone is not enough to make the card instant: a single `<video>` that has
+// its `src` swapped per tool still has to demux and decode a first frame on
+// every hover. So each clip gets its own `<video>`, built as its bytes land,
+// decoded up front and parked hidden in the card — a hover then only unhides
+// the one it wants. Hovering before the prefetch reaches that tool still
+// works; it falls back to a shared element that loads on demand, the way all
+// of this used to.
 //
 // See `demos/README.md` for how the clips are made.
 //
@@ -25,7 +27,16 @@
 // browser's own tooltip instead.
 
 /** How long the pointer has to rest on a button before the card appears. */
-const HOVER_DELAY_MS = 350;
+const HOVER_DELAY_MS = 250;
+
+/**
+ * How long after a card is put away the next one still counts as the same
+ * look around the toolbox. Within that window the wait is skipped: the delay
+ * is there to keep cards from flashing up at a pointer that is only passing
+ * through, and someone comparing one tool with the next has already shown
+ * that is not what they are doing.
+ */
+const WARM_MS = 600;
 
 /** Gap between the toolbox button and the card. */
 const OFFSET_PX = 8;
@@ -36,8 +47,8 @@ const probed = new Map();
 /** Bumped by `refreshDemo` to get past the browser's cache: name -> number. */
 const version = new Map();
 
-/** Prefetched clips, as blob URLs: name -> string. */
-const sources = new Map();
+/** Prefetched clips, decoded and ready to show: name -> HTMLVideoElement. */
+const clips = new Map();
 
 /** Every tool wired up by `attachToolHelp`, in the order they were wired. */
 const wanted = [];
@@ -47,14 +58,71 @@ const PREFETCH_CONCURRENCY = 4;
 
 let prefetchScheduled = false;
 
+const canHover = () => window.matchMedia?.("(hover: hover)").matches ?? true;
+const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+let card = null;
+let titleEl = null;
+let hintEl = null;
+
+/** The shared element for clips the prefetch has not got to yet. */
+let fallback = null;
+
+/** The element the card is showing, prefetched or fallback. */
+let video = null;
+
+/** The button the card is currently showing for, or null when it is hidden. */
+let shownFor = null;
+let timer = 0;
+
+/** When the last card was put away, for `WARM_MS`. */
+let hiddenAt = 0;
+
 /** The URL a tool's clip is at right now — versioned after a retake. */
 function demoUrl(name) {
   const v = version.get(name);
   return v ? `demos/${name}.webm?v=${v}` : `demos/${name}.webm`;
 }
 
+/**
+ * A `<video>` for one tool, hidden in the card. `src` is a blob URL for a
+ * prefetched clip; the fallback element is made without one and given a URL
+ * per hover instead.
+ */
+function makeVideo(name, src) {
+  const el = document.createElement("video");
+  el.className = "toolhelp-demo";
+  el.muted = true;
+  el.loop = true;
+  el.playsInline = true;
+  el.hidden = true;
+  // The fallback is only ever used for a clip nobody has asked for yet, so it
+  // waits to be told; a prefetched one is meant to be decoded before anyone
+  // asks, which is the whole point of holding the bytes.
+  el.preload = src ? "auto" : "none";
+  if (name) el.dataset.tool = name;
+  if (src) el.src = src;
+
+  // A clip that is missing, or that the browser cannot decode, leaves the
+  // card as text — which is what every tool without a demo looks like.
+  el.addEventListener("error", () => {
+    probed.set(el.dataset.tool, false);
+    el.hidden = true;
+    if (el === fallback) el.removeAttribute("src");
+  });
+  el.addEventListener("loadeddata", () => {
+    probed.set(el.dataset.tool, true);
+    if (video === el && shownFor) el.hidden = false;
+  });
+
+  // Before the title, so the clip sits above the text.
+  card.insertBefore(el, titleEl);
+  if (src) el.load();
+  return el;
+}
+
 async function prefetchOne(name) {
-  if (sources.has(name) || probed.get(name) === false) return;
+  if (clips.has(name) || probed.get(name) === false) return;
   try {
     const res = await fetch(demoUrl(name));
     if (!res.ok) throw new Error(String(res.status));
@@ -62,10 +130,9 @@ async function prefetchOne(name) {
     if (!blob.size) throw new Error("empty");
     // Two fetches for one tool can overlap — a retake lands while the idle
     // pass is still working through the list — and the loser drops its copy
-    // rather than replacing a blob URL the card may already be playing.
-    if (sources.has(name)) return;
-    sources.set(name, URL.createObjectURL(blob));
-    probed.set(name, true);
+    // rather than replacing an element the card may already be playing.
+    if (clips.has(name)) return;
+    clips.set(name, makeVideo(name, URL.createObjectURL(blob)));
   } catch {
     // A missing clip is the common case for a tool without a demo, and the
     // card is meant to be text-only there. Anything else that goes wrong
@@ -98,18 +165,6 @@ function schedulePrefetch() {
   else setTimeout(run, 500);
 }
 
-const canHover = () => window.matchMedia?.("(hover: hover)").matches ?? true;
-const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-
-let card = null;
-let video = null;
-let titleEl = null;
-let hintEl = null;
-
-/** The button the card is currently showing for, or null when it is hidden. */
-let shownFor = null;
-let timer = 0;
-
 function build() {
   card = document.createElement("div");
   card.className = "toolhelp";
@@ -118,33 +173,15 @@ function build() {
   // with its own label, and a card that comes and goes would only interrupt.
   card.setAttribute("aria-hidden", "true");
 
-  video = document.createElement("video");
-  video.className = "toolhelp-demo";
-  video.muted = true;
-  video.loop = true;
-  video.playsInline = true;
-  video.preload = "none";
-  video.hidden = true;
-
   titleEl = document.createElement("div");
   titleEl.className = "toolhelp-title";
   hintEl = document.createElement("div");
   hintEl.className = "toolhelp-hint";
 
-  card.append(video, titleEl, hintEl);
+  card.append(titleEl, hintEl);
   document.body.appendChild(card);
 
-  // A clip that is missing, or that the browser cannot decode, leaves the
-  // card as text — which is what every tool without a demo looks like.
-  video.addEventListener("error", () => {
-    probed.set(video.dataset.tool, false);
-    video.hidden = true;
-    video.removeAttribute("src");
-  });
-  video.addEventListener("loadeddata", () => {
-    probed.set(video.dataset.tool, true);
-    video.hidden = false;
-  });
+  fallback = makeVideo(null, null);
 }
 
 /** Puts the card beside `button`, or below it if there is no room to the right. */
@@ -163,6 +200,15 @@ function place(button) {
   card.style.top = `${Math.round(top)}px`;
 }
 
+/** Makes `el` the card's clip, putting away whichever one was there before. */
+function useVideo(el) {
+  if (video && video !== el) {
+    video.pause();
+    video.hidden = true;
+  }
+  video = el;
+}
+
 function show(button, def) {
   shownFor = button;
   titleEl.textContent = def.key ? `${def.label} (${def.key})` : def.label;
@@ -173,19 +219,27 @@ function show(button, def) {
   card.style.visibility = "hidden";
   card.hidden = false;
 
-  const known = probed.get(def.name);
-  if (known === false) {
-    video.hidden = true;
-    video.removeAttribute("src");
+  const ready = clips.get(def.name);
+  if (probed.get(def.name) === false) {
+    useVideo(null);
+  } else if (ready) {
+    useVideo(ready);
+    // Every clip starts from the top, however far the last hover got.
+    ready.currentTime = 0;
+    ready.hidden = false;
+    if (!stillMotion()) ready.play().catch(() => {});
   } else {
-    video.dataset.tool = def.name;
-    video.hidden = known !== true;
-    const src = sources.get(def.name) ?? demoUrl(def.name);
-    if (video.src !== src && !video.src.endsWith(src)) video.src = src;
+    useVideo(fallback);
+    fallback.dataset.tool = def.name;
+    // Unknown until it loads: showing an empty box and then the clip is worse
+    // than the text growing a clip once there is one to show.
+    fallback.hidden = true;
+    const src = demoUrl(def.name);
+    if (!fallback.src.endsWith(src)) fallback.src = src;
     // Reduced motion gets the first frame and no loop; the hint carries the
     // rest. `preload="none"` means nothing is fetched until one of these.
-    if (stillMotion()) video.load();
-    else video.play().catch(() => {});
+    if (stillMotion()) fallback.load();
+    else fallback.play().catch(() => {});
   }
 
   place(button);
@@ -195,8 +249,9 @@ function show(button, def) {
 function hide() {
   if (!shownFor) return;
   shownFor = null;
+  hiddenAt = performance.now();
   card.hidden = true;
-  video.pause();
+  video?.pause();
 }
 
 function cancel() {
@@ -212,15 +267,17 @@ function cancel() {
 export function refreshDemo(name) {
   probed.delete(name);
   version.set(name, Date.now());
-  const stale = sources.get(name);
+  const stale = clips.get(name);
   if (stale) {
-    sources.delete(name);
-    URL.revokeObjectURL(stale);
+    clips.delete(name);
+    if (video === stale) useVideo(null);
+    stale.remove();
+    URL.revokeObjectURL(stale.src);
   }
   // The retake has to come off the server, so it is fetched again rather than
   // left to the next hover — which is what makes the new clip show at once.
   prefetchOne(name);
-  if (shownFor && video.dataset.tool === name) {
+  if (shownFor && (video === stale || video?.dataset.tool === name)) {
     const button = shownFor;
     hide();
     button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
@@ -240,7 +297,8 @@ export function attachToolHelp(button, def) {
   button.addEventListener("pointerenter", (e) => {
     if (e.pointerType === "touch") return;
     cancel();
-    timer = setTimeout(() => show(button, def), HOVER_DELAY_MS);
+    if (performance.now() - hiddenAt < WARM_MS) show(button, def);
+    else timer = setTimeout(() => show(button, def), HOVER_DELAY_MS);
   });
   button.addEventListener("pointerleave", () => {
     cancel();
