@@ -165,6 +165,31 @@ pub enum EditRefusal {
     AlphaLocked,
 }
 
+impl EditRefusal {
+    /// A stable name for the page, in the same vocabulary as
+    /// [`LayerKind::name`]. The page keys its offer to rasterize off this
+    /// rather than off the wording of the message, which is prose and free
+    /// to change.
+    pub fn slug(self) -> &'static str {
+        match self {
+            EditRefusal::SmartObject => "smart",
+            EditRefusal::AdjustmentLayer => "adjustment",
+            EditRefusal::TextLayer => "text",
+            EditRefusal::Group => "group",
+            EditRefusal::Locked => "locked",
+            EditRefusal::AlphaLocked => "alpha",
+        }
+    }
+
+    /// Whether rasterizing the layer is what makes the edit possible. True
+    /// for the two kinds whose pixels are rendered from a source the tools
+    /// cannot reach; a locked layer wants unlocking and a group or an
+    /// adjustment layer has no pixels to rasterize towards.
+    pub fn fixed_by_rasterizing(self) -> bool {
+        matches!(self, EditRefusal::SmartObject | EditRefusal::TextLayer)
+    }
+}
+
 impl std::fmt::Display for EditRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -214,6 +239,11 @@ pub struct Layer {
     /// A group whose children the panel is not showing. Nothing to do with
     /// how it composites.
     pub collapsed: bool,
+    /// Clipped to the layer below: the layer draws only where that one
+    /// already has something, and takes its opacity and blend mode from it.
+    /// A run of clipped layers all clip to the same base — the first
+    /// unclipped sibling under them. See [`crate::document`].
+    pub clipped: bool,
 }
 
 /// How much a mask pixel shows: its brightness, with anything transparent
@@ -264,6 +294,7 @@ impl Layer {
             lock_alpha: false,
             parent: None,
             collapsed: false,
+            clipped: false,
         }
     }
 
@@ -311,6 +342,13 @@ impl Layer {
 
     pub fn is_adjustment(&self) -> bool {
         matches!(self.kind, LayerKind::Adjustment(_))
+    }
+
+    /// Whether [`Layer::clipped`] has anything to say about this layer. An
+    /// adjustment layer reaches everything under it by definition, so the
+    /// flag on one is inert rather than an error — a file may carry it.
+    pub fn clips_below(&self) -> bool {
+        self.clipped && !self.is_adjustment()
     }
 
     pub fn is_group(&self) -> bool {
@@ -550,6 +588,25 @@ pub fn keep_alpha(edited: &mut Raster, base: &Raster, clip: &Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rasterizing is offered for exactly the two kinds it would help, and
+    /// every refusal has a name the page can key off.
+    #[test]
+    fn only_a_rendered_layer_is_worth_offering_to_rasterize() {
+        let all = [
+            (EditRefusal::SmartObject, "smart", true),
+            (EditRefusal::TextLayer, "text", true),
+            (EditRefusal::AdjustmentLayer, "adjustment", false),
+            (EditRefusal::Group, "group", false),
+            (EditRefusal::Locked, "locked", false),
+            (EditRefusal::AlphaLocked, "alpha", false),
+        ];
+        for (why, slug, rasterize) in all {
+            assert_eq!(why.slug(), slug);
+            assert_eq!(why.fixed_by_rasterizing(), rasterize, "{slug}");
+            assert!(!why.to_string().is_empty(), "{slug}");
+        }
+    }
     use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);

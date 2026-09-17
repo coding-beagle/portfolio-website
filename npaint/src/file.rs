@@ -11,9 +11,13 @@
 //!
 //! Any field a future version adds goes at the end of the layer record,
 //! after a length the reader can skip by; anything a reader does not
-//! understand it can leave. After the layers comes a trailer with the
-//! guides; a file without one (the first files written) simply has none,
-//! and a reader from before the trailer stops after the layers.
+//! understand it can leave, so a field added there costs no version bump
+//! and older builds still open the file. The first such field is the
+//! clipping flag (one byte, non-zero for a layer clipped to the one below);
+//! a file written before it has an empty block and reads back unclipped.
+//! After the layers comes a trailer with the guides; a file without one
+//! (the first files written) simply has none, and a reader from before the
+//! trailer stops after the layers.
 //!
 //! # The version
 //!
@@ -235,8 +239,9 @@ fn save_as(doc: &Document, guides: &Guides, version: u16) -> Vec<u8> {
             }
             None => w.u8(0),
         }
-        // Room for later: a block a reader can skip.
-        w.u32(0);
+        // The block a reader too old for these may skip; see the module.
+        w.u32(1);
+        w.u8(u8::from(layer.clipped));
     }
     for axis in [&guides.h, &guides.v] {
         w.u32(axis.len() as u32);
@@ -416,8 +421,8 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
         } else {
             None
         };
-        let extra = r.u32()? as usize;
-        r.take(extra)?;
+        let extra_len = r.u32()? as usize;
+        let clipped = r.take(extra_len)?.first().is_some_and(|&b| b != 0);
 
         let mut layer = Layer::new(id, name, raster);
         layer.visible = visible;
@@ -431,6 +436,7 @@ pub fn load(bytes: &[u8]) -> Result<(Document, Guides), FileError> {
         layer.set_target(if on_mask { Target::Mask } else { Target::Pixels });
         layer.parent = parent;
         layer.collapsed = collapsed;
+        layer.clipped = clipped;
         layers.push(layer);
     }
     // `from_parts` also checks that the groups nest the way the stack
@@ -510,6 +516,9 @@ mod tests {
         let group = doc.group_layer(4, Some("Folder")).unwrap();
         doc.set_collapsed(group, true).unwrap();
         doc.layer_mut(group).unwrap().set_opacity(0.4);
+        // A clipped layer, so the round trip covers the flag in the layer
+        // record's extra block.
+        doc.layer_mut(1).unwrap().clipped = true;
         doc.set_active(1).unwrap();
         doc
     }

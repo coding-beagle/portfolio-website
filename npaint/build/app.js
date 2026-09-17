@@ -262,7 +262,7 @@ async function boot() {
   bindUnload();
   loadViewPrefs();
   np.set_snap(snapToGuides);
-  adjust = createAdjustDialog(np, { onChange: touch, onError: message });
+  adjust = createAdjustDialog(np, { onChange: touch, onError: message, mayEdit: mayEditPixels });
 
   $("loading").hidden = true;
   $("app").hidden = false;
@@ -1973,6 +1973,12 @@ function layerItems(index) {
       enabled: () => layerKind(i()) === "group",
       action: () => act(() => np.ungroup(i())),
     },
+    {
+      label: () => (np.layer_clipped(i()) ? "Release Clipping Mask" : "Create Clipping Mask"),
+      shortcut: "Ctrl+Alt+G",
+      enabled: () => np.layer_clipped(i()) || np.can_clip_layer(i()),
+      action: () => toggleClipping(i()),
+    },
     { sep: true },
     { label: "Move Up", enabled: () => np.can_reorder_layer(i(), true), action: () => act(() => np.reorder_layer(i(), true)) },
     { label: "Move Down", enabled: () => np.can_reorder_layer(i(), false), action: () => act(() => np.reorder_layer(i(), false)) },
@@ -2035,17 +2041,17 @@ function editItems() {
     { sep: true },
     { label: "Free Transform…", shortcut: "T", action: beginTransform },
     { sep: true },
-    { label: "Fill with Foreground", shortcut: "Alt+Backspace", action: () => act(() => np.fill_selection()) },
-    { label: "Fill with Background", shortcut: "Ctrl+Backspace", action: () => act(() => np.fill_selection_background()) },
+    { label: "Fill with Foreground", shortcut: "Alt+Backspace", action: () => actPixels(() => np.fill_selection()) },
+    { label: "Fill with Background", shortcut: "Ctrl+Backspace", action: () => actPixels(() => np.fill_selection_background()) },
     {
       label: "Stroke Selection",
       submenu: STROKE_WIDTHS.map((n) => ({
         label: `${n} px, foreground colour`,
         enabled: hasSelection,
-        action: () => act(() => np.stroke_selection(n)),
+        action: () => actPixels(() => np.stroke_selection(n)),
       })),
     },
-    { label: "Clear", shortcut: "Delete", action: () => act(() => np.clear_selection()) },
+    { label: "Clear", shortcut: "Delete", action: () => actPixels(() => np.clear_selection()) },
     { sep: true },
     { label: "Swap Colours", shortcut: "X", action: swapColors },
     { label: "Default Colours", shortcut: "D", action: resetColors },
@@ -2156,7 +2162,9 @@ function removeCheckerboard() {
     if (np.remove_checkerboard()) {
       message("Checkerboard background made transparent. Any left inside enclosed areas can be taken out with the magic wand.");
     } else {
-      message(np.edit_refusal() ? "This layer's pixels cannot be edited." : "No checkerboard found along the edges of this layer.");
+      const why = np.layer_refusal();
+      if (why) offerRasterize(why);
+      else message("No checkerboard found along the edges of this layer.");
     }
   });
 }
@@ -2488,8 +2496,8 @@ function menuDefinitions() {
       title: "Image",
       items: [
         { label: "Adjustments", submenu: adjustmentItems() },
-        { label: "Auto Levels", shortcut: "Ctrl+Shift+L", action: () => act(() => np.auto_levels(true)) },
-        { label: "Auto Contrast", shortcut: "Ctrl+Alt+Shift+L", action: () => act(() => np.auto_levels(false)) },
+        { label: "Auto Levels", shortcut: "Ctrl+Shift+L", action: () => actPixels(() => np.auto_levels(true)) },
+        { label: "Auto Contrast", shortcut: "Ctrl+Alt+Shift+L", action: () => actPixels(() => np.auto_levels(false)) },
         { label: "Remove Checkerboard Background", action: removeCheckerboard },
         { sep: true },
         { label: "Image Size…", shortcut: "Ctrl+Alt+I", action: showImageSizeDialog },
@@ -3492,6 +3500,7 @@ async function pasteFromMenu() {
 }
 
 function copyToClipboard(what) {
+  if (what === "cut" && !mayEditPixels()) return;
   const done = what === "cut" ? np.cut_selection() : np.copy_selection(what === "merged");
   touch();
   if (!done) {
@@ -3937,6 +3946,54 @@ function act(fn) {
   touch();
 }
 
+/** An engine refusal is written as a clause; the status bar wants a sentence. */
+const sentence = (why) => why.charAt(0).toUpperCase() + why.slice(1) + ".";
+
+/**
+ * Surfaces a refusal the user can act on. A smart object and a text layer
+ * keep their pixels in a source the tools cannot reach, and rasterizing is
+ * the only way in, so ask outright instead of leaving a line in the status
+ * bar to be noticed. Everything else — a lock, a group, an adjustment
+ * layer — is reported and nothing more, because rasterizing would not help.
+ *
+ * Returns whether the layer was rasterized, and so whether whatever was
+ * refused is now worth running.
+ */
+function offerRasterize(why) {
+  if (!np.rasterizing_would_help()) {
+    if (why) message(sentence(why));
+    return false;
+  }
+  const index = np.active_layer();
+  const what = np.layer_refusal_kind() === "text" ? "Text layers" : "Smart objects";
+  if (!window.confirm(`${what} cannot be painted on directly, rasterize it first?`)) {
+    message(sentence(why));
+    return false;
+  }
+  try {
+    np.rasterize_layer(index);
+  } catch (e) {
+    message(String(e));
+    return false;
+  }
+  // A refusal from an earlier attempt would otherwise sit there contradicting
+  // the edit that is about to go through.
+  message("");
+  touch();
+  return true;
+}
+
+/** Whether a command about to change the active layer's pixels may go ahead. */
+function mayEditPixels() {
+  const why = np.layer_refusal();
+  return why ? offerRasterize(why) : true;
+}
+
+/** `act`, for a command that changes the active layer's pixels. */
+function actPixels(fn) {
+  if (mayEditPixels()) act(fn);
+}
+
 /** The thumbnail box in the layers panel, matching `.thumb` in the stylesheet. */
 const THUMB_W = 40;
 const THUMB_H = 30;
@@ -4020,6 +4077,7 @@ function renderLayers() {
       (picked ? " selected" : "") +
       (visible ? "" : " hidden-layer") +
       (group ? " group" : "") +
+      (np.layer_clipped(i) ? " clipped" : "") +
       (visible && np.layer_hidden_by_group(i) ? " group-hidden" : "");
     li.dataset.index = i;
     li.style.setProperty("--depth", np.layer_depth(i));
@@ -4097,6 +4155,18 @@ function renderLayers() {
 
     const thumbs = document.createElement("span");
     thumbs.className = "thumbs";
+    // The arrow a clipping mask is marked with, pointing at the layer the
+    // clip is to. A flag left over from a reorder or an import may have
+    // nothing under it to act on, and then it says so.
+    if (np.layer_clipped(i)) {
+      const clip = document.createElement("span");
+      clip.className = "clip-mark";
+      clip.textContent = "↓";
+      const base = np.layer_clip_base(i);
+      clip.title = base >= 0 ? `Clipped to ${np.layer_name(base)}` : "Clipped, but there is nothing below to clip to";
+      if (base < 0) clip.classList.add("inert");
+      thumbs.appendChild(clip);
+    }
     thumbs.appendChild(pixels);
 
     // The mask, if there is one. Click edits it, Shift-click switches it
@@ -4192,6 +4262,21 @@ function folderThumbnail() {
   folder.className = "folder";
   folder.textContent = "🗀";
   return folder;
+}
+
+/**
+ * Clips a layer to the one below, or releases it. A layer with nothing
+ * under it to clip to says so rather than silently taking a flag that would
+ * never show — the layer below may be the bottom of a group, or an
+ * adjustment layer, which has no shape of its own.
+ */
+function toggleClipping(index) {
+  const clipped = np.layer_clipped(index);
+  if (!clipped && !np.can_clip_layer(index)) {
+    message("There is nothing below this layer to clip it to.");
+    return;
+  }
+  act(() => np.set_layer_clipped(index, !clipped));
 }
 
 /** Whether Merge Down would do anything: a group merges into itself, and
@@ -4484,9 +4569,10 @@ function bindPointer() {
       if (tool === "subject") subjectMods = { shift: e.shiftKey, alt: e.altKey };
       if (!np.pointer_down(x, y, e.shiftKey, alt, pressureOf(e))) {
         // A smart object's pixels, an adjustment layer's, or a locked
-        // layer: the engine says which, and what to do instead.
-        const why = np.edit_refusal();
-        if (why) message(why.charAt(0).toUpperCase() + why.slice(1) + ".");
+        // layer: the engine says which, and what to do instead. The stroke
+        // itself is not retried — this gesture is over by the time the
+        // prompt is answered — so say the layer is ready and let them draw.
+        if (offerRasterize(np.edit_refusal())) message("Rasterized. Draw again to paint on it.");
         return;
       }
       if (tool === "eyedropper" || alt) syncSwatches();
@@ -4728,11 +4814,11 @@ function bindKeyboard() {
         // them). With nothing selected there are no pixels it could mean,
         // so it deletes the layer — which is what the key does in the
         // layers panel of every editor.
-        act(() => {
-          if (e.altKey) np.fill_selection();
-          else if (hasSelection()) np.clear_selection();
-          else np.remove_selected_layers();
-        });
+        // Deleting the layer is not a pixel edit, so only the two that are
+        // go through the guard.
+        if (e.altKey) actPixels(() => np.fill_selection());
+        else if (hasSelection()) actPixels(() => np.clear_selection());
+        else act(() => np.remove_selected_layers());
         e.preventDefault();
         return;
       case "ArrowLeft":
@@ -4809,9 +4895,8 @@ function nudge(key, step, pixels) {
   const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
   act(() => {
     if (pixels) {
-      if (!np.nudge_layer(dx, dy)) {
-        const why = np.edit_refusal();
-        if (why) message(why.charAt(0).toUpperCase() + why.slice(1) + ".");
+      if (!np.nudge_layer(dx, dy) && offerRasterize(np.edit_refusal())) {
+        np.nudge_layer(dx, dy);
       }
     } else if (!np.nudge_selection(dx, dy)) {
       message("Select something to move its outline, or use the move tool to move pixels.");
@@ -4886,8 +4971,10 @@ function handleShortcut(key, shift, alt) {
       return true;
     case "g":
       // Ctrl+G folds the layer into a group where it is; Ctrl+Shift+G
-      // takes the group apart again, as everywhere else.
-      act(() => (shift ? np.ungroup(active()) : np.group_selected_layers()));
+      // takes the group apart again, as everywhere else. Ctrl+Alt+G is
+      // Photoshop's clipping mask, which is a different kind of nesting.
+      if (alt) toggleClipping(active());
+      else act(() => (shift ? np.ungroup(active()) : np.group_selected_layers()));
       return true;
     case "i":
       if (alt) showImageSizeDialog();
@@ -4898,7 +4985,7 @@ function handleShortcut(key, shift, alt) {
       adjust.open(shift ? "desaturate" : "hue-saturation");
       return true;
     case "l":
-      if (shift) act(() => np.auto_levels(!alt));
+      if (shift) actPixels(() => np.auto_levels(!alt));
       else adjust.open("levels");
       return true;
     case "m":
@@ -4944,7 +5031,7 @@ function handleShortcut(key, shift, alt) {
       nudge(key, shift ? 10 : 1, true);
       return true;
     case "Backspace":
-      act(() => (alt ? np.fill_selection() : np.fill_selection_background()));
+      actPixels(() => (alt ? np.fill_selection() : np.fill_selection_background()));
       return true;
     default:
       return false;

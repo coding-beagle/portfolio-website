@@ -282,6 +282,17 @@ export class NPaint {
         return v1;
     }
     /**
+     * Whether clipping this layer to the one below would show — false at
+     * the bottom of a group, and over an adjustment layer, which has no
+     * alpha to clip to.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    can_clip_layer(index) {
+        const ret = wasm.npaint_can_clip_layer(this.__wbg_ptr, index);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     can_redo() {
@@ -537,6 +548,25 @@ export class NPaint {
         let deferred1_1;
         try {
             const ret = wasm.npaint_edit_refusal(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The reason behind [`NPaint::edit_refusal`] as a stable name —
+     * "smart", "text", "adjustment", "group", "locked", "alpha" — or an
+     * empty string. The page offers to rasterize off this, not off the
+     * wording.
+     * @returns {string}
+     */
+    edit_refusal_kind() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_edit_refusal_kind(this.__wbg_ptr);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -929,6 +959,28 @@ export class NPaint {
         }
     }
     /**
+     * The layer this one is clipped to, or -1 when it is not clipped or
+     * the flag has nothing to act on. The panel marks the run off by it.
+     * @param {number} index
+     * @returns {number}
+     */
+    layer_clip_base(index) {
+        const ret = wasm.npaint_layer_clip_base(this.__wbg_ptr, index);
+        return ret;
+    }
+    /**
+     * Whether a layer is clipped to the one below it.
+     * @param {number} index
+     * @returns {boolean}
+     */
+    layer_clipped(index) {
+        const ret = wasm.npaint_layer_clipped(this.__wbg_ptr, index);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Whether a group's contents are folded away in the panel.
      * @param {number} index
      * @returns {boolean}
@@ -1152,6 +1204,41 @@ export class NPaint {
         var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
         return v1;
+    }
+    /**
+     * Why editing the active layer's pixels would be refused whatever the
+     * tool is, or an empty string — what a menu command asks before it
+     * changes pixels, since `edit_refusal` answers only for the tool in
+     * hand and says nothing while a marquee is active.
+     * @returns {string}
+     */
+    layer_refusal() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_layer_refusal(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * [`NPaint::layer_refusal`] as a stable name, or an empty string.
+     * @returns {string}
+     */
+    layer_refusal_kind() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.npaint_layer_refusal_kind(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * Whether the panel has this row picked out. The active layer always
@@ -1605,6 +1692,16 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * Whether rasterizing the active layer is what would let the refused
+     * edit through — true for a smart object or a text layer, false for a
+     * lock, a group or an adjustment layer, which rasterizing cannot help.
+     * @returns {boolean}
+     */
+    rasterizing_would_help() {
+        const ret = wasm.npaint_rasterizing_would_help(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * @returns {boolean}
@@ -2143,6 +2240,16 @@ export class NPaint {
         const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.npaint_set_layer_blend(this.__wbg_ptr, index, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} index
+     * @param {boolean} clipped
+     */
+    set_layer_clipped(index, clipped) {
+        const ret = wasm.npaint_set_layer_clipped(this.__wbg_ptr, index, clipped);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }

@@ -4,7 +4,7 @@
 //! This is a *reader*, not an implementation of the format. What it takes
 //! is the part everyone's files are made of: an 8-bit RGB or greyscale
 //! document, its layers with their names, positions, opacity, blend mode,
-//! visibility and layer masks, stored raw or run-length encoded. What it
+//! visibility, clipping and layer masks, stored raw or run-length encoded. What it
 //! does not take, it says so about rather than guessing.
 //!
 //! **The fallback is the point.** Almost every `.psd` in the world carries a
@@ -27,15 +27,12 @@
 //!   flattened. (The page *could* hand back an inflated copy — it has
 //!   `DecompressionStream` — which is the obvious way to lift this if it
 //!   turns out to matter.)
-//! * **Layer effects and clipping masks.** A group's *knockout* and
-//!   *blend interior* settings are not read either; a group comes in
-//!   pass-through or in whatever blend mode it was set to, which is the
+//! * **A group's *knockout* and *blend interior* settings.** A group comes
+//!   in pass-through or in whatever blend mode it was set to, which is the
 //!   part that shows.
 //! * **Layer effects, adjustment layers, text as text, vector shapes and
 //!   smart objects**, which arrive as the pixels Photoshop last rendered
 //!   for them — which is what the layer's channels hold anyway.
-//! * **Clipping masks**, since a layer clipped to the one below has no
-//!   equivalent here; such a layer comes in unclipped.
 
 use crate::blend::BlendMode;
 use crate::color::Rgba;
@@ -275,6 +272,8 @@ struct Record {
     blend: BlendMode,
     unknown_blend: bool,
     opacity: f32,
+    /// Photoshop's "clipping" byte: the layer is clipped to the one below.
+    clipped: bool,
     visible: bool,
     name: String,
     /// Which end of a folder this record is, when it is one. Either way it
@@ -321,7 +320,7 @@ fn read_record(r: &mut Reader) -> Result<Record, PsdError> {
     let key: [u8; 4] = r.take(4)?.try_into().expect("four bytes");
     let (blend, unknown_blend) = blend_of(&key);
     let opacity = f32::from(r.u8()?) / 255.0;
-    let _clipping = r.u8()?;
+    let clipped = r.u8()? != 0;
     let flags = r.u8()?;
     r.skip(1)?; // filler
 
@@ -365,6 +364,7 @@ fn read_record(r: &mut Reader) -> Result<Record, PsdError> {
         blend,
         unknown_blend,
         opacity,
+        clipped,
         // Bit 1 is "hidden", so the sense is the other way about.
         visible: flags & 0x02 == 0,
         name,
@@ -500,6 +500,7 @@ fn build_layer(record: &Record, planes: &[(i16, Vec<u8>)], width: u32, height: u
     layer.visible = record.visible;
     layer.blend = record.blend;
     layer.set_opacity(record.opacity);
+    layer.clipped = record.clipped;
     if let (Some(info), Some(bytes)) = (record.mask.as_ref(), plane(-2)) {
         layer.mask = Some(mask_raster(info, bytes, width, height));
         layer.mask_enabled = true;
@@ -516,6 +517,7 @@ fn build_group(record: &Record, id: LayerId, width: u32, height: u32, mask: Opti
     group.visible = record.visible;
     group.blend = record.blend;
     group.set_opacity(record.opacity);
+    group.clipped = record.clipped;
     if let (Some(info), Some(bytes)) = (record.mask.as_ref(), mask) {
         group.mask = Some(mask_raster(info, bytes, width, height));
         group.mask_enabled = true;
@@ -810,6 +812,7 @@ mod tests {
         channels: Vec<(i16, Vec<u8>)>,
         blend: [u8; 4],
         opacity: u8,
+        clipping: u8,
         flags: u8,
         name: String,
         unicode_name: Option<String>,
@@ -828,6 +831,7 @@ mod tests {
                 channels: Vec::new(),
                 blend: *b"norm",
                 opacity: 255,
+                clipping: 0,
                 flags: 0,
                 name: name.to_owned(),
                 unicode_name: None,
@@ -902,7 +906,7 @@ mod tests {
             out.extend_from_slice(BIM);
             out.extend_from_slice(&self.blend);
             out.push(self.opacity);
-            out.push(0); // clipping
+            out.push(self.clipping);
             out.push(self.flags);
             out.push(0); // filler
 
@@ -1051,6 +1055,20 @@ mod tests {
         assert_eq!(top.raster.get(3, 3), Rgba::opaque(0, 0, 255));
         assert_eq!(top.raster.get(0, 0), Rgba::TRANSPARENT);
         assert_eq!(top.raster.get(7, 7), Rgba::TRANSPARENT);
+        assert_eq!(import.note, None, "nothing had to be approximated");
+    }
+
+    #[test]
+    fn a_clipped_layer_comes_in_clipped_to_the_one_below() {
+        let mut b = Builder::new(8, 8);
+        b.layers.push(TestLayer::new((0, 0, 8, 8), "Base").solid((255, 0, 0), 255));
+        let mut over = TestLayer::new((0, 0, 8, 8), "Over").solid((0, 0, 255), 255);
+        over.clipping = 1;
+        b.layers.push(over);
+        let import = load(&b.build()).unwrap();
+        assert!(!layer_named(&import, "Base").clipped);
+        assert!(layer_named(&import, "Over").clipped);
+        assert_eq!(import.document.clip_base(1), Some(0));
         assert_eq!(import.note, None, "nothing had to be approximated");
     }
 

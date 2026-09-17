@@ -33,6 +33,23 @@
 //! one are, skips the buffer: the children draw straight onto what is
 //! below the group, so an adjustment layer inside a group reaches the rest
 //! of the picture exactly as it would outside one.
+//!
+//! # Clipping masks
+//!
+//! A layer with [`Layer::clipped`] set draws only where the layer under it
+//! already has something. The run of clipped layers above a sibling and
+//! that sibling — the **base** — make one clipping group: the clipped
+//! layers are composited onto the base's own picture, the result is held to
+//! the base's alpha, and the base's opacity and blend mode then carry the
+//! whole thing onto the backdrop. That last part is why it is the base's
+//! row that the panel shows the opacity of a clipped layer next to: a
+//! clipped layer cannot reach the backdrop on its own terms at all.
+//!
+//! An adjustment layer has no alpha of its own, so nothing clips to one,
+//! and the bottom sibling in a stack has nothing below it to clip to; in
+//! both cases the flag simply does nothing. [`Document::clip_base`] is the
+//! same question for the page, which greys the command out rather than
+//! offering a flag that would not show.
 
 use crate::adjust::Adjustment;
 use crate::color::Rgba;
@@ -74,6 +91,8 @@ pub enum DocumentError {
     /// A group cannot be dropped inside itself or inside one of its own
     /// children.
     CannotNest,
+    /// There is nothing under the layer for it to be clipped to.
+    CannotClip,
 }
 
 impl std::fmt::Display for DocumentError {
@@ -87,6 +106,7 @@ impl std::fmt::Display for DocumentError {
             DocumentError::NoMask => "this layer has no mask",
             DocumentError::WrongKind => "this kind of layer cannot do that",
             DocumentError::CannotNest => "a group cannot go inside itself",
+            DocumentError::CannotClip => "there is nothing below this layer to clip it to",
         })
     }
 }
@@ -271,6 +291,10 @@ impl Document {
     /// Where the top-level item containing `index` begins. The composite can
     /// only be split at one of these: everything below is a whole number of
     /// top-level subtrees, which is what [`Document::composite_below`] needs.
+    ///
+    /// A clipping group is indivisible too — the clipped layers are drawn
+    /// with their base, so a cut between them would leave neither side a
+    /// picture — and the point walks down past the base to keep it whole.
     pub fn split_point(&self, index: usize) -> usize {
         let mut at = index;
         while let Some(parent) = self.parent_index(at) {
@@ -279,7 +303,53 @@ impl Document {
                 break;
             }
         }
-        self.subtree(at).start
+        let mut start = self.subtree(at).start;
+        while start > 0 && self.layers[at].clips_below() {
+            at = start - 1;
+            start = self.subtree(at).start;
+        }
+        start
+    }
+
+    /// The layer `index` would clip to: the first sibling below it that is
+    /// not itself clipped, and that has pixels to be clipped to. `None`
+    /// when the layer is the bottom of its group or sits over an adjustment
+    /// layer, which has no alpha of its own. Says nothing about whether
+    /// `index` is clipped — see [`Document::clip_base`].
+    fn base_below(&self, index: usize) -> Option<usize> {
+        let parent = self.layers.get(index)?.parent;
+        let mut start = self.subtree(index).start;
+        // An adjustment layer ends the run without being a base itself, and
+        // then the lowest clipped layer above it is what the rest clip to —
+        // which is what the compositor makes of the same stack.
+        let mut lowest_clipped = None;
+        while start > 0 {
+            // The row just under the item, which for a group is the group's
+            // own row rather than its bottom child.
+            let item = start - 1;
+            let below = &self.layers[item];
+            if below.parent != parent || below.is_adjustment() {
+                break;
+            }
+            if !below.clipped {
+                return Some(item);
+            }
+            lowest_clipped = Some(item);
+            start = self.subtree(item).start;
+        }
+        lowest_clipped
+    }
+
+    /// The layer `index` is clipped to, or `None` if it is not clipped or
+    /// the flag has nothing to act on.
+    pub fn clip_base(&self, index: usize) -> Option<usize> {
+        self.layers.get(index)?.clips_below().then(|| self.base_below(index)).flatten()
+    }
+
+    /// Whether clipping `index` to what is below it would do anything —
+    /// what the page greys the command out on.
+    pub fn can_clip(&self, index: usize) -> bool {
+        self.layers.get(index).is_some_and(|l| !l.is_adjustment()) && self.base_below(index).is_some()
     }
 
     /// The indices of the layers directly inside `parent`, bottom-first.
@@ -1209,26 +1279,125 @@ impl Document {
         self.composite_range(index..self.layers.len(), None, out, clip);
     }
 
-    /// Composites the layers inside `parent` that lie in `range`, bottom to
-    /// top. A group among them is drawn by its contents, which are the run
-    /// of layers between the previous sibling and the group's own row.
-    fn composite_range(&self, range: Range<usize>, parent: Option<LayerId>, out: &mut Raster, clip: &Rect) {
-        // Where the current item's contents start: just past whatever the
-        // last sibling took.
+    /// The siblings directly inside `parent` that lie in `range`,
+    /// bottom-first, each with the run of layers its contents occupy — for
+    /// a group, its children; for anything else, empty.
+    fn siblings_in(&self, range: Range<usize>, parent: Option<LayerId>) -> Vec<(usize, Range<usize>)> {
+        // An item's contents start just past whatever the last sibling took.
         let mut cursor = range.start;
+        let mut siblings = Vec::new();
         for i in range {
-            let layer = &self.layers[i];
-            if layer.parent != parent {
+            if self.layers[i].parent != parent {
                 continue;
             }
-            if layer.visible {
-                if layer.is_group() {
-                    self.composite_group(layer, cursor..i, out, clip);
-                } else {
-                    Self::blend_layer(out, layer, clip);
-                }
-            }
+            siblings.push((i, cursor..i));
             cursor = i + 1;
+        }
+        siblings
+    }
+
+    /// Composites the layers inside `parent` that lie in `range`, bottom to
+    /// top. A group among them is drawn by its contents, which are the run
+    /// of layers between the previous sibling and the group's own row, and
+    /// a sibling with clipped layers above it is drawn together with them.
+    fn composite_range(&self, range: Range<usize>, parent: Option<LayerId>, out: &mut Raster, clip: &Rect) {
+        let siblings = self.siblings_in(range, parent);
+        let mut at = 0;
+        while at < siblings.len() {
+            let end = at + 1 + self.clipped_above(&siblings, at);
+            if end > at + 1 {
+                self.composite_clipped(&siblings[at..end], out, clip);
+            } else {
+                self.draw_item(&siblings[at], out, clip);
+            }
+            at = end;
+        }
+    }
+
+    /// How many of the siblings above `at` are clipped to it. An adjustment
+    /// layer has no pixels for anything to be clipped to, so it never takes
+    /// any.
+    fn clipped_above(&self, siblings: &[(usize, Range<usize>)], at: usize) -> usize {
+        if self.layers[siblings[at].0].is_adjustment() {
+            return 0;
+        }
+        siblings[at + 1..].iter().take_while(|&&(i, _)| self.layers[i].clips_below()).count()
+    }
+
+    /// One sibling on its own terms: a group by its contents, anything else
+    /// by its pixels.
+    fn draw_item(&self, (index, contents): &(usize, Range<usize>), out: &mut Raster, clip: &Rect) {
+        let layer = &self.layers[*index];
+        if !layer.visible {
+            return;
+        }
+        if layer.is_group() {
+            self.composite_group(layer, contents.clone(), out, clip);
+        } else {
+            Self::blend_layer(out, layer, clip);
+        }
+    }
+
+    /// A clipping group: `siblings[0]` is the base and the rest are clipped
+    /// to it.
+    ///
+    /// The clipped layers draw onto the base's own picture, so a Multiply
+    /// among them multiplies with the base and not with the backdrop, and
+    /// the result is then held to the base's alpha — nothing of theirs
+    /// shows where the base is transparent. The base's opacity and blend
+    /// mode carry the finished group onto the backdrop, which is why they
+    /// are applied here rather than while it is drawn.
+    ///
+    /// A hidden base takes the whole group with it: the clipped layers have
+    /// nothing left to clip to.
+    fn composite_clipped(&self, siblings: &[(usize, Range<usize>)], out: &mut Raster, clip: &Rect) {
+        let base = &self.layers[siblings[0].0];
+        let area = clip.intersect(&self.bounds());
+        if !base.visible || base.opacity <= 0.0 || area.is_empty() {
+            return;
+        }
+        let mut inner = Raster::new(self.width, self.height);
+        self.draw_clip_base(&siblings[0], &mut inner, &area);
+        let covered: Vec<u8> = Self::alpha_in(&inner, &area);
+        for item in &siblings[1..] {
+            self.draw_item(item, &mut inner, &area);
+        }
+        let width = area.w as usize;
+        inner.map_at(&area, |p, x, y| {
+            let limit = covered[(y - area.y) as usize * width + (x - area.x) as usize];
+            if p.a <= limit {
+                p
+            } else {
+                Rgba { a: limit, ..p }
+            }
+        });
+        Self::blend_raster(out, &inner, base.opacity, base.blend, None, &area);
+    }
+
+    /// The alpha channel of `raster` inside `area`, row-major.
+    fn alpha_in(raster: &Raster, area: &Rect) -> Vec<u8> {
+        let mut out = Vec::with_capacity(area.area() as usize);
+        for y in area.y..area.y + area.h {
+            for x in area.x..area.x + area.w {
+                out.push(raster.get(x, y).a);
+            }
+        }
+        out
+    }
+
+    /// The base of a clipping group on a transparent buffer of its own:
+    /// through its mask, which is part of what the group is clipped to, but
+    /// not through its opacity or blend mode, which belong to the finished
+    /// group.
+    fn draw_clip_base(&self, (index, contents): &(usize, Range<usize>), inner: &mut Raster, clip: &Rect) {
+        let base = &self.layers[*index];
+        if !base.is_group() {
+            Self::blend_raster(inner, &base.raster, 1.0, BlendMode::Normal, base.render_mask(), clip);
+            return;
+        }
+        self.composite_range(contents.clone(), Some(base.id()), inner, clip);
+        if let Some(mask) = base.render_mask() {
+            inner.map_at(clip, |p, x, y| p.scaled_alpha(f32::from(mask_cover(mask.get(x, y))) / 255.0));
         }
     }
 
@@ -1322,6 +1491,7 @@ mod tests {
     use crate::adjust::Kind;
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
+    const BLUE: Rgba = Rgba::opaque(0, 0, 255);
 
     fn names(doc: &Document) -> Vec<&str> {
         doc.layers().iter().map(|l| l.name.as_str()).collect()
@@ -2175,6 +2345,102 @@ mod tests {
         doc.merge_down(1).unwrap();
         assert_eq!(doc.composite().get(0, 0), Rgba::WHITE);
     }
+
+    // ---- Clipping masks ------------------------------------------------------
+
+    /// `Base` with red down the left half of a transparent canvas, and
+    /// `Over` covering the whole canvas in blue.
+    fn clipping_pair() -> Document {
+        let mut doc = Document::new(4, 2, Rgba::TRANSPARENT);
+        doc.layers[0].name = "Base".to_owned();
+        for y in 0..2 {
+            for x in 0..2 {
+                doc.layers[0].raster.set(x, y, RED);
+            }
+        }
+        let over = doc.add_layer();
+        doc.layers[over].name = "Over".to_owned();
+        doc.layers[over].raster = Raster::filled(4, 2, BLUE);
+        doc.layers[over].clipped = true;
+        doc
+    }
+
+    #[test]
+    fn a_clipped_layer_only_shows_where_its_base_does() {
+        let doc = clipping_pair();
+        let out = doc.composite();
+        assert_eq!(out.get(0, 0), BLUE, "over the base, the clipped layer covers it");
+        assert_eq!(out.get(3, 0), Rgba::TRANSPARENT, "past the base, nothing of it shows");
+        assert_eq!(doc.clip_base(1), Some(0));
+        assert!(!doc.can_clip(0), "the bottom layer has nothing under it");
+    }
+
+    /// The base carries the group: its opacity and blend mode apply to the
+    /// clipped layers too, which is why they are not applied while it draws.
+    #[test]
+    fn the_base_opacity_carries_the_whole_clipping_group() {
+        let mut doc = clipping_pair();
+        doc.layers[0].set_opacity(0.5);
+        let out = doc.composite();
+        assert_eq!(out.get(0, 0).a, 128, "half of the group, not a fully covered base");
+        assert_eq!(out.get(0, 0).b, 255, "and what shows is the clipped layer");
+    }
+
+    #[test]
+    fn a_hidden_or_masked_base_takes_the_clipped_layer_with_it() {
+        let mut doc = clipping_pair();
+        doc.layers[0].visible = false;
+        assert_eq!(doc.composite().get(0, 0), Rgba::TRANSPARENT, "nothing left to clip to");
+
+        doc.layers[0].visible = true;
+        // A mask that hides the left column: the group is clipped to what
+        // the base shows, not to the pixels behind its mask.
+        doc.add_mask(0, Some(Mask::from_rect(4, 2, Rect::new(1, 0, 3, 2))), false).unwrap();
+        let out = doc.composite();
+        assert_eq!(out.get(0, 0), Rgba::TRANSPARENT, "the base's mask clips the group too");
+        assert_eq!(out.get(1, 0), BLUE);
+    }
+
+    /// The run of clipped layers all clip to the same base, and the cut the
+    /// editing session makes in the stack never falls inside that run.
+    #[test]
+    fn a_run_of_clipped_layers_shares_one_base_and_is_never_split() {
+        let mut doc = clipping_pair();
+        let third = doc.add_layer();
+        doc.layers[third].raster = Raster::filled(4, 2, Rgba::opaque(0, 255, 0));
+        doc.layers[third].clipped = true;
+        assert_eq!(doc.clip_base(2), Some(0), "past the layer between, to the base");
+        let out = doc.composite();
+        assert_eq!(out.get(0, 0), Rgba::opaque(0, 255, 0));
+        assert_eq!(out.get(3, 0), Rgba::TRANSPARENT);
+        for i in 0..3 {
+            assert_eq!(doc.split_point(i), 0, "the group is drawn whole");
+        }
+    }
+
+    #[test]
+    fn nothing_clips_to_an_adjustment_layer() {
+        let mut doc = Document::new(4, 2, Rgba::WHITE);
+        doc.add_adjustment_layer(Adjustment::from_params("invert", &[]).unwrap(), None);
+        let over = doc.add_layer();
+        doc.layers[over].raster = Raster::filled(4, 2, BLUE);
+        doc.layers[over].clipped = true;
+        assert!(!doc.can_clip(over), "an adjustment layer has no alpha to clip to");
+        assert_eq!(doc.clip_base(over), None);
+        let out = doc.composite();
+        assert_eq!(out.get(0, 0), BLUE, "the flag does nothing, rather than hiding the layer");
+        assert!(!doc.can_clip(1), "and an adjustment layer is never clipped itself");
+    }
+
+    /// A group can be the base, and clipping is kept between siblings: a
+    /// layer at the bottom of a group does not reach out of it.
+    #[test]
+    fn clipping_does_not_reach_out_of_a_group() {
+        let doc = grouped();
+        assert_eq!(names(&doc), ["Background", "Inner", "Folder", "Top"]);
+        assert!(!doc.can_clip(1), "Inner is the bottom of Folder");
+        assert!(doc.can_clip(3), "Top sits over the whole folder");
+    }
 }
 
 #[cfg(test)]
@@ -2243,4 +2509,5 @@ mod text_tests {
         doc.rasterize_layer(index).unwrap();
         assert_eq!(doc.layer(index).unwrap().kind.name(), "pixels");
     }
+
 }

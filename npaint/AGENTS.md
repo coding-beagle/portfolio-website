@@ -119,7 +119,8 @@ npaint/
     layer.rs       Layer, LayerId, and what kind of layer it is: pixels, an
                    adjustment layer, a smart object, or a group; the layer
                    mask and which of the two rasters the tools edit; the two
-                   locks; which group the layer is in (`parent`)
+                   locks; which group the layer is in (`parent`) and whether
+                   it is clipped to the one below (`clipped`)
     palette.rs     a set of colours, and a picture conformed to it: the
                    nearest colour, with the error hidden by a dither, and
                    the distinct colours a picture is made of (a median cut)
@@ -127,8 +128,9 @@ npaint/
                    feather, smooth, antialias, contours (the marching ants),
                    and `from_polygon`, which is what the lasso draws with
     psd.rs         reading Photoshop's `.psd` — see "Photoshop files"
-    document.rs    the layer stack; add/remove/move/merge/composite, and
-                   the grouping the flat list carries — see "Layer groups"
+    document.rs    the layer stack; add/remove/move/merge/composite, the
+                   grouping the flat list carries — see "Layer groups" — and
+                   the clipping groups it carries the same way
     selection.rs   what painting may touch: nothing, a rect, or a Mask
     text.rs        what a text layer remembers: the text, its style (font,
                    size, bold, italic, alignment), colour, and where the
@@ -240,9 +242,12 @@ relationship between layers — the same change has three more parts:
 2. **It says so when it cannot.** An approximation gets a sentence on
    `Import::note`, which the page puts in the status bar. Never guess
    silently.
-3. **`src/file.rs` carries it both ways**, with a bumped `VERSION` and a
-   line in the version history, so that a document opened from a `.psd` and
-   saved as NPaint's own file keeps what it arrived with.
+3. **`src/file.rs` carries it both ways**, so that a document opened from a
+   `.psd` and saved as NPaint's own file keeps what it arrived with. A flag
+   or a number goes in the layer record's trailing skip block, which costs
+   no version bump and leaves older builds able to open the file; anything
+   that changes what the existing bytes *mean* bumps `VERSION` and gets a
+   line in the version history.
 
 The regression cover that travels is `psd.rs`'s own tests, which build the
 files they read — `a_folder_comes_in_as_a_group_with_its_layers_inside_it`
@@ -254,7 +259,8 @@ checkout is green without them.
 
 Layer groups are the worked example: [`LayerKind::Group`] and
 [`Layer::parent`], `psd.rs` building them from the section dividers, and
-format 5 writing them.
+format 5 writing them. Clipping masks are the short one: [`Layer::clipped`],
+Photoshop's clipping byte, and the skip block.
 
 Coordinates: the engine's pointer entry points take **screen** coordinates
 (CSS pixels relative to the canvas) and map them through the viewport itself.
@@ -1293,6 +1299,47 @@ an active layer, because the tools have to have something to paint on, so
 painting goes on working; that is the one place this differs from
 Photoshop, where a brush with no layer selected refuses.
 
+## Clipping masks
+
+A layer with [`Layer::clipped`] set draws only where the layer under it
+already has something — Photoshop's Ctrl+Alt+G, and how a colour wash or a
+texture is kept to one shape without a mask being painted.
+
+Like grouping, this rides on the flat list: the run of clipped layers over a
+sibling and that sibling — the **base** — make one *clipping group*, and
+`composite_range` recognises it in the same pass that recognises a folder.
+
+```text
+  index 3   Texture   clipped    ─┐  all clipped to Shape
+  index 2   Colour    clipped    ─┤
+  index 1   Shape                ─┘  the base
+  index 0   Background
+```
+
+`composite_clipped` draws it: the base goes onto a buffer of its own through
+its mask, the clipped layers composite on top of *that*, the result is held
+to the base's alpha, and the base's opacity and blend mode then carry the
+whole thing onto the backdrop. Three consequences worth knowing:
+
+* A Multiply among the clipped layers multiplies with the base, not with the
+  document under it.
+* A hidden base takes the group with it — there is nothing left to clip to —
+  and so does the base's own mask.
+* A clipped layer's opacity and blend mode still apply *inside* the group,
+  but it is the base's that reach the backdrop.
+
+`Document::clip_base(i)` is what a layer is actually clipped to and
+`can_clip(i)` whether setting the flag would show at all; the panel greys
+the command out and marks the row off these rather than off the flag, since
+a flag can be left over after a reorder. Nothing clips to an adjustment
+layer, which has no alpha of its own, and nothing clips out of its group: a
+layer at the bottom of a folder has no base.
+
+The buffer means a clipping group cannot be cut in half, so
+`split_point` walks down past the base as well as out of a group — otherwise
+a stroke on a clipped layer would composite against a cached backdrop that
+already had the group drawn into it.
+
 ## Masks, adjustment layers and smart objects
 
 Every layer is one struct with a `kind`, and the tools do not know which:
@@ -1344,6 +1391,43 @@ The layers panel shows the mask beside the pixels with the target outlined;
 click either to switch, Shift-click the mask to disable it, Ctrl-click it to
 load it as a selection. Adjustment layers open their dialog on double-click,
 on the mark or on the name.
+
+## When a layer will not take an edit
+
+[`Layer::edit_refusal`] says why a layer's pixels cannot be changed —
+it is a smart object, a text layer, an adjustment layer, a group, or locked.
+It is asked at **two levels**, and picking the wrong one is the mistake to
+avoid:
+
+* [`Editor::edit_refusal`] answers *for the tool in hand*, and so says
+  nothing when the tool paints nothing. A marquee over a smart object is not
+  a refusal; it is a selection. The pointer path and the move/nudge path use
+  this one, because whether a move is refused depends on the tool (a smart
+  object moves by its placement, so the move tool is never turned away).
+* [`Editor::layer_refusal`] answers *for the layer alone*. A menu command
+  that is about to change pixels — fill, clear, cut, an adjustment, a
+  filter — has no tool to ask about, so it uses this. Asking the tool-aware
+  one there is how a command ends up reporting the wrong reason, or none.
+
+Both cross to the page twice over: as prose (`edit_refusal`,
+`layer_refusal`) and as a stable slug (`edit_refusal_kind`,
+`layer_refusal_kind`) in the same vocabulary as `LayerKind::name` —
+`"smart"`, `"text"`, `"adjustment"`, `"group"`, `"locked"`, `"alpha"`. The
+page keys behaviour off the slug and never off the wording, which is prose
+and free to change.
+
+A refusal the user can do something about is offered the fix rather than
+merely reported. `EditRefusal::fixed_by_rasterizing` — a smart object or a
+text layer, whose pixels are rendered from a source the tools cannot reach —
+is what `rasterizing_would_help` crosses on, and `offerRasterize` in
+`app.js` puts the question to the user and rasterizes on a yes. `actPixels`
+is `act` for a command that changes pixels: it clears the way first, so
+accepting the prompt runs the command that was refused. The one path that
+does not retry is painting — the gesture is over by the time the prompt is
+answered, so the layer is rasterized and the user draws again.
+
+Rasterizing is an ordinary undo step (`Rasterize Layer`), so accepting the
+prompt and then pressing Ctrl+Z twice puts the smart object back.
 
 ## Conventions
 

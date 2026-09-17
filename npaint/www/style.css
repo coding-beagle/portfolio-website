@@ -623,6 +623,22 @@ button.opt {
   align-items: center;
   gap: 4px;
 }
+/* A clipping mask: the arrow points at the layer the clip is to, and the
+   row shifts right so the run reads as belonging to the layer under it. */
+.layer.clipped {
+  padding-left: calc(8px + var(--depth, 0) * 14px + 10px);
+}
+.layer .clip-mark {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  margin-left: -8px;
+}
+/* A flag with nothing under it to act on — after a reorder, or from a
+   `.psd` whose base did not come in — draws nothing, and says as much. */
+.layer .clip-mark.inert {
+  opacity: 0.4;
+}
 /* The mask sits beside the pixels with a link between; the one the tools
    are editing wears the accent. */
 .layer .thumb-wrap {

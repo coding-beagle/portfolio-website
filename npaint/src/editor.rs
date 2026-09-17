@@ -798,6 +798,15 @@ impl Editor {
         (self.tool.kind() == ToolKind::Move && layer.keeps_alpha()).then_some(EditRefusal::AlphaLocked)
     }
 
+    /// Why editing the active layer's pixels would be refused, whatever the
+    /// tool happens to be — what a menu command runs into, as against a
+    /// brush. [`Editor::edit_refusal`] answers for the tool in hand and so
+    /// says nothing while a marquee is active; a command that is about to
+    /// change pixels needs the layer's own answer.
+    pub fn layer_refusal(&self) -> Option<EditRefusal> {
+        self.document.active_layer().edit_refusal()
+    }
+
     /// Whether the active surface must keep its transparency through an
     /// edit, and so needs the before-picture kept.
     fn keeps_alpha(&self) -> bool {
@@ -1615,6 +1624,18 @@ impl Editor {
     pub fn set_layer_lock_alpha(&mut self, index: usize, locked: bool) -> Result<(), DocumentError> {
         self.structural(if locked { "Lock Transparency" } else { "Unlock Transparency" }, |d| {
             d.layer_mut(index).ok_or(DocumentError::NoSuchLayer)?.lock_alpha = locked;
+            Ok(())
+        })
+    }
+
+    /// Clips a layer to the one below, or releases it. Refused when there
+    /// is nothing under it to clip to — [`Document::can_clip`].
+    pub fn set_layer_clipped(&mut self, index: usize, clipped: bool) -> Result<(), DocumentError> {
+        if clipped && !self.document.can_clip(index) {
+            return Err(DocumentError::CannotClip);
+        }
+        self.structural(if clipped { "Create Clipping Mask" } else { "Release Clipping Mask" }, |d| {
+            d.layer_mut(index).ok_or(DocumentError::NoSuchLayer)?.clipped = clipped;
             Ok(())
         })
     }

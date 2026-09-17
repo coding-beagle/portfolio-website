@@ -573,7 +573,7 @@ function createToggleControl(p, value, onChange) {
  * Wires the adjustment dialog to the engine. Returns `open(name)`; the
  * parameterless adjustments apply straight away without a dialog.
  */
-export function createAdjustDialog(np, { onChange, onError }) {
+export function createAdjustDialog(np, { onChange, onError, mayEdit }) {
   const dlg = document.getElementById("dlg-adjust");
   const title = document.getElementById("adjust-title");
   const paramsRoot = document.getElementById("adjust-params");
@@ -704,6 +704,9 @@ export function createAdjustDialog(np, { onChange, onError }) {
   function open(name) {
     const found = ADJUSTMENTS.find((a) => a.name === name);
     if (!found) return;
+    // An adjustment is a pixel edit, so the layer has to be able to take one
+    // before a dialog goes up over a preview that could never be committed.
+    if (mayEdit && !mayEdit()) return;
     if (found.params.length === 0) {
       try {
         np.apply_adjustment(name);

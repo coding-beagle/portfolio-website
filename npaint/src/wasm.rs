@@ -785,6 +785,28 @@ impl NPaint {
         self.editor.set_layer_lock_alpha(index, locked).map_err(err)
     }
 
+    /// Whether a layer is clipped to the one below it.
+    pub fn layer_clipped(&self, index: usize) -> Result<bool, String> {
+        Ok(self.layer(index)?.clipped)
+    }
+
+    /// Whether clipping this layer to the one below would show — false at
+    /// the bottom of a group, and over an adjustment layer, which has no
+    /// alpha to clip to.
+    pub fn can_clip_layer(&self, index: usize) -> bool {
+        self.editor.document().can_clip(index)
+    }
+
+    /// The layer this one is clipped to, or -1 when it is not clipped or
+    /// the flag has nothing to act on. The panel marks the run off by it.
+    pub fn layer_clip_base(&self, index: usize) -> i32 {
+        self.editor.document().clip_base(index).map_or(-1, |i| i as i32)
+    }
+
+    pub fn set_layer_clipped(&mut self, index: usize, clipped: bool) -> Result<(), String> {
+        self.editor.set_layer_clipped(index, clipped).map_err(err)
+    }
+
     /// A small RGBA thumbnail of one layer's pixels, `w` by `h`,
     /// nearest-neighbour. Transparent for an adjustment layer, which has none.
     pub fn layer_thumbnail(&self, index: usize, w: u32, h: u32) -> Result<Vec<u8>, String> {
@@ -832,6 +854,34 @@ impl NPaint {
     /// canvas is declined.
     pub fn edit_refusal(&self) -> String {
         self.editor.edit_refusal().map(|why| why.to_string()).unwrap_or_default()
+    }
+
+    /// The reason behind [`NPaint::edit_refusal`] as a stable name —
+    /// "smart", "text", "adjustment", "group", "locked", "alpha" — or an
+    /// empty string. The page offers to rasterize off this, not off the
+    /// wording.
+    pub fn edit_refusal_kind(&self) -> String {
+        self.editor.edit_refusal().map(|why| why.slug().to_owned()).unwrap_or_default()
+    }
+
+    /// Why editing the active layer's pixels would be refused whatever the
+    /// tool is, or an empty string — what a menu command asks before it
+    /// changes pixels, since `edit_refusal` answers only for the tool in
+    /// hand and says nothing while a marquee is active.
+    pub fn layer_refusal(&self) -> String {
+        self.editor.layer_refusal().map(|why| why.to_string()).unwrap_or_default()
+    }
+
+    /// [`NPaint::layer_refusal`] as a stable name, or an empty string.
+    pub fn layer_refusal_kind(&self) -> String {
+        self.editor.layer_refusal().map(|why| why.slug().to_owned()).unwrap_or_default()
+    }
+
+    /// Whether rasterizing the active layer is what would let the refused
+    /// edit through — true for a smart object or a text layer, false for a
+    /// lock, a group or an adjustment layer, which rasterizing cannot help.
+    pub fn rasterizing_would_help(&self) -> bool {
+        self.editor.layer_refusal().is_some_and(|why| why.fixed_by_rasterizing())
     }
 
     fn layer(&self, index: usize) -> Result<&crate::layer::Layer, String> {
@@ -1864,6 +1914,19 @@ mod tests {
         np.set_layer_lock_alpha(0, true).unwrap();
         assert!(np.layer_lock_alpha(0).unwrap());
         np.set_layer_lock_alpha(0, false).unwrap();
+
+        // Clipping: the bottom layer has nothing to clip to, the one above
+        // it has, and the panel is told which layer that is.
+        assert!(!np.can_clip_layer(0));
+        assert!(np.set_layer_clipped(0, true).is_err());
+        let over = np.add_layer();
+        assert!(np.can_clip_layer(over));
+        np.set_layer_clipped(over, true).unwrap();
+        assert!(np.layer_clipped(over).unwrap());
+        assert_eq!(np.layer_clip_base(over), 0);
+        np.set_layer_clipped(over, false).unwrap();
+        assert_eq!(np.layer_clip_base(over), -1);
+        np.remove_layer(over).unwrap();
         assert!(np.is_modified());
         assert!(np.history_labels().len() >= 5);
         assert_eq!(np.history_position(), np.history_labels().len());
@@ -1979,7 +2042,17 @@ mod tests {
         assert!(np.place_smart_object("x", 3, 3, &red).is_err(), "bytes that do not match");
         np.set_tool("brush").unwrap();
         assert!(!np.edit_refusal().is_empty());
+        assert_eq!(np.edit_refusal_kind(), "smart");
+        assert!(np.rasterizing_would_help());
         assert!(!np.pointer_down(2.0, 2.0, false, false, 1.0));
+
+        // A marquee paints nothing, so the tool-aware answer goes quiet —
+        // but a menu command about to change pixels still has to be told.
+        np.set_tool("select").unwrap();
+        assert_eq!(np.edit_refusal_kind(), "", "no tool is asking to paint");
+        assert_eq!(np.layer_refusal_kind(), "smart", "the layer still refuses");
+        assert!(!np.layer_refusal().is_empty());
+        assert!(np.rasterizing_would_help());
         np.begin_transform().unwrap();
         assert!(np.transform_nudge(1.0, 0.0));
         assert!(np.commit_session());
@@ -1989,6 +2062,8 @@ mod tests {
         np.rasterize_layer(i).unwrap();
         assert_eq!(np.layer_kind(i).unwrap(), "pixels");
         assert_eq!(np.edit_refusal(), "");
+        assert_eq!(np.layer_refusal_kind(), "", "rasterizing is what cleared it");
+        assert!(!np.rasterizing_would_help());
         np.convert_to_smart_object(i).unwrap();
         assert_eq!(np.layer_kind(i).unwrap(), "smart");
     }
