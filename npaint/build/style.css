@@ -172,6 +172,46 @@ button.opt {
   accent-color: var(--accent);
   margin: 0;
 }
+.opt.wet {
+  gap: 10px;
+}
+.opt.wet label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tilt {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background:
+    linear-gradient(var(--border-soft), var(--border-soft)) center / 1px 100% no-repeat,
+    linear-gradient(var(--border-soft), var(--border-soft)) center / 100% 1px no-repeat;
+  cursor: crosshair;
+  touch-action: none;
+  flex: none;
+}
+.tilt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.tilt .bead {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  pointer-events: none;
+}
+.tilt.wet .bead {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
 .opt.axes {
   gap: 8px;
 }

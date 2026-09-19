@@ -83,6 +83,10 @@ npaint/
                    curves, colour balance, dither, ...) and the automatic
                    levels. An `Adjustment` is a `Kind` — what to do — and a
                    `Channel` — which of R, G, B to do it to, or all three
+    age.rs         Filter > Age: the picture as the years would leave it —
+                   faded, yellowed, browned at the edges, foxed, dusty and
+                   scratched — keyed to position like the noise, so it is an
+                   adjustment like any other. See "Age, rain and wet paint"
     checker.rs     finds a transparency checkerboard painted into a picture
                    (two colours, cell, phase, from the edges) and unmixes it
                    to real alpha — Image > Remove Checkerboard Background
@@ -138,6 +142,9 @@ npaint/
                    size, bold, italic, alignment), colour, and where the
                    block starts in the picture the page drew of it
     viewport.rs    zoom and pan, screen <-> document mapping
+    wet.rs         how wet each pixel of one layer still is: what the wet
+                   brush paints into, what dries every frame, and what runs
+                   downhill when the canvas is tilted. Not in the document
     history.rs     undo/redo as labelled before-snapshots: one surface of a
                    layer (pixels or mask), a whole layer, the whole stack, or
                    nothing; every step also carries an `Aside` (the selection
@@ -157,6 +164,11 @@ npaint/
       movetool.rs  move (translate the selection or the layer). What a
                    drag of the whole layer pushes off the canvas goes into
                    the layer's `Offscreen` store rather than being cut off
+      erode.rs     the erosion brush: rain that runs downhill by brightness,
+                   carrying colour and carving channels
+      wetbrush.rs  the wet brush: paint that stays wet, smears, and is taken
+                   up by the brush that crosses it — see "Age, rain and wet
+                   paint"
       stroke.rs    brush, pencil, eraser, clone stamp, healing brush (one
                    gesture, five stamps, a tip from brush.rs, and a hardness
                    the pencil ignores). The clone stamp is the one that reads pixels
@@ -665,6 +677,52 @@ alone. The ordered patterns perturb by `Palette::spread` — how far apart the
 palette's colours typically are — since a palette has no evenly spaced ladder
 for a threshold to be a step of, and the diffusion passes carry the error of
 the whole colour rather than of one channel.
+
+## Age, rain and wet paint
+
+Three things that are not in Photoshop, and what holds each of them to the
+rules above.
+
+**Age** (`src/age.rs`) is `adjust::Kind::Age { years, foxing, wear }`: a
+filter in the Filter menu, with the dialog, the preview, the undo step and
+the life as an adjustment layer every other one has. Everything it does is
+a function of the pixel's colour, its document position and the picture's
+size — the spots and scratches are placed once per call from a hash of the
+size, then looked up — so it keeps the filters' rule that the answer does
+not depend on the clip, and an Age adjustment layer sits still while the
+layers under it are painted. It saves through `file.rs` as name plus
+parameters like any adjustment, and exports to `.psd` baked, like any.
+
+**The erosion brush** (`src/tools/erode.rs`, `ToolKind::Erode`) reads
+brightness as height. Each dab drops a shower inside the brush; each drop
+runs to the lowest of its neighbours — level ground allowed for a few steps,
+uphill never — laying down some of the colour it carries, taking up some of
+what it crosses, and darkening what it actually falls across so the next
+drop finds the channel deeper. Rain (the opacity slider, relabelled) is how
+many drops. Where the drops fall is a hash of the dab and the drop, so a
+stroke is reproducible and testable. It is an ordinary `Tool`: one undo
+step per stroke, confined to the selection, cancel restores the layer.
+
+**The wet brush** (`src/tools/wetbrush.rs`, `ToolKind::WetBrush`) paints
+like the brush and marks what it paints wet in a `wet::WetPaint` map — one
+per layer, the last one used, held in `ToolSettings::wet` beside the clone
+anchor, because it is transient shared state and not part of the picture.
+Over wet paint a dab drags the paint along, takes some of it up into the
+brush (a blue brush through wet red comes out purple), and mixes rather
+than covers. Dabs compound within a stroke, deliberately.
+
+Time is the page's: every frame calls `NPaint::wet_tick(dt)`, which dries
+the map by `dt / dry_seconds` and, if `ToolSettings::tilt` is not flat,
+first runs every wet pixel a little towards the tilt (`WetPaint::flow`),
+marking what moved dirty so the ordinary render draws it. A run is one undo
+step for as long as it goes on — every tick pushes the coalescing key
+`wet-run`, and the first tick's snapshot is kept. Nothing runs while a
+gesture or a session is open: both hold a copy of the layer that paint
+moving underneath would make a lie of. The map is dropped by an undo, a new
+document, Dry Now, a layer that no longer exists or has changed size, and
+by drying out; `wet_tick` returns whether anything is still wet so the page
+can light the tilt pad. The map is never saved: wetness is a property of the
+afternoon, not of the file. Neither tool has a demo clip yet — see TODO.md.
 
 ## Select Subject
 

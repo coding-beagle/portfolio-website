@@ -555,6 +555,16 @@ export class NPaint {
         const ret = wasm.npaint_document_state(this.__wbg_ptr);
         return ret;
     }
+    dry_paint() {
+        wasm.npaint_dry_paint(this.__wbg_ptr);
+    }
+    /**
+     * @returns {number}
+     */
+    dry_seconds() {
+        const ret = wasm.npaint_dry_seconds(this.__wbg_ptr);
+        return ret;
+    }
     /**
      * @param {number} index
      * @returns {number}
@@ -973,6 +983,13 @@ export class NPaint {
      */
     is_transforming_selection() {
         const ret = wasm.npaint_is_transforming_selection(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_wet() {
+        const ret = wasm.npaint_is_wet(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -2265,6 +2282,12 @@ export class NPaint {
         }
     }
     /**
+     * @param {number} seconds
+     */
+    set_dry_seconds(seconds) {
+        wasm.npaint_set_dry_seconds(this.__wbg_ptr, seconds);
+    }
+    /**
      * @param {boolean} fill
      */
     set_fill(fill) {
@@ -2558,6 +2581,14 @@ export class NPaint {
      */
     set_text_size(size) {
         wasm.npaint_set_text_size(this.__wbg_ptr, size);
+    }
+    /**
+     * How far the canvas leans on each axis, `-1..=1`.
+     * @param {number} x
+     * @param {number} y
+     */
+    set_tilt(x, y) {
+        wasm.npaint_set_tilt(this.__wbg_ptr, x, y);
     }
     /**
      * @param {number} tolerance
@@ -2862,6 +2893,15 @@ export class NPaint {
         return ret;
     }
     /**
+     * @returns {Float32Array}
+     */
+    tilt() {
+        const ret = wasm.npaint_tilt(this.__wbg_ptr);
+        var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
      * Ctrl-clicking a row: adds it to the selection, or takes it out.
      * @param {number} index
      */
@@ -3039,6 +3079,16 @@ export class NPaint {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * `dt` seconds pass for the wet brush's paint; see
+     * [`Editor::wet_tick`]. Returns whether any is still wet.
+     * @param {number} dt
+     * @returns {boolean}
+     */
+    wet_tick(dt) {
+        const ret = wasm.npaint_wet_tick(this.__wbg_ptr, dt);
+        return ret !== 0;
     }
     /**
      * @returns {number}

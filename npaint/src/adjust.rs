@@ -15,6 +15,7 @@
 //! the plain rounding. See [`crate::dither`].
 
 use crate::color::Rgba;
+use crate::age;
 use crate::dither::{Dither, DitherMethod, MAX_LEVELS, MAX_SCALE, MIN_LEVELS};
 use crate::palette::Palette;
 use crate::filter;
@@ -125,6 +126,10 @@ pub enum Kind {
     /// `strength` and `scale` are the pattern's amount and cell size, as
     /// they are for a dither. See [`crate::palette`].
     Palette { method: Option<DitherMethod>, strength: f32, scale: f32, palette: Palette },
+    /// The picture as `years` (`0..=age::MAX_YEARS`) would leave it: faded,
+    /// yellowed and browned at the edges, with `foxing` and `wear` percent
+    /// of the spots, dust and scratches the years bring. See [`crate::age`].
+    Age { years: f32, foxing: f32, wear: f32 },
 }
 
 
@@ -175,6 +180,7 @@ impl Adjustment {
         "emboss",
         "find-edges",
         "palette",
+        "age",
     ];
 
     /// Builds an adjustment from its name and parameters.
@@ -356,6 +362,11 @@ impl Kind {
                 scale: p(2, 1.0).round().clamp(1.0, MAX_SCALE),
                 palette: Palette::from_flat(params.get(3..).unwrap_or_default()),
             },
+            "age" => Kind::Age {
+                years: p(0, 0.0).clamp(0.0, age::MAX_YEARS),
+                foxing: p(1, 50.0).clamp(0.0, 100.0),
+                wear: p(2, 50.0).clamp(0.0, 100.0),
+            },
             other => return Err(AdjustmentError(format!("unknown adjustment: {other}"))),
         })
     }
@@ -381,6 +392,7 @@ impl Kind {
             Kind::Emboss { .. } => "emboss",
             Kind::FindEdges { .. } => "find-edges",
             Kind::Palette { .. } => "palette",
+            Kind::Age { .. } => "age",
         }
     }
 
@@ -406,6 +418,7 @@ impl Kind {
             Kind::Emboss { .. } => "Emboss",
             Kind::FindEdges { .. } => "Find Edges",
             Kind::Palette { .. } => "Palette",
+            Kind::Age { .. } => "Age",
         }
     }
 
@@ -439,6 +452,7 @@ impl Kind {
                 params.extend(palette.to_flat());
                 params
             }
+            Kind::Age { years, foxing, wear } => vec![*years, *foxing, *wear],
         }
     }
 
@@ -477,6 +491,7 @@ impl Kind {
                     | Kind::Pixelate { .. }
                     | Kind::Emboss { .. }
                     | Kind::FindEdges { .. }
+                    | Kind::Age { .. }
             ),
         }
     }
@@ -500,6 +515,7 @@ impl Kind {
             Kind::Palette { method, strength, scale, palette } => {
                 palette.map(raster, clip, *method, strength / 100.0, *scale as i32)
             }
+            Kind::Age { years, foxing, wear } => age::age(raster, clip, *years, *foxing, *wear),
             _ => unreachable!("only a spatial adjustment asks for one"),
         }
     }
@@ -523,7 +539,8 @@ impl Kind {
             | Kind::MotionBlur { .. }
             | Kind::Pixelate { .. }
             | Kind::Emboss { .. }
-            | Kind::FindEdges { .. } => p,
+            | Kind::FindEdges { .. }
+            | Kind::Age { .. } => p,
             Kind::HueSaturation { hue, saturation, lightness } => {
                 let (h, s, l) = rgb_to_hsl(p);
                 let h = (h + hue).rem_euclid(360.0);

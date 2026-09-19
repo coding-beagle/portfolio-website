@@ -251,6 +251,11 @@ pub const MAX_SIDE: u32 = 16_384;
 pub const MAX_PIXELS: u64 = 40_000_000;
 
 /// Whether a canvas of this size is one the editor will make.
+/// The most time one wet-paint tick may stand for, in seconds.
+const MAX_WET_STEP: f64 = 0.1;
+/// The coalescing key that makes a run of wet paint one undo step.
+const WET_RUN_KEY: &str = "wet-run";
+
 pub fn canvas_fits(width: u32, height: u32) -> bool {
     width > 0
         && height > 0
@@ -418,6 +423,7 @@ impl Editor {
     fn replace_document(&mut self, document: Document) {
         self.cancel_session();
         self.abort_gesture();
+        self.settings.wet = None;
         self.document = document;
         self.selection = Selection::None;
         self.history.clear();
@@ -1310,6 +1316,9 @@ impl Editor {
         let mut aside = self.aside();
         let done = go(&mut self.history, &mut self.document, &mut aside);
         if done {
+            // Wet paint belongs to the picture as it was painted; put the
+            // picture back and it has dried.
+            self.settings.wet = None;
             self.selection = aside.selection;
             self.settings.guides.h = aside.guides_h;
             self.settings.guides.v = aside.guides_v;
@@ -1321,6 +1330,78 @@ impl Editor {
 
     pub fn undo(&mut self) -> bool {
         self.travel(|h, d, a| h.undo(d, a))
+    }
+
+    // ---- Wet paint ----------------------------------------------------------------
+
+    /// Time passes for the wet brush's paint: `dt` seconds of it. The paint
+    /// dries by that much of [`ToolSettings::dry_seconds`], and if the
+    /// canvas is tilted it runs downhill first. Returns whether any paint is
+    /// still wet, which is the page's cue to keep the clock going.
+    ///
+    /// Nothing runs while a gesture or a session is open: a stroke keeps
+    /// the layer as it was for cancel, and a dialog composites from a copy
+    /// of the layers under it, and paint moving under either would leave
+    /// them putting back or previewing a picture that is no longer there.
+    /// The paint goes on drying meanwhile.
+    ///
+    /// A run is one undo step for as long as it keeps running: every tick
+    /// pushes the same coalescing key, and the first tick's snapshot is the
+    /// one kept. Anything else recorded in between starts a fresh run.
+    pub fn wet_tick(&mut self, dt: f64) -> bool {
+        let Some(mut wet) = self.settings.wet.take() else { return false };
+        // A frame that took a long time — a tab in the background — dries
+        // a bounded amount, so paint does not vanish or fly off the canvas
+        // when the tab comes back.
+        let dt = if dt.is_finite() { dt.clamp(0.0, MAX_WET_STEP) as f32 } else { 0.0 };
+        let Some(index) = self.document.index_of(wet.layer()) else { return false };
+        let layer = &self.document.layers()[index];
+        if !wet.fits(layer.surface()) || layer.locked {
+            return false;
+        }
+        let (tx, ty) = self.settings.tilt;
+        let tilted = tx != 0.0 || ty != 0.0;
+        if tilted && self.gesture.is_none() && self.session.is_none() && layer.visible {
+            // The snapshot is a copy of the layer, and every tick after the
+            // first would only throw it away.
+            if !self.history.continues(WET_RUN_KEY) {
+                if let Some(snapshot) = Snapshot::of_layer(&self.document, index) {
+                    self.record_coalescing(snapshot, "Wet Paint Runs", WET_RUN_KEY);
+                }
+            }
+            let amount = crate::wet::FLOW_RATE * dt;
+            let selection = &self.selection;
+            let changed = self
+                .document
+                .layer_mut(index)
+                .and_then(|layer| wet.flow(layer.surface_mut(), (tx, ty), amount, |x, y| selection.cover(x, y)));
+            if let Some(changed) = changed {
+                self.touch(changed);
+            }
+        }
+        let still_wet = wet.dry(dt / self.settings.dry_seconds.max(crate::tools::MIN_DRY_SECONDS));
+        if still_wet {
+            self.settings.wet = Some(wet);
+        }
+        still_wet
+    }
+
+    /// Dries every pixel at once: Dry Now in the options bar.
+    pub fn dry_paint(&mut self) {
+        self.settings.wet = None;
+    }
+
+    /// Whether any of the wet brush's paint is still wet.
+    pub fn is_wet(&self) -> bool {
+        self.settings.wet.as_ref().is_some_and(|w| !w.is_dry())
+    }
+
+    /// Tilts the canvas: `x` and `y` in `-1.0..=1.0` are how far it leans
+    /// each way, and wet paint runs that way. Anything out of range is
+    /// held to it; anything that is not a number is flat.
+    pub fn set_tilt(&mut self, x: f64, y: f64) {
+        let held = |v: f64| if v.is_finite() { v.clamp(-1.0, 1.0) as f32 } else { 0.0 };
+        self.settings.tilt = (held(x), held(y));
     }
 
     pub fn redo(&mut self) -> bool {
@@ -5600,6 +5681,110 @@ mod tests {
         assert_eq!(e.history_labels(), vec!["Paint Bucket"]);
         assert!(e.undo());
         assert_eq!(px(&e, 4, 0), Rgba::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod wet_paint_tests {
+    use super::*;
+
+    const RED: Rgba = Rgba::opaque(255, 0, 0);
+
+    fn editor() -> Editor {
+        let mut e = Editor::new(32, 32, Rgba::WHITE);
+        e.settings_mut().color = RED;
+        e.settings_mut().size = 4;
+        e.set_tool(ToolKind::WetBrush);
+        e
+    }
+
+    fn px(e: &Editor, x: i32, y: i32) -> Rgba {
+        e.document().composite().get(x, y)
+    }
+
+    fn dab(e: &mut Editor, x: f64, y: f64) {
+        e.pointer_down(Point::new(x, y), false, false);
+        e.pointer_up(Point::new(x, y), false, false);
+    }
+
+    #[test]
+    fn a_wet_stroke_is_a_step_that_dries_with_time() {
+        let mut e = editor();
+        dab(&mut e, 16.0, 4.0);
+        assert_eq!(px(&e, 16, 4), RED);
+        assert!(e.is_wet());
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Wet Brush"));
+        e.settings_mut().dry_seconds = 2.0;
+        assert!(e.wet_tick(0.1));
+        assert!(e.is_wet(), "a tenth of a second is not two");
+        for _ in 0..25 {
+            e.wet_tick(0.1);
+        }
+        assert!(!e.is_wet(), "two and a half seconds is");
+        assert!(!e.wet_tick(0.1), "and a dry canvas has no clock to keep");
+        assert_eq!(px(&e, 16, 4), RED, "drying does not move the paint");
+    }
+
+    #[test]
+    fn tilting_the_canvas_runs_the_paint_as_one_undo_step() {
+        let mut e = editor();
+        e.settings_mut().dry_seconds = 100.0;
+        dab(&mut e, 16.0, 4.0);
+        let steps = e.history_labels().len();
+        // Flat: nothing runs.
+        for _ in 0..10 {
+            e.wet_tick(0.05);
+        }
+        assert_eq!(px(&e, 16, 12), Rgba::WHITE);
+        assert_eq!(e.history_labels().len(), steps);
+        // Tilted: the paint runs down, and the whole run is one step.
+        e.set_tilt(0.0, 1.0);
+        for _ in 0..60 {
+            assert!(e.wet_tick(0.05));
+        }
+        let below = px(&e, 16, 10);
+        assert!(below.r > below.g, "no paint ran down: {below}");
+        assert_eq!(px(&e, 16, 1), Rgba::WHITE, "and none ran up");
+        assert_eq!(e.history_labels().len(), steps + 1);
+        assert_eq!(e.history_labels().last().map(String::as_str), Some("Wet Paint Runs"));
+        assert!(e.take_dirty().is_some(), "the run is drawn");
+        // Undo puts the run back and dries the canvas.
+        assert!(e.undo());
+        assert_eq!(px(&e, 16, 10), Rgba::WHITE);
+        assert_eq!(px(&e, 16, 4), RED);
+        assert!(!e.is_wet());
+    }
+
+    #[test]
+    fn the_paint_does_not_run_under_an_open_gesture_and_dries_with_the_document() {
+        let mut e = editor();
+        e.settings_mut().dry_seconds = 100.0;
+        e.set_tilt(0.0, 1.0);
+        dab(&mut e, 16.0, 4.0);
+        e.pointer_down(Point::new(4.0, 20.0), false, false);
+        for _ in 0..20 {
+            e.wet_tick(0.05);
+        }
+        assert_eq!(px(&e, 16, 9), Rgba::WHITE, "ran while a stroke was open");
+        e.pointer_up(Point::new(4.0, 20.0), false, false);
+        e.new_document(8, 8, Rgba::WHITE);
+        assert!(!e.is_wet());
+        // Out-of-range tilts are held, and nonsense is flat.
+        e.set_tilt(5.0, f64::NAN);
+        assert_eq!(e.settings().tilt, (1.0, 0.0));
+    }
+
+    #[test]
+    fn dry_now_dries_and_a_locked_layer_does_not_run() {
+        let mut e = editor();
+        dab(&mut e, 16.0, 4.0);
+        e.dry_paint();
+        assert!(!e.is_wet());
+        dab(&mut e, 16.0, 4.0);
+        e.set_layer_locked(0, true).unwrap();
+        e.set_tilt(0.0, 1.0);
+        assert!(!e.wet_tick(0.05), "locked paint is dry paint");
+        assert_eq!(px(&e, 16, 8), Rgba::WHITE);
     }
 }
 

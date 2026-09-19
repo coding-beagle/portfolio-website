@@ -275,6 +275,18 @@ export const ADJUSTMENTS = [
     demo: { style: "wipe" },
   },
   {
+    name: "age",
+    hint: "Years pass: the tones fade and yellow, the edges brown, and foxing, dust and scratches gather.",
+    label: "Age…",
+    group: "filter",
+    params: [
+      { label: "Years", min: 0, max: 200, value: 60 },
+      { label: "Foxing", min: 0, max: 100, value: 50, unit: "%" },
+      { label: "Wear", min: 0, max: 100, value: 50, unit: "%" },
+    ],
+    demo: { param: "Years", from: 0, to: 170 },
+  },
+  {
     name: "desaturate",
     hint: "Drops the colour, keeping each pixel's brightness.",
     label: "Desaturate",

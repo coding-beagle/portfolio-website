@@ -195,6 +195,13 @@ impl History {
         self.push_keyed(snapshot, aside, label.into(), Some(key.into()));
     }
 
+    /// Whether the next [`History::push_coalescing`] under `key` would be
+    /// folded into the step already on top — so a caller whose snapshot is
+    /// expensive to take, and would only be dropped, can skip taking it.
+    pub fn continues(&self, key: &str) -> bool {
+        self.last_key.as_deref() == Some(key) && self.redo.is_empty()
+    }
+
     fn push_keyed(&mut self, snapshot: Snapshot, aside: Aside, label: String, key: Option<String>) {
         let continues_run = key.is_some() && key == self.last_key && self.redo.is_empty();
         self.last_key = key;

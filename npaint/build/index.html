@@ -88,6 +88,24 @@
           <input id="opt-opacity" type="range" min="1" max="100" value="100" />
           <output id="opt-opacity-out">100%</output>
         </label>
+        <div class="opt wet" id="opt-wet-wrap">
+          <label title="How long the paint stays wet">
+            <span>Drying</span>
+            <input id="opt-dry" type="range" min="1" max="120" value="10" />
+            <output id="opt-dry-out">10 s</output>
+          </label>
+          <div
+            id="opt-tilt"
+            class="tilt"
+            role="slider"
+            tabindex="0"
+            aria-label="Tilt"
+            title="Tilt the canvas: drag the bead and wet paint runs that way. Double-click to lay it flat."
+          >
+            <div class="bead"></div>
+          </div>
+          <button id="opt-dry-now" title="Dry every bit of wet paint at once">Dry now</button>
+        </div>
         <label class="opt" id="opt-tolerance-wrap" title="How far a colour may be from the one sampled and still count">
           <span>Tolerance</span>
           <input id="opt-tolerance" type="range" min="0" max="255" value="32" />

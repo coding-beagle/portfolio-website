@@ -26,7 +26,7 @@ use crate::palette::Palette;
 use crate::raster::Raster;
 use crate::transform::{Handle, Hit};
 use crate::text::TextAlign;
-use crate::tools::{Symmetry, SymmetryFrame, SymmetryHit, ToolKind, MAX_RADIAL};
+use crate::tools::{self, Symmetry, SymmetryFrame, SymmetryHit, ToolKind, MAX_RADIAL};
 
 #[wasm_bindgen]
 pub struct NPaint {
@@ -532,6 +532,41 @@ impl NPaint {
 
     pub fn clone_aligned(&self) -> bool {
         self.editor.settings().clone_aligned
+    }
+
+    // ---- Wet paint ----------------------------------------------------------------
+
+    /// `dt` seconds pass for the wet brush's paint; see
+    /// [`Editor::wet_tick`]. Returns whether any is still wet.
+    pub fn wet_tick(&mut self, dt: f64) -> bool {
+        self.editor.wet_tick(dt)
+    }
+
+    pub fn is_wet(&self) -> bool {
+        self.editor.is_wet()
+    }
+
+    pub fn dry_paint(&mut self) {
+        self.editor.dry_paint();
+    }
+
+    /// How far the canvas leans on each axis, `-1..=1`.
+    pub fn set_tilt(&mut self, x: f64, y: f64) {
+        self.editor.set_tilt(x, y);
+    }
+
+    pub fn tilt(&self) -> Vec<f32> {
+        let (x, y) = self.editor.settings().tilt;
+        vec![x, y]
+    }
+
+    pub fn set_dry_seconds(&mut self, seconds: f32) {
+        let held = if seconds.is_finite() { seconds } else { tools::DEFAULT_DRY_SECONDS };
+        self.editor.settings_mut().dry_seconds = held.clamp(tools::MIN_DRY_SECONDS, tools::MAX_DRY_SECONDS);
+    }
+
+    pub fn dry_seconds(&self) -> f32 {
+        self.editor.settings().dry_seconds
     }
 
     /// Where the clone stamp copies from, as `[x, y]` in document pixels,
@@ -1995,6 +2030,29 @@ mod tests {
         np.set_clone_aligned(false);
         assert!(!np.clone_aligned());
         assert!(np.clone_anchor().is_empty(), "nothing to clone from yet");
+    }
+
+    #[test]
+    fn the_wet_paint_settings_reach_the_page() {
+        let mut np = NPaint::new(16, 16, "#ffffff").unwrap();
+        assert_eq!(np.tilt(), vec![0.0, 0.0]);
+        np.set_tilt(0.5, -2.0);
+        assert_eq!(np.tilt(), vec![0.5, -1.0]);
+        np.set_dry_seconds(f32::NAN);
+        assert_eq!(np.dry_seconds(), tools::DEFAULT_DRY_SECONDS);
+        np.set_dry_seconds(0.0);
+        assert_eq!(np.dry_seconds(), tools::MIN_DRY_SECONDS);
+        assert!(!np.is_wet());
+        assert!(!np.wet_tick(0.1));
+        np.set_tool("wetbrush").unwrap();
+        np.set_color("#ff0000").unwrap();
+        np.pointer_down(8.0, 4.0, false, false, 1.0);
+        np.pointer_up(8.0, 4.0, false, false, 1.0);
+        assert!(np.is_wet());
+        np.dry_paint();
+        assert!(!np.is_wet());
+        np.set_tool("erode").unwrap();
+        assert_eq!(np.tool(), "erode");
     }
 
     #[test]

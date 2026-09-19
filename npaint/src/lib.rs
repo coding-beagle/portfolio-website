@@ -15,6 +15,7 @@
 //! about zoom.
 
 pub mod adjust;
+pub mod age;
 pub mod autoselect;
 pub mod blend;
 pub mod brush;
@@ -40,4 +41,5 @@ pub mod text;
 pub mod tools;
 pub mod transform;
 pub mod viewport;
+pub mod wet;
 pub mod wasm;

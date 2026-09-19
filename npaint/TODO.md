@@ -2,6 +2,10 @@ Sorted by priority (top = highest to bottom):
 
 # Features:
 
+Demo clips for the wet brush and the erosion brush. Both are gestures over
+time — the wet brush's point is what happens after the stroke — so both want
+a recorded clip the way the other tools have; see demos/README.md.
+
 Demos for layer masks and layer clipping. Both are gestures, so both want a recorded clip the way the tools do — see demos/README.md. (The filters and adjustments are done, and are not recordings: see adjusthelp.js.)
 
 Photo / Pixel Art / Vector mode split?

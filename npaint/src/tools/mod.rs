@@ -10,6 +10,7 @@
 //! going to edit the active layer and the editor snapshots it beforehand.
 
 mod bucket;
+mod erode;
 mod eyedropper;
 mod gradient;
 mod lasso;
@@ -21,8 +22,10 @@ mod subjectbox;
 mod text;
 mod view;
 mod wand;
+mod wetbrush;
 
 pub use bucket::BucketTool;
+pub use erode::ErodeTool;
 pub use eyedropper::{sample_color, EyedropperTool};
 pub use gradient::GradientTool;
 pub use lasso::LassoTool;
@@ -34,6 +37,7 @@ pub use subjectbox::SubjectBoxTool;
 pub use text::TextTool;
 pub use view::{HandTool, ZoomTool};
 pub use wand::{MagicWandTool, QuickSelectTool, RefineTool};
+pub use wetbrush::WetBrushTool;
 
 use crate::autoselect::SampleMode;
 use crate::brush::BrushTip;
@@ -62,6 +66,8 @@ pub enum ToolKind {
     Eraser,
     Clone,
     Heal,
+    WetBrush,
+    Erode,
     Bucket,
     Gradient,
     Eyedropper,
@@ -89,6 +95,8 @@ impl ToolKind {
         ToolKind::Eraser,
         ToolKind::Clone,
         ToolKind::Heal,
+        ToolKind::WetBrush,
+        ToolKind::Erode,
         ToolKind::Bucket,
         ToolKind::Gradient,
         ToolKind::Eyedropper,
@@ -116,6 +124,8 @@ impl ToolKind {
             ToolKind::Eraser => "eraser",
             ToolKind::Clone => "clone",
             ToolKind::Heal => "heal",
+            ToolKind::WetBrush => "wetbrush",
+            ToolKind::Erode => "erode",
             ToolKind::Bucket => "bucket",
             ToolKind::Gradient => "gradient",
             ToolKind::Eyedropper => "eyedropper",
@@ -142,6 +152,8 @@ impl ToolKind {
             ToolKind::Eraser => "Eraser",
             ToolKind::Clone => "Clone Stamp",
             ToolKind::Heal => "Healing Brush",
+            ToolKind::WetBrush => "Wet Brush",
+            ToolKind::Erode => "Erosion Brush",
             ToolKind::Bucket => "Paint Bucket",
             ToolKind::Gradient => "Gradient",
             ToolKind::Eyedropper => "Eyedropper",
@@ -180,7 +192,7 @@ impl ToolKind {
     /// Whether Alt-clicking with the tool samples a colour instead —
     /// the eyedropper that lives under every painting tool.
     pub fn alt_picks_color(self) -> bool {
-        matches!(self, ToolKind::Brush | ToolKind::Pencil | ToolKind::Bucket | ToolKind::Gradient)
+        matches!(self, ToolKind::Brush | ToolKind::Pencil | ToolKind::WetBrush | ToolKind::Bucket | ToolKind::Gradient)
     }
 
     /// Whether the tool's edits must stay inside the selection. The move
@@ -223,6 +235,8 @@ impl ToolKind {
             ToolKind::Eraser => Box::new(StrokeTool::new(StrokeMode::Eraser)),
             ToolKind::Clone => Box::new(StrokeTool::new(StrokeMode::Clone)),
             ToolKind::Heal => Box::new(StrokeTool::new(StrokeMode::Heal)),
+            ToolKind::WetBrush => Box::new(WetBrushTool::default()),
+            ToolKind::Erode => Box::new(ErodeTool::default()),
             ToolKind::Bucket => Box::new(BucketTool::default()),
             ToolKind::Gradient => Box::new(GradientTool::default()),
             ToolKind::Eyedropper => Box::new(EyedropperTool),
@@ -303,7 +317,22 @@ pub struct ToolSettings {
     /// The type settings for the text tool, and for the text layer being
     /// edited, which takes them over while it is.
     pub text: crate::text::TextStyle,
+    /// How wet the wet brush's paint still is, pixel by pixel, on the one
+    /// layer it was last used on. `None` is a dry canvas. Not part of the
+    /// document — see [`crate::wet`].
+    pub wet: Option<crate::wet::WetPaint>,
+    /// How far the canvas is tilted on each axis, `-1.0..=1.0`: which way
+    /// wet paint runs, and how fast. Flat by default.
+    pub tilt: (f32, f32),
+    /// How long wet paint takes to dry, in seconds.
+    pub dry_seconds: f32,
 }
+
+/// The shortest and longest a drying time may be set to, in seconds.
+pub const MIN_DRY_SECONDS: f32 = 1.0;
+pub const MAX_DRY_SECONDS: f32 = 120.0;
+/// How long paint stays wet unless the options bar says otherwise.
+pub const DEFAULT_DRY_SECONDS: f32 = 10.0;
 
 impl Default for ToolSettings {
     fn default() -> ToolSettings {
@@ -332,6 +361,9 @@ impl Default for ToolSettings {
             clone_aligned: true,
             clone_offset: None,
             text: crate::text::TextStyle::default(),
+            wet: None,
+            tilt: (0.0, 0.0),
+            dry_seconds: DEFAULT_DRY_SECONDS,
         }
     }
 }

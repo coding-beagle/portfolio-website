@@ -38,6 +38,8 @@ const ICON = {
   eraser: '<path d="M5 15l8-8 6 6-6 6H9z"/><path d="M9 19h11"/>',
   clone: '<path d="M8 3h8v5H8z"/><path d="M4 13c0-2.2 2-3 4-5h8c2 2 4 2.8 4 5z"/><path d="M4 13h16v3H4z"/><path d="M10 16v5h4v-5"/>',
   heal: '<rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-45 12 12)"/><rect x="9" y="9" width="6" height="6" transform="rotate(-45 12 12)"/>',
+  wetbrush: '<path d="M3 20c2-.5 3-2 3.5-4L14 8.5l2.5 2.5L9 18.5c-2 .5-3.5 1.5-6 1.5z"/><path d="M18.5 3c1.6 2.3 2.5 3.7 2.5 5a2.5 2.5 0 01-5 0c0-1.3.9-2.7 2.5-5z"/>',
+  erode: '<path d="M7 14a3.5 3.5 0 01.4-7 5 5 0 019.6 1.3A3 3 0 0116.5 14H7z"/><path d="M8.5 17l-1 3M12.5 17l-1 3M16.5 17l-1 3"/>',
   line: '<path d="M5 19L19 5"/>',
   rectangle: '<rect x="4" y="6" width="16" height="12"/>',
   ellipse: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
@@ -110,6 +112,18 @@ const TOOLS = [
     label: "Healing brush",
     key: "J",
     hint: "Alt+click a clean patch, then paint over the blemish: the copy takes the tone of what is round it when you let go.",
+  },
+  {
+    name: "wetbrush",
+    label: "Wet brush",
+    key: "K",
+    hint: "Paint that stays wet: brush through it to smear and mix it, tilt the canvas in the options bar to make it run. Alt+click picks a colour.",
+  },
+  {
+    name: "erode",
+    label: "Erosion brush",
+    key: "N",
+    hint: "Rain on the picture: drops run downhill from light to dark, carrying colour and carving channels. Rain sets how heavy the shower is.",
   },
   {
     name: "bucket",
@@ -199,6 +213,10 @@ let antsPathKey = "";
 let cursor = null;
 // Set once the render loop has reported a failure, so it says so once.
 let frameFailed = false;
+/** When the last frame ran, for the wet paint's clock. */
+let lastFrameAt = 0;
+/** Whether the tilt pad was last drawn glowing, so it is only touched on a change. */
+let wetShown = false;
 // Set while a canvas edge is being dragged: which edge, and where it is now.
 let resizing = null;
 let dpr = 1;
@@ -356,6 +374,18 @@ function frame(now) {
 }
 
 function step(now) {
+  // Time passes for wet paint: it dries, and runs if the canvas is tilted.
+  // The engine marks what moved, so the render below draws it.
+  const dt = lastFrameAt ? (now - lastFrameAt) / 1000 : 0;
+  lastFrameAt = now;
+  const wet = np.wet_tick(dt);
+  if (wet !== wetShown) {
+    $("opt-tilt").classList.toggle("wet", wet);
+    wetShown = wet;
+  }
+  // A run is an undo step, and the panel should say so while it happens.
+  if (wet && np.tilt().some((v) => v !== 0)) historyDirty = true;
+
   // While a dialog previews and the canvas is zoomed out, the engine
   // composites at the size the screen is showing rather than at the
   // document's — a sixteenth of the pixels at a quarter zoom — and the page
@@ -930,7 +960,7 @@ function drawGuides(px, py, zoom) {
 }
 
 /** The tools whose size is worth seeing before the stroke starts. */
-const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "clone", "heal", "quickselect", "refine"]);
+const BRUSH_TOOLS = new Set(["brush", "pencil", "eraser", "clone", "heal", "wetbrush", "erode", "quickselect", "refine"]);
 
 /** The tools that lay down pixels read from elsewhere in the picture. */
 const COPYING_TOOLS = new Set(["clone", "heal"]);
@@ -1272,7 +1302,7 @@ const SELECTION_TOOLS = new Set(["select", "ellipse-select", "lasso", "crop", "w
 const TOOL_GROUPS = [
   ["select", "ellipse-select", "lasso", "crop", "wand", "quickselect", "subject", "refine"],
   ["move"],
-  ["brush", "pencil", "eraser", "clone", "heal", "bucket", "gradient", "eyedropper"],
+  ["brush", "pencil", "eraser", "clone", "heal", "wetbrush", "erode", "bucket", "gradient", "eyedropper"],
   ["line", "rectangle", "ellipse"],
   ["text"],
   ["zoom", "hand"],
@@ -1331,11 +1361,18 @@ function zoomHint() {
 function syncOptions() {
   const isShape = tool === "rectangle" || tool === "ellipse";
   const copying = COPYING_TOOLS.has(tool);
-  const hasOpacity = tool === "brush" || tool === "eraser" || copying || tool === "bucket" || tool === "gradient";
+  const isWet = tool === "wetbrush";
+  const isErode = tool === "erode";
+  const hasOpacity = tool === "brush" || tool === "eraser" || copying || tool === "bucket" || tool === "gradient" || isWet || isErode;
   const hasTip = tool === "brush" || tool === "pencil" || tool === "eraser" || copying;
   // The pencil is hard whatever the slider says, and chalk and spatter
-  // have their grain and their dots in place of a soft rim.
-  const hasHardness = (tool === "brush" || tool === "eraser" || copying) && np.brush_tip_has_hardness();
+  // have their grain and their dots in place of a soft rim. The wet brush
+  // is always a round dab, and soft or hard is all it asks.
+  const hasHardness = ((tool === "brush" || tool === "eraser" || copying) && np.brush_tip_has_hardness()) || isWet;
+  // The erosion brush's opacity is how heavy the rain is.
+  $("opt-opacity-wrap").querySelector("span").textContent = isErode ? "Rain" : "Opacity";
+  $("opt-wet-wrap").hidden = !isWet;
+  if (isWet) syncWetOptions();
   const isText = tool === "text";
   const auto = tool === "wand" || tool === "quickselect" || tool === "refine";
   const subject = tool === "subject";
@@ -1414,6 +1451,69 @@ function syncOptions() {
   toggleSeg($("opt-fill"), $("opt-stroke"), np.fill());
   toggleSeg($("opt-zoom-in"), $("opt-zoom-out"), !zoomOutMode);
   viewport.classList.toggle("alt", tool === "zoom" && (altHeld || zoomOutMode));
+}
+
+/** The wet brush's own options: how long the paint stays wet, and the tilt. */
+function syncWetOptions() {
+  const seconds = Math.round(np.dry_seconds());
+  $("opt-dry").value = seconds;
+  $("opt-dry-out").value = `${seconds} s`;
+  placeTiltBead();
+}
+
+/** Puts the tilt pad's bead where the engine says the canvas leans. */
+function placeTiltBead() {
+  const [x, y] = np.tilt();
+  const bead = $("opt-tilt").querySelector(".bead");
+  bead.style.left = `${50 + x * 50}%`;
+  bead.style.top = `${50 + y * 50}%`;
+}
+
+function bindWetOptions() {
+  const dry = $("opt-dry");
+  dry.addEventListener("input", () => {
+    np.set_dry_seconds(Number(dry.value));
+    $("opt-dry-out").value = `${dry.value} s`;
+  });
+  $("opt-dry-now").addEventListener("click", () => np.dry_paint());
+
+  // The tilt pad: a bead dragged about a square, held where it is let go.
+  // Double-click, or Home, lays the canvas flat again.
+  const pad = $("opt-tilt");
+  const lean = (e) => {
+    const r = pad.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    const y = ((e.clientY - r.top) / r.height) * 2 - 1;
+    np.set_tilt(Math.max(-1, Math.min(1, x)), Math.max(-1, Math.min(1, y)));
+    placeTiltBead();
+  };
+  pad.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    lean(e);
+    // A pointer the browser is not tracking — a synthetic event — cannot be
+    // captured, and the click has already set the tilt.
+    try {
+      pad.setPointerCapture(e.pointerId);
+    } catch {}
+    e.preventDefault();
+  });
+  pad.addEventListener("pointermove", (e) => {
+    if (pad.hasPointerCapture(e.pointerId)) lean(e);
+  });
+  pad.addEventListener("dblclick", () => {
+    np.set_tilt(0, 0);
+    placeTiltBead();
+  });
+  pad.addEventListener("keydown", (e) => {
+    const [x, y] = np.tilt();
+    const step = e.shiftKey ? 0.5 : 0.1;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step], Home: [-x, -y] };
+    const move = moves[e.key];
+    if (!move) return;
+    np.set_tilt(x + move[0], y + move[1]);
+    placeTiltBead();
+    e.preventDefault();
+  });
 }
 
 function toggleSeg(onEl, offEl, first) {
@@ -1642,6 +1742,7 @@ function bindOptions() {
     syncOptions();
   });
   $("opt-aligned").addEventListener("change", (e) => np.set_clone_aligned(e.target.checked));
+  bindWetOptions();
   $("opt-all-layers").addEventListener("change", (e) => np.set_sample_all_layers(e.target.checked));
   $("opt-antialias").addEventListener("change", (e) => np.set_antialias(e.target.checked));
   $("opt-subject").addEventListener("click", selectSubject);
