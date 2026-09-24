@@ -87,22 +87,196 @@ function parseLiteral(literal, baseHint) {
 /** How far a single shift may move, to keep a typo from asking for a megabit. */
 const MAX_SHIFT = 4096;
 
+/** The widest result the tool will lay out, for the same reason. */
+const MAX_WIDTH = 8192;
+
 /**
- * Splits `0b1001 << 5` into the literal and the shifts applied to it. Shifts
- * read left to right, so `0xFF << 8 >> 4` is the two steps in that order.
+ * Splits an expression into values and operators. A value is any run of word
+ * characters (and `'`, for Verilog literals); whether it is a valid literal is
+ * decided later, once the parser knows which base a bare word should be read
+ * in. Two values separated only by whitespace are one value, so a word pasted
+ * from a dump as `DEAD BEEF` still reads as 0xDEADBEEF.
  */
-function splitShifts(literal) {
-  const parts = literal.split(/(<<|>>)/);
-  const shifts = [];
-  for (let i = 1; i < parts.length; i += 2) {
-    const amount = parts[i + 1].replace(/[_\s]/g, "");
-    if (!/^\d+$/.test(amount))
-      return { error: `"${amount.trim() || parts[i]}" is not a shift amount` };
-    if (Number(amount) > MAX_SHIFT)
-      return { error: `shift amount must be at most ${MAX_SHIFT}` };
-    shifts.push({ op: parts[i], amount: Number(amount) });
+function tokenize(text) {
+  const tokens = [];
+  let i = 0;
+  let gap = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (/\s/.test(ch)) {
+      gap = true;
+      i += 1;
+      continue;
+    }
+    const word = /^[0-9A-Za-z_']+/.exec(text.slice(i));
+    if (word) {
+      const last = tokens[tokens.length - 1];
+      if (last && last.type === "value" && gap) last.text += word[0];
+      else tokens.push({ type: "value", text: word[0] });
+      i += word[0].length;
+    } else {
+      const op = /^(<<|>>|[-+*/%&|^~()])/.exec(text.slice(i));
+      if (!op) return { error: `"${ch}" is not an operator` };
+      tokens.push({ type: "op", text: op[0] });
+      i += op[0].length;
+    }
+    gap = false;
   }
-  return { literal: parts[0].trim(), shifts };
+  return { tokens };
+}
+
+/** Bits needed to hold `value`, with a sign bit if it is negative. */
+function bitsNeeded(value) {
+  if (value === 0n) return 0;
+  return value > 0n ? value.toString(2).length : (-value - 1n).toString(2).length + 1;
+}
+
+/** Binary operators by precedence, loosest first, as in C and Verilog. */
+const LEVELS = [["|"], ["^"], ["&"], ["<<", ">>"], ["+", "-"], ["*", "/", "%"]];
+
+class ParseError extends Error {}
+
+/**
+ * Evaluates an expression of literals, arithmetic and bitwise operators.
+ *
+ * Values are carried as exact (possibly negative) BigInts alongside the width
+ * they occupy, and only wrapped into a register at the very end — so `-1` is
+ * all ones at whatever width is picked, not 0xF zero extended. Widths grow the
+ * way a careful designer would size the result: an operation is as wide as its
+ * widest operand, or as wide as its result needs if that is more, and a left
+ * shift widens by what it shifts by. `>>` and `~` are the exceptions that act
+ * on the register rather than the number, since that is what they mean.
+ *
+ * A shift amount is read in decimal unless it says otherwise, which is how
+ * `<< 10` is always written.
+ */
+function evaluate(expression, baseHint) {
+  const lexed = tokenize(expression);
+  if (lexed.error) throw new ParseError(lexed.error);
+  const { tokens } = lexed;
+  const literals = [];
+  const warnings = [];
+  let pos = 0;
+  let hint = baseHint;
+
+  const peek = () => tokens[pos];
+  const isOp = (token, ops) => token && token.type === "op" && ops.includes(token.text);
+
+  const literal = (text) => {
+    const parsed = parseLiteral(text, hint);
+    if (parsed.error) throw new ParseError(parsed.error);
+    const natural = widthOfDigits(parsed.base, parsed.digits);
+    let value = valueOfDigits(parsed.base, parsed.digits);
+    const width = parsed.declaredWidth ?? natural;
+    if (value > maskOf(width)) {
+      value &= maskOf(width);
+      warnings.push(`Literal needs ${natural} bits and was truncated to ${width}.`);
+    }
+    literals.push(parsed);
+    return { value, width };
+  };
+
+  const unary = () => {
+    const token = peek();
+    if (!token) {
+      const prev = tokens[pos - 1];
+      throw new ParseError(prev ? `expected a value after "${prev.text}"` : "empty");
+    }
+    pos += 1;
+    if (token.type === "value") return literal(token.text);
+    if (token.text === "(") {
+      const inner = binary(0);
+      if (!isOp(peek(), [")"])) throw new ParseError('missing ")"');
+      pos += 1;
+      return inner;
+    }
+    if (token.text === "-" || token.text === "+" || token.text === "~") {
+      const operand = unary();
+      if (token.text === "+") return operand;
+      if (token.text === "-") return { value: -operand.value, width: operand.width };
+      return {
+        value: BigInt.asUintN(operand.width, operand.value) ^ maskOf(operand.width),
+        width: operand.width,
+      };
+    }
+    if (token.text === ")") throw new ParseError('unexpected ")"');
+    throw new ParseError(
+      token.text === "<<" || token.text === ">>"
+        ? "nothing to shift"
+        : `"${token.text}" needs a value on its left`
+    );
+  };
+
+  const shiftAmount = (operand) => {
+    if (operand.value < 0n) throw new ParseError("shift amount cannot be negative");
+    if (operand.value > BigInt(MAX_SHIFT))
+      throw new ParseError(`shift amount must be at most ${MAX_SHIFT}`);
+    return Number(operand.value);
+  };
+
+  const apply = (op, a, b) => {
+    const width = Math.max(a.width, b.width);
+    const sized = (value) => ({ value, width: Math.max(width, bitsNeeded(value)) });
+    switch (op) {
+      case "+":
+        return sized(a.value + b.value);
+      case "-":
+        return sized(a.value - b.value);
+      case "*":
+        return sized(a.value * b.value);
+      case "/":
+      case "%":
+        if (b.value === 0n) throw new ParseError("division by zero");
+        return sized(op === "/" ? a.value / b.value : a.value % b.value);
+      case "&":
+        return sized(a.value & b.value);
+      case "|":
+        return sized(a.value | b.value);
+      case "^":
+        return sized(a.value ^ b.value);
+      case "<<": {
+        const amount = shiftAmount(b);
+        return { value: a.value << BigInt(amount), width: a.width + amount };
+      }
+      case ">>":
+      default:
+        return {
+          value: BigInt.asUintN(a.width, a.value) >> BigInt(shiftAmount(b)),
+          width: a.width,
+        };
+    }
+  };
+
+  const binary = (level) => {
+    if (level === LEVELS.length) return unary();
+    let left = binary(level + 1);
+    while (isOp(peek(), LEVELS[level])) {
+      const op = tokens[pos].text;
+      pos += 1;
+      let right;
+      if (op === "<<" || op === ">>") {
+        const outer = hint;
+        hint = "dec";
+        right = binary(level + 1);
+        hint = outer;
+      } else {
+        right = binary(level + 1);
+      }
+      left = apply(op, left, right);
+      if (left.width > MAX_WIDTH)
+        throw new ParseError(`result must be at most ${MAX_WIDTH} bits wide`);
+    }
+    return left;
+  };
+
+  const result = binary(0);
+  if (pos < tokens.length) {
+    const token = tokens[pos];
+    throw new ParseError(
+      token.text === ")" ? 'unexpected ")"' : `expected an operator before "${token.text}"`
+    );
+  }
+  return { ...result, literals, compound: tokens.length > 1, warnings };
 }
 
 /**
@@ -186,59 +360,37 @@ export function bitsOf(value, width) {
  * both the digit count and a Verilog size, and truncates the value when it is
  * narrower, the way an assignment to a too-small reg would.
  *
- * A left shift widens the word by what it shifts by, so `0b1001 << 5` keeps all
- * nine bits rather than dropping four off the top — picking a width is how you
- * ask for the truncating, fixed-width reading instead.
+ * The input can be an expression (see `evaluate`). A left shift widens the word
+ * by what it shifts by, so `0b1001 << 5` keeps all nine bits rather than
+ * dropping four off the top — picking a width is how you ask for the
+ * truncating, fixed-width reading instead.
  */
 export function parseInput(input, { baseHint = "auto", widthOverride = null } = {}) {
   const raw = (input ?? "").trim();
   if (!raw) return { ok: false, empty: true, warnings: [] };
 
   const { literal: expression, selector } = splitSelector(raw);
-  const split = splitShifts(expression);
-  if (split.error) return { ok: false, empty: false, error: split.error, warnings: [] };
-  if (split.shifts.length && !split.literal)
-    return { ok: false, empty: false, error: "nothing to shift", warnings: [] };
-  const parsed = parseLiteral(split.literal, baseHint);
-  if (parsed.error)
-    return {
-      ok: false,
-      empty: parsed.error === "empty",
-      error: parsed.error === "empty" ? undefined : parsed.error,
-      warnings: [],
-    };
-
-  const warnings = [];
-  const natural = widthOfDigits(parsed.base, parsed.digits);
-  let value = valueOfDigits(parsed.base, parsed.digits);
-  let shifted = parsed.declaredWidth ?? natural;
-
-  // A shifted literal is cut to its own declared size first: `8'hDEAD << 4` is
-  // 0xAD moved up, not 0xDEAD.
-  if (split.shifts.length && value > maskOf(shifted)) {
-    value &= maskOf(shifted);
-    warnings.push(`Literal needs ${natural} bits and was truncated to ${shifted}.`);
-  }
-  for (const { op, amount } of split.shifts) {
-    if (op === "<<") {
-      value <<= BigInt(amount);
-      shifted += amount;
-    } else {
-      value >>= BigInt(amount);
-    }
+  let evaluated;
+  try {
+    evaluated = evaluate(expression, baseHint);
+  } catch (error) {
+    if (!(error instanceof ParseError)) throw error;
+    const empty = error.message === "empty";
+    return { ok: false, empty, error: empty ? undefined : error.message, warnings: [] };
   }
 
-  const width = widthOverride ?? shifted;
+  const { warnings, literals, compound } = evaluated;
+  const natural = evaluated.width;
+  const width = widthOverride ?? natural;
   if (width < 1) return { ok: false, error: "width must be at least 1", warnings };
 
-  if (value > maskOf(width)) {
-    value &= maskOf(width);
+  // Wrapping into the register is where a negative result becomes its two's
+  // complement, and where a too-narrow width drops the top bits.
+  const value = BigInt.asUintN(width, evaluated.value);
+  if (bitsNeeded(evaluated.value) > width)
     warnings.push(
-      split.shifts.length
-        ? `Result needs ${shifted} bits and was truncated to ${width}.`
-        : `Literal needs ${natural} bits and was truncated to ${width}.`
+      `${compound ? "Result" : "Literal"} needs ${natural} bits and was truncated to ${width}.`
     );
-  }
 
   let selection = null;
   if (selector !== null) {
@@ -258,9 +410,9 @@ export function parseInput(input, { baseHint = "auto", widthOverride = null } = 
     empty: false,
     value,
     width,
-    base: parsed.base,
-    signed: parsed.signed,
-    shifts: split.shifts,
+    base: literals[0].base,
+    signed: literals[0].signed,
+    compound,
     selection,
     warnings,
   };

@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../../../themes/ThemeProvider";
 import { MobileContext } from "../../../contexts/MobileContext";
 import { noSelect } from "../title/utilities/valueChangerElements/styles";
@@ -8,25 +8,34 @@ import { noSelect } from "../title/utilities/valueChangerElements/styles";
  * index (`i >> 2`) rather than by position in the string, so a value whose
  * width is not a multiple of four keeps its hex digits aligned with the columns
  * they actually belong to.
+ *
+ * Rows hold a power of two nibbles, so they break on byte and word boundaries,
+ * up to a whole 64-bit word on a wide screen.
  */
-const NIBBLE_CAP = 8;
+const NIBBLE_CAP = 16;
+const NIBBLE_GAP = 14;
 
-function useNibblesPerRow(cellWidth) {
-  const [count, setCount] = useState(NIBBLE_CAP);
+/** Nibbles per row for the element behind `ref`, kept in step with its width. */
+function useNibblesPerRow(ref, cellWidth) {
+  const [count, setCount] = useState(8);
 
   useEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
     const measure = () => {
-      // 4 cells plus the gap that separates one nibble from the next.
-      const nibbleWidth = cellWidth * 4 + 14;
-      const usable = window.innerWidth - 64;
-      setCount(
-        Math.max(1, Math.min(NIBBLE_CAP, Math.floor(usable / nibbleWidth)))
-      );
+      // n nibbles of 4 cells, with a gap between each pair of them.
+      const usable = element.clientWidth + NIBBLE_GAP;
+      let fit = NIBBLE_CAP;
+      while (fit > 1 && fit * (cellWidth * 4 + NIBBLE_GAP) > usable) fit /= 2;
+      setCount(fit);
     };
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [cellWidth]);
+    // Every browser has it; jsdom does not.
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, cellWidth]);
 
   return count;
 }
@@ -49,7 +58,8 @@ export default function BitGrid({ bits, width, selection, onSelectBit }) {
   const { theme } = useTheme();
   const mobile = useContext(MobileContext);
   const cell = mobile ? 22 : 27;
-  const nibblesPerRow = useNibblesPerRow(cell);
+  const root = useRef(null);
+  const nibblesPerRow = useNibblesPerRow(root, cell);
 
   // Descending bit indices, grouped into nibbles, then into rows of nibbles.
   const indices = Array.from({ length: width }, (_, i) => width - 1 - i);
@@ -73,11 +83,11 @@ export default function BitGrid({ bits, width, selection, onSelectBit }) {
       .toUpperCase();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.9em" }}>
+    <div ref={root} style={{ display: "flex", flexDirection: "column", gap: "0.9em" }}>
       {rows.map((row) => (
         <div
           key={row[0][0]}
-          style={{ display: "flex", gap: 14, flexWrap: "nowrap" }}
+          style={{ display: "flex", gap: NIBBLE_GAP, flexWrap: "nowrap" }}
         >
           {row.map((group) => {
             // A nibble counts as selected only when every one of its bits is,

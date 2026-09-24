@@ -17,6 +17,7 @@ import UploadThat, {
 import { ThemeProvider } from "../src/themes/ThemeProvider";
 import { MobileContext } from "../src/contexts/MobileContext";
 import { decrypt } from "../src/components/pages/uploadthat/crypto";
+import { blobBytes, unzip } from "./helpers/unzip";
 import {
   installUploadthatServer,
   uninstallUploadthatServer,
@@ -208,6 +209,32 @@ describe("files", () => {
     const stored = server.state.files[0];
     expect(new TextDecoder().decode(stored.body)).not.toContain("hello there");
     expect(atob(stored.meta)).not.toContain("notes.txt");
+  });
+
+  it("downloads every file as one zip", async () => {
+    await openSession();
+    drop("notes.txt", "text/plain", "hello there");
+    drop("notes.txt", "text/plain", "second copy");
+    await screen.findAllByText(/from Device 1/, {}, POLL_GRACE);
+    await waitFor(
+      () => expect(screen.getAllByText(/from Device 1/)).toHaveLength(2),
+      POLL_GRACE
+    );
+
+    let saved = null;
+    URL.createObjectURL = jest.fn((blob) => {
+      saved = blob;
+      return "blob:zip";
+    });
+    URL.revokeObjectURL = jest.fn();
+    userEvent.click(screen.getByRole("button", { name: /Download all/i }));
+    await waitFor(() => expect(saved).not.toBeNull(), POLL_GRACE);
+
+    const entries = unzip(await blobBytes(saved)).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    expect(entries.map((entry) => entry.name)).toEqual(["notes (2).txt", "notes.txt"]);
+    expect(entries.map((entry) => entry.text).sort()).toEqual(["hello there", "second copy"]);
   });
 
   it("hands the other device something it can actually open", async () => {

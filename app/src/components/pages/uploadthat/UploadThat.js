@@ -6,6 +6,7 @@ import {
   faChevronDown,
   faChevronRight,
   faCopy,
+  faDownload,
   faPowerOff,
   faQrcode,
 } from "@fortawesome/free-solid-svg-icons";
@@ -21,6 +22,8 @@ import FileRow, { formatBytes } from "./FileRow";
 import HandshakeGate from "./HandshakeGate";
 import { forgetKey, rememberKey, rememberedKey } from "./operatorKey";
 import ThemeToggle from "../../common/ThemeToggle";
+import { saveBlob } from "./api";
+import { uniqueNames, zipFiles } from "./zip";
 
 /** The code in the address bar, if someone arrived from a QR scan. */
 export function codeFromHash(hash) {
@@ -35,6 +38,17 @@ export function formatCountdown(seconds) {
 }
 
 export { formatBytes };
+
+/** A Blob's bytes. jsdom's Blob has no arrayBuffer, so FileReader backs it up. */
+function bytesOf(blob) {
+  if (blob.arrayBuffer) return blob.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(new Uint8Array(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
 
 /** Seconds left on the session, ticking. */
 function useCountdown(expiresAt) {
@@ -69,6 +83,9 @@ export default function UploadThat() {
   // need now, so they fold away behind a button and the files get the screen.
   const [showJoinPanel, setShowJoinPanel] = useState(false);
   const [noteCopied, setNoteCopied] = useState(false);
+  // While every file is being fetched for the zip: how far through it is.
+  const [zipping, setZipping] = useState(null);
+  const [zipError, setZipError] = useState(null);
   // A phone is nearly always the second device. Joining is what it came here to
   // do, so that goes first and opening a session — which you do from whichever
   // machine the files are on — folds away behind a button.
@@ -107,6 +124,31 @@ export default function UploadThat() {
     navigator.clipboard?.writeText(bridge.note);
     setNoteCopied(true);
     setTimeout(() => setNoteCopied(false), 1200);
+  };
+
+  /**
+   * Fetches and decrypts every file, one at a time so only one download is in
+   * flight, and saves them as a single zip. Files are what the list showed when
+   * the button was pressed; anything that arrives meanwhile waits for next time.
+   */
+  const downloadAll = async () => {
+    const files = manifest?.files ?? [];
+    if (!files.length || zipping) return;
+    setZipError(null);
+    setZipping({ done: 0, total: files.length });
+    try {
+      const names = uniqueNames(files.map((file) => file.name));
+      const entries = [];
+      for (let i = 0; i < files.length; i += 1) {
+        entries.push({ name: names[i], bytes: await bytesOf(await bridge.getFile(files[i])) });
+        setZipping({ done: i + 1, total: files.length });
+      }
+      saveBlob(zipFiles(entries), `uploadthat-${session.code}.zip`);
+    } catch (failure) {
+      setZipError(failure.message || "Could not download the files");
+    } finally {
+      setZipping(null);
+    }
   };
 
   // A tick left over from the old note would read as a copy of the new one.
@@ -303,16 +345,14 @@ export default function UploadThat() {
     </section>
   );
 
-  const pad = mobile ? "1em" : "2em";
+  const pad = mobile ? "1em" : "3vw";
 
   return (
     <div
       style={{
         minHeight: "100%",
         boxSizing: "border-box",
-        padding: mobile ? "1.5em 1em 4em" : "3em 2em 5em",
-        maxWidth: 720,
-        margin: "0 auto",
+        padding: `${mobile ? "1.5em" : "3em"} ${pad} ${mobile ? "4em" : "5em"}`,
       }}
     >
       <style>{`
@@ -640,9 +680,55 @@ export default function UploadThat() {
           ))}
 
           <section style={{ marginTop: "1.8em" }}>
-            <h2 style={{ ...label, margin: "0 0 0.6em" }}>
-              Files{manifest ? ` · ${manifest.files.length}` : ""}
-            </h2>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.8em",
+                margin: "0 0 0.6em",
+              }}
+            >
+              <h2 style={{ ...label, margin: 0 }}>
+                Files{manifest ? ` · ${manifest.files.length}` : ""}
+              </h2>
+              {manifest && manifest.files.length > 1 && (
+                <button
+                  className="utControl"
+                  onClick={downloadAll}
+                  disabled={zipping !== null}
+                  title="Download every file as one zip"
+                  style={{
+                    ...noSelect,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.5em",
+                    background: "none",
+                    border: "none",
+                    padding: "0 0.2em",
+                    fontFamily: "inherit",
+                    fontSize: "0.74rem",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    cursor: zipping ? "default" : "pointer",
+                    color: `${theme.accent}A6`,
+                  }}
+                >
+                  <FontAwesomeIcon icon={faDownload} />
+                  {zipping
+                    ? `Downloading ${zipping.done}/${zipping.total}`
+                    : "Download all"}
+                </button>
+              )}
+            </div>
+            {zipError && (
+              <p
+                role="alert"
+                style={{ color: theme.tertiaryAccent, fontSize: "0.85rem", margin: "0 0 0.6em" }}
+              >
+                {zipError}
+              </p>
+            )}
             {manifest && manifest.files.length === 0 && (
               <p style={{ opacity: 0.5, fontSize: "0.9rem", margin: 0 }}>
                 Nothing here yet. Drop something in, on either device.

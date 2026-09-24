@@ -133,9 +133,80 @@ describe("shifts", () => {
 
   it("rejects a shift with nothing to shift, or nothing to shift by", () => {
     expect(parseInput("<< 4").error).toMatch(/nothing to shift/);
-    expect(parseInput("0xFF <<").error).toMatch(/not a shift amount/);
-    expect(parseInput("0xFF << 0x4").error).toMatch(/not a shift amount/);
+    expect(parseInput("0xFF <<").error).toMatch(/expected a value after "<<"/);
     expect(parseInput("0xFF << 99999").error).toMatch(/at most/);
+  });
+
+  it("reads a bare shift amount as decimal, whatever the base hint", () => {
+    expect(parseInput("0x1 << 10").value).toBe(1n << 10n);
+    expect(parseInput("0x1 << 0x10").value).toBe(1n << 16n);
+    expect(parseInput("0x1 << 2 + 2").value).toBe(0x10n);
+  });
+
+  it("shifts right as a register, not as a signed number", () => {
+    const result = parseInput("(0x5 - 0x7) >> 1");
+    expect(result.value).toBe(0x7n);
+    expect(result.width).toBe(4);
+  });
+});
+
+describe("arithmetic", () => {
+  it("evaluates with C precedence and parentheses", () => {
+    expect(parseInput("0x10 + 0x2 * 0x3").value).toBe(0x16n);
+    expect(parseInput("(0x10 + 0x2) * 0x3").value).toBe(0x36n);
+    expect(parseInput("0xF0 | 0x0F & 0x3").value).toBe(0xf3n);
+    expect(parseInput("0xFF ^ 0x0F").value).toBe(0xf0n);
+    expect(parseInput("1 + 1 << 4").value).toBe(0x20n);
+  });
+
+  it("divides and takes remainders, and refuses to divide by zero", () => {
+    expect(parseInput("0x64 / 0x7", { baseHint: "hex" }).value).toBe(14n);
+    expect(parseInput("100 % 7", { baseHint: "dec" }).value).toBe(2n);
+    expect(parseInput("0xFF / 0").error).toMatch(/division by zero/);
+  });
+
+  it("sizes to the widest operand, growing only when the result needs it", () => {
+    expect(parseInput("0x10 + 0x01").width).toBe(8);
+    const carry = parseInput("0xFF + 0x01");
+    expect(carry.value).toBe(0x100n);
+    expect(carry.width).toBe(9);
+    expect(parseInput("0xFF * 0xFF").width).toBe(16);
+  });
+
+  it("wraps a negative result into two's complement at the chosen width", () => {
+    const natural = parseInput("0x5 - 0x7");
+    expect(natural.value).toBe(0xen);
+    expect(natural.width).toBe(4);
+    const wide = parseInput("-1", { widthOverride: 16 });
+    expect(wide.value).toBe(0xffffn);
+    expect(wide.warnings).toHaveLength(0);
+  });
+
+  it("inverts within the operand's width", () => {
+    expect(parseInput("~0x0F").value).toBe(0xf0n);
+    expect(parseInput("~8'h1").value).toBe(0xfen);
+  });
+
+  it("takes a bit select of the result", () => {
+    expect(parseInput("(0xAB + 0x01)[3:0]").slice.value).toBe(0xcn);
+  });
+
+  it("warns when the chosen width cuts the result", () => {
+    const result = parseInput("0xFF + 0x01", { widthOverride: 8 });
+    expect(result.value).toBe(0n);
+    expect(result.warnings[0]).toMatch(/Result needs 9 bits/);
+  });
+
+  it("still reads a word pasted with spaces in it as one value", () => {
+    expect(parseInput("DEAD BEEF").value).toBe(0xdeadbeefn);
+  });
+
+  it("rejects malformed expressions", () => {
+    expect(parseInput("0xFF +").error).toMatch(/after "\+"/);
+    expect(parseInput("(0xFF + 1").error).toMatch(/missing "\)"/);
+    expect(parseInput("0xFF)").error).toMatch(/unexpected "\)"/);
+    expect(parseInput("* 2").error).toMatch(/needs a value on its left/);
+    expect(parseInput("0xFF $ 2").error).toMatch(/not an operator/);
   });
 });
 
