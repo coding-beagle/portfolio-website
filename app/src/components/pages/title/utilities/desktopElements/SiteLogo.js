@@ -1,18 +1,16 @@
 import React from "react";
 
 /**
- * The site's mark: a 3:2 Lissajous figure with one arc of it picked out.
+ * The site's mark: the NT monogram.
  *
- * It is drawn from `public/lissajous.svg` rather than a redrawn copy, so the
- * mark stays in one place — change that file and everything showing it
- * follows. The site's favicon is the NT .ico; the Lissajous is the start
- * button's mark here and NPaint's favicon on its own subdomain. The SVG fills
- * its box, so `size` is the size of the mark itself.
+ * It is drawn from `public/logo192.png`, the same image the favicon and the
+ * web manifest are cut from (all generated from `public/NT.png`), so the mark
+ * stays in one place. The image is square, so `size` is the size of the mark.
  */
 export default function SiteLogo({ size = 20, style = {} }) {
   return (
     <img
-      src={`${process.env.PUBLIC_URL ?? ""}/lissajous.svg`}
+      src={`${process.env.PUBLIC_URL ?? ""}/logo192.png`}
       alt=""
       aria-hidden="true"
       draggable={false}
